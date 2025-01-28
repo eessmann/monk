@@ -7,6 +7,10 @@ module FishAST (
   FishArg(..),
   FishExpr(..),
   FishIndex(..),
+  -- * Type synonyms
+  CmdStr, CmdInt, CmdBool, CmdList, CmdStatus, CmdUnit,
+  ArgStr, ArgInt, ArgBool, ArgList, ArgStatus, ArgUnit,
+  ExprStr, ExprInt, ExprBool, ExprList, ExprStatus, ExprUnit,
   -- * Arithmetic & Boolean
   ArithOp(..),
   NumExpr(..),
@@ -29,7 +33,6 @@ module FishAST (
 import qualified ShellCheck.Interface as Bash (Position(..))
 import Data.Type.Equality (testEquality, (:~:)(Refl))
 import Type.Reflection (typeRep)
-import Unsafe.Coerce (unsafeCoerce)
 
 --------------------------------------------------------------------------------
 ---- 1. FishType
@@ -176,163 +179,155 @@ data FishCommand (t :: FishType) where
 
 deriving stock instance Show (FishCommand t)
 
--- | A manual Eq instance using testEquality to unify type variables.
-instance Eq (FishCommand t) where
+instance Typeable t => Eq (FishCommand t) where
+  (==) = eqGADT eqFishCommandSameType
+
+eqFishCommandSameType :: FishCommand a -> FishCommand a -> Bool
   ----------------------------------------
   -- Command
   ----------------------------------------
-  (Command txt1 args1) == (Command txt2 args2) =
+eqFishCommandSameType (Command txt1 args1) (Command txt2 args2) =
     txt1 == txt2 && args1 == args2
 
   ----------------------------------------
   -- Set
   ----------------------------------------
-  (Set scope1 var1 arg1) == (Set scope2 var2 arg2) =
+eqFishCommandSameType (Set scope1 var1 arg1) (Set scope2 var2 arg2) =
     (scope1 == scope2) && (var1 == var2)
     && eqFishArg arg1 arg2
-  (Set _ _ _) == _ = False
+eqFishCommandSameType (Set _ _ _) _ = False
 
   ----------------------------------------
   -- Function
   ----------------------------------------
-  (Function f1) == (Function f2) = f1 == f2
-  (Function _)  == _            = False
+eqFishCommandSameType (Function f1) (Function f2) = f1 == f2
+eqFishCommandSameType (Function _)  _            = False
 
   ----------------------------------------
   -- For
   ----------------------------------------
-  (For v1 list1 stmts1) == (For v2 list2 stmts2) =
+eqFishCommandSameType (For v1 list1 stmts1) (For v2 list2 stmts2) =
     (v1 == v2)
     && eqFishArg list1 list2
     && (stmts1 == stmts2)
-  (For _ _ _) == _ = False
+eqFishCommandSameType (For _ _ _) _ = False
 
   ----------------------------------------
   -- While, Begin, If, Switch, Break, Continue
   ----------------------------------------
-  (While cond1 body1) == (While cond2 body2) =
+eqFishCommandSameType (While cond1 body1) (While cond2 body2) =
     cond1 == cond2 && body1 == body2
-  (While _ _) == _ = False
+eqFishCommandSameType (While _ _) _ = False
 
-  (Begin s1) == (Begin s2) = s1 == s2
-  (Begin _)   == _         = False
+eqFishCommandSameType (Begin s1) (Begin s2) = s1 == s2
+eqFishCommandSameType (Begin _) _         = False
 
-  (If c1 th1 el1) == (If c2 th2 el2) =
+eqFishCommandSameType (If c1 th1 el1) (If c2 th2 el2) =
     (c1 == c2) && (th1 == th2) && (el1 == el2)
-  (If _ _ _) == _ = False
+eqFishCommandSameType (If _ _ _) _ = False
 
-  (Switch a1 cs1) == (Switch a2 cs2) =
+eqFishCommandSameType (Switch a1 cs1) (Switch a2 cs2) =
     a1 == a2 && cs1 == cs2
-  (Switch _ _) == _ = False
+eqFishCommandSameType (Switch _ _) _ = False
 
-  Break == Break = True
-  Break == _     = False
+eqFishCommandSameType Break Break = True
+eqFishCommandSameType Break _     = False
 
-  Continue == Continue = True
-  Continue == _        = False
+eqFishCommandSameType Continue Continue = True
+eqFishCommandSameType Continue _        = False
 
   ----------------------------------------
   -- Return
   ----------------------------------------
-  (Return a1) == (Return a2) = eqFishArg a1 a2
-  (Return _)  == _           = False
+eqFishCommandSameType (Return a1) (Return a2) = a1 == a2
+eqFishCommandSameType (Return _) _            = False
 
   ----------------------------------------
   -- Source, Brace, HereDoc
   ----------------------------------------
-  (Source f1) == (Source f2) = f1 == f2
-  (Source _)   == _          = False
+eqFishCommandSameType (Source f1) (Source f2) = f1 == f2
+eqFishCommandSameType (Source _) _           = False
 
-  (Brace b1) == (Brace b2)   = b1 == b2
-  (Brace _)   == _           = False
+eqFishCommandSameType (Brace b1) (Brace b2) = b1 == b2
+eqFishCommandSameType (Brace _) _           = False
 
-  (HereDoc x1 y1) == (HereDoc x2 y2) =
+eqFishCommandSameType (HereDoc x1 y1) (HereDoc x2 y2) =
     (x1 == x2) && (y1 == y2)
-  (HereDoc _ _) == _ = False
+eqFishCommandSameType (HereDoc _ _) _ = False
 
   ----------------------------------------
   -- IO and Redirection
   ----------------------------------------
-  (Read v1) == (Read v2)   = v1 == v2
-  (Read _)  == _          = False
+eqFishCommandSameType (Read v1) (Read v2) = v1 == v2
+eqFishCommandSameType (Read _) _      = False
 
-  (Echo x1) == (Echo x2)   = x1 == x2
-  (Echo _)  == _           = False
+eqFishCommandSameType (Echo x1) (Echo x2) = x1 == x2
+eqFishCommandSameType (Echo _) _          = False
 
-  (Printf fmt1 xs1) == (Printf fmt2 xs2) =
+eqFishCommandSameType (Printf fmt1 xs1) (Printf fmt2 xs2) =
     fmt1 == fmt2 && xs1 == xs2
-  (Printf _ _) == _ = False
+eqFishCommandSameType (Printf _ _) _ = False
 
-  (Redirect c1 op1 a1) == (Redirect c2 op2 a2) =
-    eqFishCommand c1 c2 &&
+eqFishCommandSameType (Redirect c1 op1 a1) (Redirect c2 op2 a2) =
+    (eqGADT eqFishCommandSameType c1 c2) &&
     (op1 == op2) &&
     (a1 == a2)
-  (Redirect _ _ _) == _ = False
+eqFishCommandSameType (Redirect _ _ _) _ = False
 
   ----------------------------------------
   -- Pipeline, JobControl
   ----------------------------------------
-  (Pipeline xs1) == (Pipeline xs2) = xs1 == xs2
-  (Pipeline _)   == _             = False
+eqFishCommandSameType (Pipeline xs1) (Pipeline xs2) = xs1 == xs2
+eqFishCommandSameType (Pipeline _) _                = False
 
-  (JobControl conj1 l1 r1) == (JobControl conj2 l2 r2) =
+eqFishCommandSameType (JobControl conj1 l1 r1) (JobControl conj2 l2 r2) =
     conj1 == conj2 &&
     l1 == l2 &&
     r1 == r2
-  (JobControl _ _ _) == _ = False
+eqFishCommandSameType (JobControl _ _ _) _ = False
 
   ----------------------------------------
   -- Semicolon
   ----------------------------------------
-  (Semicolon a1 b1) == (Semicolon a2 b2) =
+eqFishCommandSameType (Semicolon a1 b1) (Semicolon a2 b2) =
     -- unify both a1 and a2, and b1 and b2
-    eqFishCommand a1 a2 &&
-    eqFishCommand b1 b2
-  (Semicolon _ _) == _ = False
+    (eqGADT eqFishCommandSameType a1 a2) &&
+    (eqGADT eqFishCommandSameType b1 b2)
+eqFishCommandSameType (Semicolon _ _) _ = False
 
   ----------------------------------------
   -- Not
   ----------------------------------------
-  (Not c1) == (Not c2) = eqFishCommand c1 c2
-  (Not _)   == _       = False
+eqFishCommandSameType (Not c1) (Not c2) = eqGADT eqFishCommandSameType c1 c2
+eqFishCommandSameType (Not _) _       = False
 
   ----------------------------------------
   -- Background, Disown
   ----------------------------------------
-  (Background c1) == (Background c2) = c1 == c2
-  (Background _)   == _             = False
+eqFishCommandSameType (Background c1) (Background c2) = c1 == c2
+eqFishCommandSameType (Background _) _             = False
 
-  (Disown c1) == (Disown c2) = c1 == c2
-  (Disown _)   == _         = False
+eqFishCommandSameType (Disown c1) (Disown c2) = c1 == c2
+eqFishCommandSameType (Disown _) _         = False
 
   ----------------------------------------
   -- Decorated
   ----------------------------------------
-  (Decorated d1 c1) == (Decorated d2 c2) =
+eqFishCommandSameType (Decorated d1 c1) (Decorated d2 c2) =
     d1 == d2 && c1 == c2
-  (Decorated _ _) == _ = False
+eqFishCommandSameType (Decorated _ _) _ = False
 
   ----------------------------------------
   -- TryCatch
   ----------------------------------------
-  (TryCatch t1 c1) == (TryCatch t2 c2) =
+eqFishCommandSameType (TryCatch t1 c1) (TryCatch t2 c2) =
     (t1 == t2) && (c1 == c2)
-  (TryCatch _ _) == _ = False
+eqFishCommandSameType (TryCatch _ _) _ = False
 
   ----------------------------------------
   -- Default 
   ----------------------------------------
-  _ == _ = False
-
--- | Helper that checks equality of two commands with possibly different type indices
--- by doing a 'testEquality' on their typeReps. We then call (==) if they unify.
-eqFishCommand :: forall a b. (Typeable a, Typeable b) => FishCommand a -> FishCommand b -> Bool
-eqFishCommand c1 c2 =
-  case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl ->
-      -- now we know a ~ b, so we can coerce c2 to the same type as c1
-      c1 == c2  -- uses the Eq (FishCommand a) instance
-    Nothing -> False
+eqFishCommandSameType _ _ = False
 
 --------------------------------------------------------------------------------
 ---- 4. Arguments & Redirects
@@ -376,14 +371,12 @@ deriving stock instance Show (FishArg t)
 
 instance (Typeable t) => Eq (FishArg t) where
   -- Instead of pattern matching a1 with a2 directly, we delegate to eqFishArg
-  a1 == a2 = eqFishArg a1 a2
+  (==) = eqGADT eqFishArgSameType
 
 -- | eqFishArg compares two FishArg values of possibly different index types.
 eqFishArg :: forall a b. (Typeable a, Typeable b) => FishArg a -> FishArg b -> Bool
-eqFishArg left right =
-  case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl -> eqFishArgSameType left (unsafeCoerceArg right)
-    Nothing   -> False
+eqFishArg = eqGADT eqFishArgSameType
+
 
 -- We define eqFishArgSameType for the actual pattern matching where a ~ b
 eqFishArgSameType
@@ -400,21 +393,10 @@ eqFishArgSameType (ArgConcat x1 y1) (ArgConcat x2 y2) =
 eqFishArgSameType (ArgList xs1) (ArgList xs2) = xs1 == xs2
 
 eqFishArgSameType (ArgSubstituted c1) (ArgSubstituted c2) =
-  eqFishCommand c1 c2
+  c1 == c2
 
 -- If different constructors:
 eqFishArgSameType _ _ = False
-
--- | Because we matched a ~ b, we can cast right to the same type as left
---   without a runtime cost. (We trust testEquality's proof.)
-{-# INLINE unsafeCoerceArg #-}
-unsafeCoerceArg :: FishArg b -> FishArg a
-unsafeCoerceArg = unsafeCoerceFishArg
-
--- We define a fake 'unsafeCoerceFishArg' using a standard Haskell trick.
--- You could import 'Unsafe.Coerce' if you want, but let's assume we trust 'Refl'.
-unsafeCoerceFishArg :: FishArg b -> FishArg a
-unsafeCoerceFishArg = unsafeCoerce
 
 --------------------------------------------------------------------------------
 ---- 5. Expressions
@@ -439,14 +421,7 @@ data FishExpr (t :: FishType) where
 deriving stock instance Show (FishExpr t)
 
 instance (Typeable t) => Eq (FishExpr t) where
-  (==) :: FishExpr t -> FishExpr t -> Bool
-  a1 == a2 = eqFishExpr a1 a2
-
-eqFishExpr :: forall a b. (Typeable a, Typeable b) => FishExpr a -> FishExpr b -> Bool
-eqFishExpr left right =
-  case testEquality (typeRep @a) (typeRep @b) of
-    Just Refl -> eqFishExprSameType left (unsafeCoerceExpr right)
-    Nothing   -> False
+  (==) = eqGADT eqFishExprSameType
 
 eqFishExprSameType :: FishExpr a -> FishExpr a -> Bool
 eqFishExprSameType (ExprStringLit s1)  (ExprStringLit s2)  = s1 == s2
@@ -458,13 +433,9 @@ eqFishExprSameType (ExprListLit xs1) (ExprListLit xs2) =
   xs1 == xs2
 eqFishExprSameType (ExprNum n1) (ExprNum n2) = n1 == n2
 eqFishExprSameType (ExprBool b1) (ExprBool b2) = b1 == b2
-eqFishExprSameType (ExprSubstituted c1) (ExprSubstituted c2) =
-  eqFishCommand c1 c2
+eqFishExprSameType (ExprSubstituted c1) (ExprSubstituted c2) = c1 == c2
 
 eqFishExprSameType _ _ = False
-
-unsafeCoerceExpr :: FishExpr b -> FishExpr a
-unsafeCoerceExpr = unsafeCoerce
 
 --------------------------------------------------------------------------------
 ---- 6. Numeric & Boolean Sub-AST
@@ -615,3 +586,38 @@ data SourceRange = SourceRange
   { startPos :: Bash.Position
   , endPos   :: Bash.Position
   } deriving stock (Show, Eq)
+
+
+--------------------------------------------------------------------------------
+---- Equatuality Helpers
+--------------------------------------------------------------------------------
+
+eqGADT :: forall a b f. (Typeable a, Typeable b) 
+  => (forall x. f x -> f x -> Bool) -> f a -> f b -> Bool
+eqGADT eqSameType left right =
+  case testEquality (typeRep @a) (typeRep @b) of
+    Just Refl -> eqSameType left (coerce right)
+    Nothing   -> False
+
+-- | Type synonyms for convenience:
+type CmdStr    = FishCommand 'TStr
+type CmdInt    = FishCommand 'TInt
+type CmdBool   = FishCommand 'TBool
+type CmdList a = FishCommand ('TList a)
+type CmdStatus = FishCommand 'TStatus
+type CmdUnit   = FishCommand 'TUnit
+
+type ArgStr    = FishArg 'TStr
+type ArgInt    = FishArg 'TInt
+type ArgBool   = FishArg 'TBool
+type ArgList a = FishArg ('TList a)
+type ArgStatus = FishArg 'TStatus
+type ArgUnit   = FishArg 'TUnit
+
+type ExprStr    = FishExpr 'TStr
+type ExprInt    = FishExpr 'TInt
+type ExprBool   = FishExpr 'TBool
+type ExprList a = FishExpr ('TList a)
+type ExprStatus = FishExpr 'TStatus
+type ExprUnit   = FishExpr 'TUnit
+
