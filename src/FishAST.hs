@@ -43,7 +43,7 @@ data FishType
   | TInt       -- Integer
   | TBool      -- Boolean
   | TList FishType
-  | TStatus    -- Status of a command (0 or 1)
+  | TStatus    -- Status of a command - 0 for success, non-zero for failure
   | TUnit      -- No meaningful return value (void-like)
   deriving stock (Show, Eq)
 
