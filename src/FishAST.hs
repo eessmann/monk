@@ -24,10 +24,12 @@ module FishAST (
   -- * Job Control
   JobConjunction(..),
   -- * Source
-  SourceRange(..)
-) where
+  SourceRange(..)) where
 
 import qualified ShellCheck.Interface as Bash (Position(..))
+import Data.Type.Equality (testEquality, (:~:)(Refl))
+import Type.Reflection (typeRep)
+import Unsafe.Coerce (unsafeCoerce)
 
 --------------------------------------------------------------------------------
 ---- 1. FishType
@@ -46,274 +48,423 @@ data FishType
 ---- 2. Statements
 --------------------------------------------------------------------------------
 
+-- | We add a (Typeable a) constraint so we can unify the type index in 'Stmt'.
 data FishStatement where
-  Stmt         :: FishCommand a -> FishStatement
+  Stmt         :: Typeable a
+               => FishCommand a
+               -> FishStatement
   StmtList     :: [FishStatement] -> FishStatement
   Comment      :: Text -> FishStatement
   Freestanding :: FreestandingArgumentList -> FishStatement
   SemiNl       :: FishStatement
-  
+
 deriving stock instance Show FishStatement
 
 instance Eq FishStatement where
-  (==) :: FishStatement -> FishStatement -> Bool
-  Stmt a == Stmt b = a == b
-  StmtList a == StmtList b = a == b
-  Comment a == Comment b = a == b
-  Freestanding a == Freestanding b = a == b
-  SemiNl == SemiNl = True
-  _ == _ = False
+  (Stmt (c1 :: FishCommand a)) == (Stmt (c2 :: FishCommand b)) =
+    -- We must unify the type variables for c1 :: FishCommand a
+    -- and c2 :: FishCommand b.
+    case testEquality (typeRep @a) (typeRep @b) of
+      Just Refl -> c1 == c2  -- now we know a ~ b
+      Nothing   -> False
+
+  (StmtList xs1) == (StmtList xs2)          = xs1 == xs2
+  (Comment t1)   == (Comment t2)            = t1 == t2
+  (Freestanding f1) == (Freestanding f2)    = f1 == f2
+  SemiNl         == SemiNl                  = True
+  _              == _                       = False
 
 --------------------------------------------------------------------------------
 ---- 3. Commands
 --------------------------------------------------------------------------------
 
 data FishCommand (t :: FishType) where
-  ----------------------------------------
-  -- Fundamental Commands
-  ----------------------------------------
-  -- Generic command execution
-  Command       :: Text -> [FishArgOrRedirect] -> FishCommand TUnit
+  ---------------------------------------------------
+  -- Basic Commands, with Typeable constraints as needed
+  ---------------------------------------------------
+  Command   :: Text -> [FishArgOrRedirect] -> FishCommand TUnit
 
-  -- 'set' with variable scopes (local/global/exported/universal)
-  Set           :: VariableScope
-                -> Text        -- variable name
-                -> FishArg a   -- value
-                -> FishCommand TUnit
+  Set       :: Typeable a
+            => VariableScope
+            -> Text
+            -> FishArg a
+            -> FishCommand TUnit
 
-  -- Legacy: If you still want a separate SetEnv you can keep it,
-  -- but in this example we've removed it in favor of using ScopeExported.
+  Function  :: FishFunction -> FishCommand TUnit
 
-  -- A function definition referencing a separate FishFunction record
-  Function      :: FishFunction -> FishCommand TUnit
+  For       :: Typeable a
+            => Text
+            -> FishArg (TList a)
+            -> [FishStatement]
+            -> FishCommand TUnit
 
-  -- For loop: for var in (some list) ...
-  For           :: Text
-                -> FishArg (TList a)
-                -> [FishStatement]
-                -> FishCommand TUnit
+  While     :: FishExpr TBool
+            -> [FishStatement]
+            -> FishCommand TUnit
 
-  While         :: FishExpr TBool
-                -> [FishStatement]
-                -> FishCommand TUnit
+  Begin     :: [FishStatement] -> FishCommand TUnit
 
-  Begin         :: [FishStatement] -> FishCommand TUnit
+  If        :: FishExpr TBool
+            -> [FishStatement]  -- then
+            -> [FishStatement]  -- else
+            -> FishCommand TUnit
 
-  If            :: FishExpr TBool
-                -> [FishStatement]    -- then block
-                -> [FishStatement]    -- else block
-                -> FishCommand TUnit
+  Switch    :: FishArg TStr
+            -> [CaseItem]
+            -> FishCommand TUnit
 
-  Switch        :: FishArg TStr
-                -> [CaseItem]         -- case items
-                -> FishCommand TUnit
+  Break     :: FishCommand TUnit
+  Continue  :: FishCommand TUnit
 
-  Break         :: FishCommand TUnit
-  Continue      :: FishCommand TUnit
+  Return    :: Typeable a
+            => FishArg a
+            -> FishCommand a
 
-  -- Return from function, carrying any typed value
-  Return        :: FishArg a -> FishCommand a
+  Source    :: FishArg TStr -> FishCommand TUnit
+  Brace     :: [FishStatement] -> FishCommand TUnit
+  HereDoc   :: FishArg TStr -> FishArg TStr -> FishCommand TUnit
 
-  Source        :: FishArg TStr -> FishCommand TUnit
-  Brace         :: [FishStatement] -> FishCommand TUnit
-  HereDoc       :: FishArg TStr -> FishArg TStr -> FishCommand TUnit
+  ---------------------------------------------------
+  -- IO / Redirection
+  ---------------------------------------------------
+  Read      :: Text -> FishCommand TStr
+  Echo      :: FishArg TStr -> FishCommand TUnit
+  Printf    :: FishArg TStr -> [FishArg TStr] -> FishCommand TUnit
 
-  ----------------------------------------
-  -- I/O and Redirection
-  ----------------------------------------
-  Read          :: Text -> FishCommand TStr   -- read var
-  Echo          :: FishArg TStr -> FishCommand TUnit
-  Printf        :: FishArg TStr
-                -> [FishArg TStr]
-                -> FishCommand TUnit
+  Redirect  :: Typeable a
+            => FishCommand a
+            -> RedirectOp
+            -> FishArg TStr
+            -> FishCommand TUnit
 
-  Redirect      :: FishCommand a
-                -> RedirectOp
-                -> FishArg TStr
-                -> FishCommand TUnit
-
-  ----------------------------------------
+  ---------------------------------------------------
   -- Combining Commands / Job Control
-  ----------------------------------------
-  -- Pipeline returns the exit status of the last command
-  Pipeline      :: NonEmpty (FishCommand TStatus) -> FishCommand TStatus
+  ---------------------------------------------------
+  Pipeline  :: NonEmpty (FishCommand TStatus) -> FishCommand TStatus
 
-  -- Unify "and"/"or" with job control into one constructor
-  JobControl    :: JobConjunction
-                -> FishCommand TStatus
-                -> FishCommand TStatus
-                -> FishCommand TStatus
+  JobControl:: JobConjunction
+            -> FishCommand TStatus
+            -> FishCommand TStatus
+            -> FishCommand TStatus
 
-  -- Execute commands sequentially (like semicolon)
-  Semicolon     :: FishCommand a
-                -> FishCommand b
-                -> FishCommand b
+  Semicolon :: (Typeable a, Typeable b)
+            => FishCommand a
+            -> FishCommand b
+            -> FishCommand b
 
-  -- Not operator for commands
-  Not           :: FishCommand a -> FishCommand TStatus
+  Not       :: Typeable a
+            => FishCommand a
+            -> FishCommand TStatus
 
-  -- Background a job/pipeline: cmd &
-  Background    :: FishCommand TStatus -> FishCommand TStatus
+  Background:: FishCommand TStatus -> FishCommand TStatus
+  Disown    :: FishCommand TStatus -> FishCommand TStatus
 
-  -- Disown a job (run without job control)
-  Disown        :: FishCommand TStatus -> FishCommand TStatus
+  ---------------------------------------------------
+  -- Decorated
+  ---------------------------------------------------
+  Decorated :: Typeable a
+            => Decoration
+            -> FishCommand a
+            -> FishCommand a
 
-  ----------------------------------------
-  -- Decorated Command
-  ----------------------------------------
-  Decorated     :: Decoration -> FishCommand a -> FishCommand a
-
-  ----------------------------------------
-  -- Try/Catch Block
-  ----------------------------------------
-  TryCatch      :: [FishStatement]  -- try block
-                -> [FishStatement]  -- catch block
-                -> FishCommand TUnit
+  ---------------------------------------------------
+  -- Try/Catch
+  ---------------------------------------------------
+  TryCatch  :: [FishStatement]
+            -> [FishStatement]
+            -> FishCommand TUnit
 
 deriving stock instance Show (FishCommand t)
+
+-- | A manual Eq instance using testEquality to unify type variables.
 instance Eq (FishCommand t) where
-  -- Generic command execution
+  ----------------------------------------
+  -- Command
+  ----------------------------------------
   (Command txt1 args1) == (Command txt2 args2) =
-    (txt1 == txt2) && (args1 == args2)
+    txt1 == txt2 && args1 == args2
 
-  -- set
+  ----------------------------------------
+  -- Set
+  ----------------------------------------
   (Set scope1 var1 arg1) == (Set scope2 var2 arg2) =
-    (scope1 == scope2) && (var1 == var2) && (arg1 == arg2)
+    (scope1 == scope2) && (var1 == var2)
+    && eqFishArg arg1 arg2
+  (Set _ _ _) == _ = False
 
-  -- function
+  ----------------------------------------
+  -- Function
+  ----------------------------------------
   (Function f1) == (Function f2) = f1 == f2
+  (Function _)  == _            = False
 
+  ----------------------------------------
   -- For
+  ----------------------------------------
   (For v1 list1 stmts1) == (For v2 list2 stmts2) =
-    (v1 == v2) && (list1 == list2) && (stmts1 == stmts2)
+    (v1 == v2)
+    && eqFishArg list1 list2
+    && (stmts1 == stmts2)
+  (For _ _ _) == _ = False
 
-  -- While
+  ----------------------------------------
+  -- While, Begin, If, Switch, Break, Continue
+  ----------------------------------------
   (While cond1 body1) == (While cond2 body2) =
-    (cond1 == cond2) && (body1 == body2)
+    cond1 == cond2 && body1 == body2
+  (While _ _) == _ = False
 
-  -- Begin
   (Begin s1) == (Begin s2) = s1 == s2
+  (Begin _)   == _         = False
 
-  -- If
   (If c1 th1 el1) == (If c2 th2 el2) =
     (c1 == c2) && (th1 == th2) && (el1 == el2)
+  (If _ _ _) == _ = False
 
-  (Switch a1 cases1) == (Switch a2 cases2) =
-    (a1 == a2) && (cases1 == cases2)
+  (Switch a1 cs1) == (Switch a2 cs2) =
+    a1 == a2 && cs1 == cs2
+  (Switch _ _) == _ = False
 
   Break == Break = True
+  Break == _     = False
+
   Continue == Continue = True
+  Continue == _        = False
 
+  ----------------------------------------
   -- Return
-  (Return a1) == (Return a2) = a1 == a2
+  ----------------------------------------
+  (Return a1) == (Return a2) = eqFishArg a1 a2
+  (Return _)  == _           = False
 
+  ----------------------------------------
+  -- Source, Brace, HereDoc
+  ----------------------------------------
   (Source f1) == (Source f2) = f1 == f2
+  (Source _)   == _          = False
+
   (Brace b1) == (Brace b2)   = b1 == b2
+  (Brace _)   == _           = False
+
   (HereDoc x1 y1) == (HereDoc x2 y2) =
     (x1 == x2) && (y1 == y2)
+  (HereDoc _ _) == _ = False
 
-  -----------------------
-  -- I/O and Redirection
-  -----------------------
-  (Read v1) == (Read v2)     = v1 == v2
-  (Echo x1) == (Echo x2)     = x1 == x2
+  ----------------------------------------
+  -- IO and Redirection
+  ----------------------------------------
+  (Read v1) == (Read v2)   = v1 == v2
+  (Read _)  == _          = False
+
+  (Echo x1) == (Echo x2)   = x1 == x2
+  (Echo _)  == _           = False
+
   (Printf fmt1 xs1) == (Printf fmt2 xs2) =
-    (fmt1 == fmt2) && (xs1 == xs2)
+    fmt1 == fmt2 && xs1 == xs2
+  (Printf _ _) == _ = False
 
   (Redirect c1 op1 a1) == (Redirect c2 op2 a2) =
-    (c1 == c2) && (op1 == op2) && (a1 == a2)
+    eqFishCommand c1 c2 &&
+    (op1 == op2) &&
+    (a1 == a2)
+  (Redirect _ _ _) == _ = False
 
-  -----------------------
-  -- Combining Commands
-  -----------------------
+  ----------------------------------------
+  -- Pipeline, JobControl
+  ----------------------------------------
   (Pipeline xs1) == (Pipeline xs2) = xs1 == xs2
+  (Pipeline _)   == _             = False
 
   (JobControl conj1 l1 r1) == (JobControl conj2 l2 r2) =
-    (conj1 == conj2) && (l1 == l2) && (r1 == r2)
+    conj1 == conj2 &&
+    l1 == l2 &&
+    r1 == r2
+  (JobControl _ _ _) == _ = False
 
+  ----------------------------------------
+  -- Semicolon
+  ----------------------------------------
   (Semicolon a1 b1) == (Semicolon a2 b2) =
-    (a1 == a2) && (b1 == b2)
+    -- unify both a1 and a2, and b1 and b2
+    eqFishCommand a1 a2 &&
+    eqFishCommand b1 b2
+  (Semicolon _ _) == _ = False
 
-  (Not c1) == (Not c2) = c1 == c2
+  ----------------------------------------
+  -- Not
+  ----------------------------------------
+  (Not c1) == (Not c2) = eqFishCommand c1 c2
+  (Not _)   == _       = False
 
+  ----------------------------------------
+  -- Background, Disown
+  ----------------------------------------
   (Background c1) == (Background c2) = c1 == c2
-  (Disown c1) == (Disown c2)         = c1 == c2
+  (Background _)   == _             = False
 
+  (Disown c1) == (Disown c2) = c1 == c2
+  (Disown _)   == _         = False
+
+  ----------------------------------------
+  -- Decorated
+  ----------------------------------------
   (Decorated d1 c1) == (Decorated d2 c2) =
-    (d1 == d2) && (c1 == c2)
+    d1 == d2 && c1 == c2
+  (Decorated _ _) == _ = False
 
+  ----------------------------------------
+  -- TryCatch
+  ----------------------------------------
   (TryCatch t1 c1) == (TryCatch t2 c2) =
-    (t1 == t2) && (c2 == c2)
+    (t1 == t2) && (c1 == c2)
+  (TryCatch _ _) == _ = False
 
-  -- Everything else is not equal
+  ----------------------------------------
+  -- Default 
+  ----------------------------------------
   _ == _ = False
+
+-- | Helper that checks equality of two commands with possibly different type indices
+-- by doing a 'testEquality' on their typeReps. We then call (==) if they unify.
+eqFishCommand :: forall a b. (Typeable a, Typeable b) => FishCommand a -> FishCommand b -> Bool
+eqFishCommand c1 c2 =
+  case testEquality (typeRep @a) (typeRep @b) of
+    Just Refl ->
+      -- now we know a ~ b, so we can coerce c2 to the same type as c1
+      c1 == c2  -- uses the Eq (FishCommand a) instance
+    Nothing -> False
 
 --------------------------------------------------------------------------------
 ---- 4. Arguments & Redirects
 --------------------------------------------------------------------------------
 
 data FishArgOrRedirect where
-  Arg   :: FishArg a -> FishArgOrRedirect
-  Redir :: RedirectOp -> FishArg TStr -> FishArgOrRedirect
+  Arg   :: Typeable a
+        => FishArg a
+        -> FishArgOrRedirect
+  Redir :: RedirectOp
+        -> FishArg TStr
+        -> FishArgOrRedirect
 deriving stock instance Show FishArgOrRedirect
+
 instance Eq FishArgOrRedirect where
-  (==) :: FishArgOrRedirect -> FishArgOrRedirect -> Bool
-  Arg a == Arg b = a == b
-  Redir op1 a1 == Redir op2 a2 = op1 == op2 && a1 == a2
+  Arg a1 == Arg a2   = eqFishArg a1 a2
+  Redir op1 s1 == Redir op2 s2 = (op1 == op2) && (s1 == s2)
   _ == _ = False
 
+-- | GADT for arguments, requiring Typeable t so we can unify t in eqFishArg
 data FishArg (t :: FishType) where
   ArgLiteral     :: Text -> FishArg TStr
-  ArgNumber      :: Int -> FishArg TInt
-  ArgVariable    :: Text -> FishArg a
-  ArgConcat      :: FishArg TStr -> FishArg TStr -> FishArg TStr
-  ArgList        :: [FishArg a] -> FishArg (TList a)
-  ArgSubstituted :: FishCommand a -> FishArg a
-deriving stock instance Show (FishArg t)
-instance Eq (FishArg t) where
-  (==) :: FishArg t -> FishArg t -> Bool
-  ArgLiteral a1 == ArgLiteral a2 = a1 == a2
-  ArgNumber n1 == ArgNumber n2 = n1 == n2
-  ArgVariable v1 == ArgVariable v2 = v1 == v2
-  ArgConcat a1 b1 == ArgConcat a2 b2 = a1 == a2 && b1 == b2
-  ArgList a1 == ArgList a2 = a1 == a2
-  ArgSubstituted a1 == ArgSubstituted a2 = a1 == a2
-  _ == _ = False
+  ArgNumber      :: Int  -> FishArg TInt
 
+  -- We add Typeable a here for ArgVariable
+  ArgVariable    :: Typeable a
+                 => Text
+                 -> FishArg a
+
+  ArgConcat      :: FishArg TStr -> FishArg TStr -> FishArg TStr
+
+  ArgList        :: Typeable a
+                 => [FishArg a]
+                 -> FishArg (TList a)
+
+  ArgSubstituted :: Typeable a
+                 => FishCommand a
+                 -> FishArg a
+
+deriving stock instance Show (FishArg t)
+
+instance (Typeable t) => Eq (FishArg t) where
+  -- Instead of pattern matching a1 with a2 directly, we delegate to eqFishArg
+  a1 == a2 = eqFishArg a1 a2
+
+-- | eqFishArg compares two FishArg values of possibly different index types.
+eqFishArg :: forall a b. (Typeable a, Typeable b) => FishArg a -> FishArg b -> Bool
+eqFishArg left right =
+  case testEquality (typeRep @a) (typeRep @b) of
+    Just Refl -> eqFishArgSameType left (unsafeCoerceArg right)
+    Nothing   -> False
+
+-- We define eqFishArgSameType for the actual pattern matching where a ~ b
+eqFishArgSameType
+  :: FishArg a
+  -> FishArg a
+  -> Bool
+eqFishArgSameType (ArgLiteral t1) (ArgLiteral t2) = t1 == t2
+eqFishArgSameType (ArgNumber n1)  (ArgNumber n2)  = n1 == n2
+
+eqFishArgSameType (ArgVariable v1) (ArgVariable v2) = v1 == v2
+eqFishArgSameType (ArgConcat x1 y1) (ArgConcat x2 y2) =
+  x1 == x2 && y1 == y2
+
+eqFishArgSameType (ArgList xs1) (ArgList xs2) = xs1 == xs2
+
+eqFishArgSameType (ArgSubstituted c1) (ArgSubstituted c2) =
+  eqFishCommand c1 c2
+
+-- If different constructors:
+eqFishArgSameType _ _ = False
+
+-- | Because we matched a ~ b, we can cast right to the same type as left
+--   without a runtime cost. (We trust testEquality's proof.)
+{-# INLINE unsafeCoerceArg #-}
+unsafeCoerceArg :: FishArg b -> FishArg a
+unsafeCoerceArg = unsafeCoerceFishArg
+
+-- We define a fake 'unsafeCoerceFishArg' using a standard Haskell trick.
+-- You could import 'Unsafe.Coerce' if you want, but let's assume we trust 'Refl'.
+unsafeCoerceFishArg :: FishArg b -> FishArg a
+unsafeCoerceFishArg = unsafeCoerce
 
 --------------------------------------------------------------------------------
 ---- 5. Expressions
 --------------------------------------------------------------------------------
 
 data FishExpr (t :: FishType) where
-  -- String expressions
-  ExprStringLit   :: String -> FishExpr TStr
-  ExprStringVar   :: Text -> Maybe FishIndex -> FishExpr TStr
+  ExprStringLit    :: String -> FishExpr TStr
+  ExprStringVar    :: Text -> Maybe FishIndex -> FishExpr TStr
   ExprStringConcat :: FishExpr TStr -> FishExpr TStr -> FishExpr TStr
 
-  -- Lists
-  ExprListLit     :: [FishExpr a] -> FishExpr (TList a)
+  ExprListLit      :: Typeable a
+                   => [FishExpr a]
+                   -> FishExpr (TList a)
 
-  -- Numeric expressions
-  ExprNum         :: NumExpr -> FishExpr TInt
+  ExprNum          :: NumExpr -> FishExpr TInt
+  ExprBool         :: BoolExpr -> FishExpr TBool
 
-  -- Boolean expressions
-  ExprBool        :: BoolExpr -> FishExpr TBool
-
-  -- Command Substitution => type depends on the command
-  ExprSubstituted :: FishCommand a -> FishExpr a
+  ExprSubstituted  :: Typeable a
+                   => FishCommand a
+                   -> FishExpr a
 
 deriving stock instance Show (FishExpr t)
-instance Eq (FishExpr t) where
+
+instance (Typeable t) => Eq (FishExpr t) where
   (==) :: FishExpr t -> FishExpr t -> Bool
-  ExprStringLit s1 == ExprStringLit s2 = s1 == s2
-  ExprStringVar v1 i1 == ExprStringVar v2 i2 = v1 == v2 && i1 == i2
-  ExprStringConcat a1 b1 == ExprStringConcat a2 b2 = a1 == a2 && b1 == b2
-  ExprListLit a1 == ExprListLit a2 = a1 == a2
-  ExprNum n1 == ExprNum n2 = n1 == n2
-  ExprBool b1 == ExprBool b2 = b1 == b2
-  ExprSubstituted a1 == ExprSubstituted a2 = a1 == a2
-  _ == _ = False
+  a1 == a2 = eqFishExpr a1 a2
+
+eqFishExpr :: forall a b. (Typeable a, Typeable b) => FishExpr a -> FishExpr b -> Bool
+eqFishExpr left right =
+  case testEquality (typeRep @a) (typeRep @b) of
+    Just Refl -> eqFishExprSameType left (unsafeCoerceExpr right)
+    Nothing   -> False
+
+eqFishExprSameType :: FishExpr a -> FishExpr a -> Bool
+eqFishExprSameType (ExprStringLit s1)  (ExprStringLit s2)  = s1 == s2
+eqFishExprSameType (ExprStringVar v1 i1) (ExprStringVar v2 i2) =
+  v1 == v2 && i1 == i2
+eqFishExprSameType (ExprStringConcat x1 y1) (ExprStringConcat x2 y2) =
+  x1 == x2 && y1 == y2
+eqFishExprSameType (ExprListLit xs1) (ExprListLit xs2) =
+  xs1 == xs2
+eqFishExprSameType (ExprNum n1) (ExprNum n2) = n1 == n2
+eqFishExprSameType (ExprBool b1) (ExprBool b2) = b1 == b2
+eqFishExprSameType (ExprSubstituted c1) (ExprSubstituted c2) =
+  eqFishCommand c1 c2
+
+eqFishExprSameType _ _ = False
+
+unsafeCoerceExpr :: FishExpr b -> FishExpr a
+unsafeCoerceExpr = unsafeCoerce
 
 --------------------------------------------------------------------------------
 ---- 6. Numeric & Boolean Sub-AST
@@ -328,34 +479,39 @@ data ArithOp
   deriving stock (Show, Eq)
 
 data NumExpr
-  = NumLiteral   Int
-  | NumVariable  Text
-  | NumArith     ArithOp NumExpr NumExpr
+  = NumLiteral  Int
+  | NumVariable Text
+  | NumArith    ArithOp NumExpr NumExpr
   deriving stock (Show, Eq)
 
--- | Boolean expression GADT allowing "test" on arbitrary FishArg types
 data BoolExpr where
   BoolLiteral  :: Bool -> BoolExpr
   BoolVariable :: Text -> BoolExpr
   BoolAnd      :: BoolExpr -> BoolExpr -> BoolExpr
   BoolOr       :: BoolExpr -> BoolExpr -> BoolExpr
   BoolNot      :: BoolExpr -> BoolExpr
-  BoolTestOp   :: forall a b.
-                  TestOperator
+  BoolTestOp   :: forall a b. (Typeable a, Typeable b)
+               => TestOperator
                -> FishArg a
                -> FishArg b
                -> BoolExpr
-  BoolCommand  :: FishCommand TStatus -> BoolExpr   -- (0 => True, otherwise => False)
+  BoolCommand  :: FishCommand TStatus -> BoolExpr
 
 deriving stock instance Show BoolExpr
+
 instance Eq BoolExpr where
-  (==) :: BoolExpr -> BoolExpr -> Bool
   BoolLiteral b1 == BoolLiteral b2 = b1 == b2
   BoolVariable v1 == BoolVariable v2 = v1 == v2
   BoolAnd a1 b1 == BoolAnd a2 b2 = a1 == a2 && b1 == b2
   BoolOr a1 b1 == BoolOr a2 b2 = a1 == a2 && b1 == b2
-  BoolNot a1 == BoolNot a2 = a1 == a2
-  BoolTestOp op1 x1 y1 == BoolTestOp op2 x2 y2 = (op1 == op2) && (x1 == x2) && (y1 == y2)
+  BoolNot x1 == BoolNot x2 = x1 == x2
+
+  -- When we match two BoolTestOp, unify the type of x1 with x2, y1 with y2:
+  BoolTestOp op1 x1 y1 == BoolTestOp op2 x2 y2 =
+    op1 == op2
+    && eqFishArg x1 x2
+    && eqFishArg y1 y2
+
   BoolCommand c1 == BoolCommand c2 = c1 == c2
   _ == _ = False
 
@@ -372,27 +528,21 @@ data FishIndex
 ---- 8. Function-Related Types
 --------------------------------------------------------------------------------
 
--- | Flags that can appear in a 'function' definition in fish, e.g.
---   function --description 'some desc' --on-event 'foo' ...
 data FunctionFlag
   = FuncDescription Text
   | FuncOnEvent Text
   | FuncHelp
   | FuncInheritVariable
-  | FuncUnknownFlag Text  -- catch-all for unmodeled flags
+  | FuncUnknownFlag Text
   deriving stock (Show, Eq)
 
--- | A separate record for function definitions
 data FishFunction = FishFunction
   { funcName   :: Text
   , funcFlags  :: [FunctionFlag]
   , funcParams :: [FishArg TStr]
   , funcBody   :: [FishStatement]
   }
-deriving stock instance Show FishFunction
-deriving stock instance Eq FishFunction
-
--- (Show, Eq)
+  deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
 ---- 9. Variable Scopes for 'set'
@@ -401,46 +551,40 @@ deriving stock instance Eq FishFunction
 data VariableScope
   = ScopeLocal
   | ScopeGlobal
-  | ScopeExported   -- similar to 'set -x' for environment variables
+  | ScopeExported
   | ScopeUniversal
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 10. Try/Catch is now in 'FishCommand' (TryCatch constructor)
---------------------------------------------------------------------------------
-
---------------------------------------------------------------------------------
----- 11. Job Control: unify "and"/"or" with job control
+---- 10. Job Control
 --------------------------------------------------------------------------------
 
 data JobConjunction
-  = ConjAnd   -- 'and', or '&&'
-  | ConjOr    -- 'or',  or '||'
+  = ConjAnd
+  | ConjOr
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 12. Misc (Case Items, RedirectOp, etc.)
+---- 11. Case Items, Redirection, Etc.
 --------------------------------------------------------------------------------
 
 data CaseItem = CaseItem
   { casePatterns :: [FishArg TStr]
   , caseBody     :: [FishStatement]
   }
-deriving stock instance Show CaseItem
-deriving stock instance Eq CaseItem
+  deriving stock (Show, Eq)
 
 newtype FreestandingArgumentList = FreestandingArgumentList [FishArg TStr]
-deriving stock instance Show FreestandingArgumentList
-deriving stock instance Eq FreestandingArgumentList
+  deriving stock (Show, Eq)
 
 data RedirectOp
-  = RedirectOut       -- >
-  | RedirectOutAppend -- >>
-  | RedirectIn        -- <
-  | RedirectErr       -- ^>
-  | RedirectErrAppend -- ^>>
-  | RedirectBoth      -- &>
-  | RedirectBothAppend -- &>>
+  = RedirectOut
+  | RedirectOutAppend
+  | RedirectIn
+  | RedirectErr
+  | RedirectErrAppend
+  | RedirectBoth
+  | RedirectBothAppend
   deriving stock (Show, Eq)
 
 data Decoration
@@ -464,10 +608,10 @@ data TestOperator
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 13. Optional Source Tracking (omitted for now)
+---- 12. Source Tracking
 --------------------------------------------------------------------------------
 
 data SourceRange = SourceRange
   { startPos :: Bash.Position
-  , endPos   :: Bash.Position 
+  , endPos   :: Bash.Position
   } deriving stock (Show, Eq)
