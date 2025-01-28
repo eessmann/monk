@@ -16,18 +16,21 @@ category:            Translate Bash to Fish shell
 build-type:          Simple
 extra-doc-files:     README.md
                      CHANGELOG.md
-tested-with:         GHC == 9.8.2
+tested-with:         GHC == 9.10.1
 
 source-repository head
   type:                git
   location:            https://github.com/eessmann/clam.git
 
 common common-options
-  build-depends:       base ^>= 4.19.1.0
+  build-depends:       base ^>= 4.20.0.0
                      , relude
+                     , ShellCheck ^>= 0.10.0
+                     , prettyprinter ^>= 1.7.0
 
   mixins:              base hiding (Prelude)
                      , relude (Relude as Prelude)
+                     , relude
 
   ghc-options:         -Wall
                        -Wcompat
@@ -45,8 +48,8 @@ common common-options
     ghc-options:       -Wmissing-deriving-strategies
                        -fwrite-ide-info
                        -hiedir=.hie
-  if impl(ghc >= 8.10)
-    ghc-options:       -Wunused-packages
+  --if impl(ghc >= 8.10)
+    --ghc-options:       -Wunused-packages
   if impl(ghc >= 9.0)
     ghc-options:       -Winvalid-haddock
   if impl(ghc >= 9.2)
@@ -60,7 +63,7 @@ common common-options
     ghc-options:       -Wterm-variable-capture
                        -Winconsistent-flags
 
-  default-language:    Haskell2010
+  default-language:    GHC2024
   default-extensions:  ApplicativeDo
                        DefaultSignatures
                        FunctionalDependencies
@@ -75,6 +78,8 @@ library
   import:              common-options
   hs-source-dirs:      src
   exposed-modules:     Clam
+                     , FishAST
+  other-modules:       ClamPrettyPrinter
 
 executable clam
   import:              common-options

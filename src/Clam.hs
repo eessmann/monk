@@ -7,9 +7,12 @@ See README for more info
 -}
 
 module Clam
-    ( projectName
-    ) where
+    ( projectName,
+    module ClamPrettyPrinter
+        ) where
+    
+import ClamPrettyPrinter
 
 
-projectName :: String
+projectName :: Text
 projectName = "clam"

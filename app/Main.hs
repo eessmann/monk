@@ -1,7 +1,10 @@
 module Main (main) where
 
-import Clam (projectName)
-
+import Clam (projectName, prettyFish)
+import FishAST
+import Prettyprinter
 
 main :: IO ()
-main = putStrLn ("Executable for " ++ projectName)
+main = do
+  putTextLn ("Executable for " <> projectName)
+  putTextLn "\nDone!"
