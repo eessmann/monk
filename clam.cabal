@@ -27,6 +27,7 @@ common common-options
                      , relude
                      , ShellCheck ^>= 0.10.0
                      , prettyprinter ^>= 1.7.0
+                     , safe-exceptions ^>= 0.1.7.4
 
   mixins:              base hiding (Prelude)
                      , relude (Relude as Prelude)
@@ -80,6 +81,8 @@ library
   exposed-modules:     Clam
                      , FishAST
   other-modules:       ClamPrettyPrinter
+                     , BashParser
+                     , ShellToFish
 
 executable clam
   import:              common-options
