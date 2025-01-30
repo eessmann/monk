@@ -23,33 +23,78 @@ translateRoot (Root topToken) = translateToken topToken
 translateToken :: Token -> FishStatement
 translateToken token =
   case token of
-    T_Script _ _ stmts -> StmtList (map translateToken stmts)
+    -- A top-level script is just a list of commands/statements
+    T_Script _ _ stmts ->
+      StmtList (map translateToken stmts)
+
+    -- A simple command can have variable assignments plus the actual command
     T_SimpleCommand _ assignments rest ->
-      StmtList (assignmentsToSets assignments ++ [translateSimpleCommand rest])
-    T_Pipeline id bang cmds -> translatePipeline id bang cmds
-    T_IfExpression id conditionBranches elseBranch ->
-      translateIfExpression conditionBranches elseBranch id
-    T_WhileExpression id cond body ->
-      Stmt (While (translateBoolTokens cond) (map translateToken body))
-    T_UntilExpression id cond body ->
+      StmtList (assignmentsToSets assignments <> [translateSimpleCommand rest])
+
+    -- A pipeline might have an optional 'bang' (!). In shellcheck AST,
+    -- the second list is the sequence of commands, the first is the 'bang' tokens.
+    T_Pipeline _ bang cmds ->
+      translatePipeline bang cmds
+
+    -- If-then-elif-else
+    T_IfExpression _ conditionBranches elseBranch ->
+      translateIfExpression conditionBranches elseBranch
+
+    -- While loops
+    T_WhileExpression _ cond body ->
+      -- We translate the condition to a FishExpr TBool by wrapping a BoolExpr
+      Stmt (While (ExprBool (translateBoolTokens cond)) (map translateToken body))
+
+    -- Until loops => "until <cond>; do <body>; done" => while !(cond)
+    T_UntilExpression _ cond body ->
       Stmt
         ( While
-            (negateTBool (translateBoolTokens cond))
+            (negateTBool (ExprBool (translateBoolTokens cond)))
             (map translateToken body)
         )
+
+    -- Functions
     T_Function _ _ _ funcName body ->
       translateFunction funcName body
-    T_BraceGroup _ tokens -> StmtList (map translateToken tokens)
-    T_Subshell _ tokens -> StmtList [Stmt (Begin (map translateToken tokens))]
-    T_AndIf id l r -> Stmt (JobControl ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
-    T_OrIf _ l r -> Stmt (JobControl ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
-    T_Backgrounded _ token -> Stmt (Background (translateTokenToStatusCmd token))
-    T_Annotation _ _ token -> translateToken token
-    T_ForIn _ var tokens body -> Stmt (For (T.pack var) (ArgList (map argLiteralText tokens)) (map translateToken body))
-    T_CaseExpression _ switchExpr cases -> Stmt (Switch (argLiteralText switchExpr) (map translateCase cases))
-    _ -> Comment $ "Unimplemented token: " <> showToken token
-  where
-    cmd = translateTokenToStatusCmd
+
+    -- A `{ ... }` group in bash => just a list of statements in fish
+    T_BraceGroup _ tokens ->
+      StmtList (map translateToken tokens)
+
+    -- A subshell `( ... )` => fish does not have the same concept,
+    -- but we can approximate with `begin ... end`
+    T_Subshell _ tokens ->
+      StmtList [Stmt (Begin (map translateToken tokens))]
+
+    -- Logical AND / OR operators (&& / ||)
+    -- The pattern synonyms are T_AndIf id left right, T_OrIf id left right
+    T_AndIf id left right ->
+      Stmt (JobControl ConjAnd (translateTokenToStatusCmd left) (translateTokenToStatusCmd right))
+
+    T_OrIf id left right ->
+      Stmt (JobControl ConjOr (translateTokenToStatusCmd left) (translateTokenToStatusCmd right))
+
+    -- Backgrounding with &
+    T_Backgrounded _ bgToken ->
+      Stmt (Background (translateTokenToStatusCmd bgToken))
+
+    -- ShellCheck "annotation" tokens are basically wrappers: skip them
+    T_Annotation _ _ inner ->
+      translateToken inner
+
+    -- For var in words; do ...
+    T_ForIn _ var tokens body ->
+      let fishVar = T.pack var
+          fishListArg = ArgList (map argLiteralText tokens)
+       in Stmt (For fishVar fishListArg (map translateToken body))
+
+    -- "case <switch> in pattern) body ;; esac" => fish "switch <switch> case pattern ... end"
+    T_CaseExpression _ switchExpr cases ->
+      Stmt (Switch (argLiteralText switchExpr) (map translateCase cases))
+
+    -- Fallback for anything unimplemented
+    _ ->
+      Comment $ "Unimplemented token: " <> showToken token
 
 --------------------------------------------------------------------------------
 -- Token to String Conversion for Debugging
@@ -65,37 +110,56 @@ showToken = T.pack . show
 translateSimpleCommand :: [Token] -> FishStatement
 translateSimpleCommand cmdTokens =
   case cmdTokens of
-    [] -> Stmt (Command "true" [])
-    (c : args) -> Stmt (Command (literalText c) (map translateArgOrRedirect args))
+    [] ->
+      -- No actual command -> 'true' to avoid empty command in fish
+      Stmt (Command "true" [])
+    (c : args) ->
+      Stmt (Command (literalText c) (map translateArgOrRedirect args))
 
-translatePipeline :: Id -> [Token] -> [Token] -> FishStatement
-translatePipeline id bang cmds =
+--------------------------------------------------------------------------------
+-- Pipeline Translation
+--------------------------------------------------------------------------------
+
+translatePipeline :: [Token] -> [Token] -> FishStatement
+translatePipeline bang cmds =
   case cmds of
-    [] -> Stmt (Command "true" []) -- Empty pipeline
-    [cmd] ->
-      let translatedCmd = translateTokenToStatusCmd cmd
+    [] ->
+      -- If there's an empty pipeline, just do 'true'
+      Stmt (Command "true" [])
+    [single] ->
+      if null bang
+        then Stmt (translateTokenToStatusCmd single)
+        else Stmt (Not (translateTokenToStatusCmd single))
+    (c1 : c2 : rest) ->
+      -- We have at least two commands in the pipeline
+      let firstCmd = translateTokenToStatusCmd c1
+          otherCmds = map translateTokenToStatusCmd (c2 : rest)
+          pipelineCmds = firstCmd :| otherCmds
+          pipe = Pipeline pipelineCmds
        in if null bang
-            then Stmt translatedCmd
-            else Stmt (Not translatedCmd)
-    _ ->
-      Stmt $ Pipeline (translateTokenToStatusCmd (head cmds) :| map translateTokenToStatusCmd (tail cmds))
+            then Stmt pipe
+            else Stmt (Not pipe)
 
 --------------------------------------------------------------------------------
 -- If Expression Translation
 --------------------------------------------------------------------------------
 
-translateIfExpression :: [([Token], [Token])] -> [Token] -> Id -> FishStatement
-translateIfExpression conditionBranches elseBranch id =
-  let translateBranches [] = map translateToken elseBranch
-      translateBranches ((condTokens, thenTokens) : rest) =
-        [ Stmt
-            ( If
-                (translateBoolTokens condTokens)
-                (map translateToken thenTokens)
-                (translateBranches rest)
-            )
-        ]
-   in StmtList (translateBranches conditionBranches)
+translateIfExpression :: [([Token], [Token])] -> [Token] -> FishStatement
+translateIfExpression conditionBranches elseBranch =
+  -- Build nested If ... Else from left to right
+  StmtList (go conditionBranches)
+  where
+    go [] =
+      -- If no more condition branches, the else body is run
+      map translateToken elseBranch
+
+    go ((condTokens, thenTokens) : rest) =
+      [ Stmt $
+          If
+            (ExprBool (translateBoolTokens condTokens))
+            (map translateToken thenTokens)
+            (go rest) -- the else is either next branch or final
+      ]
 
 --------------------------------------------------------------------------------
 -- Function Definition Translation
@@ -107,15 +171,14 @@ translateFunction funcName bodyToken =
         case bodyToken of
           T_BraceGroup _ stmts -> map translateToken stmts
           _ -> [translateToken bodyToken]
-   in Stmt
-        ( Function
-            FishFunction
-              { funcName = T.pack funcName,
-                funcFlags = [],
-                funcParams = [],
-                funcBody = bodyStmts
-              }
-        )
+   in Stmt $
+        Function
+          FishFunction
+            { funcName = T.pack funcName,
+              funcFlags = [],
+              funcParams = [],
+              funcBody = bodyStmts
+            }
 
 --------------------------------------------------------------------------------
 -- Variable Assignment Translation
@@ -123,14 +186,16 @@ translateFunction funcName bodyToken =
 
 assignmentsToSets :: [Token] -> [FishStatement]
 assignmentsToSets assignments =
-  [ translateAssignment assignment | assignment <- assignments, isAssignment assignment
+  [ translateAssignment assignment
+    | assignment <- assignments,
+      isAssignment assignment
   ]
 
 translateAssignment :: Token -> FishStatement
 translateAssignment tok =
   case tok of
-    T_Assignment _ mode var _ val ->
-      let scope = ScopeLocal -- Could be refined based on context
+    T_Assignment _ _ var _ val ->
+      let scope = ScopeLocal
           setCmd =
             Set
               scope
@@ -142,55 +207,70 @@ translateAssignment tok =
 
 --------------------------------------------------------------------------------
 -- Condition Translation
+-- We'll return a BoolExpr so we can wrap it in ExprBool
 --------------------------------------------------------------------------------
 
-translateBoolTokens :: [Token] -> FishExpr TBool
-translateBoolTokens tokens =
-  case tokens of
-    [] -> ExprBool (BoolLiteral True)
-    [T_Bang id] -> ExprBool (BoolLiteral False)
-    [T_Bang id, t] -> negateTBool (translateBoolToken t)
-    [t] -> translateBoolToken t
-    (t1 : t2 : rest) ->
-      case t2 of
-        T_AND_IF id ->
-          ExprBool
-            ( BoolAnd
-                (boolExpr (translateBoolToken t1))
-                (boolExpr (translateBoolTokens rest))
-            )
-        T_OR_IF id ->
-          ExprBool
-            ( BoolOr
-                (boolExpr (translateBoolToken t1))
-                (boolExpr (translateBoolTokens rest))
-            )
-        _ ->
-          ExprBool (BoolCommand (translateTokenToStatusCmd (T_Pipeline (getId t1) [] tokens)))
+translateBoolTokens :: [Token] -> BoolExpr
+translateBoolTokens = \case
+  -- No tokens => 'true'
+  [] -> BoolLiteral True
+
+  -- Single '!' => false
+  [T_Bang _] -> BoolLiteral False
+
+  -- "! foo" => not(translate foo)
+  [T_Bang _, t] -> BoolNot (translateBoolToken t)
+
+  -- Single => interpret that as a command test
+  [t] -> translateBoolToken t
+
+  -- "cond && rest"
+  (cond : T_AND_IF _ : rest) ->
+    BoolAnd (translateBoolToken cond) (translateBoolTokens rest)
+
+  -- "cond || rest"
+  (cond : T_OR_IF _ : rest) ->
+    BoolOr (translateBoolToken cond) (translateBoolTokens rest)
+
+  -- If we can't parse a simpler pattern, treat it as a single command
+  -- pipeline. That yields a status => cast that to a bool.
+  tokens ->
+    BoolCommand (translateTokenToStatusCmd (makeSinglePipeline tokens))
   where
-    boolExpr x = x
+    -- Wrap a list of tokens in a ShellCheck T_Pipeline so we can reuse
+    -- translateTokenToStatusCmd. We'll pass an empty "bang" list.
+    makeSinglePipeline :: [Token] -> Token
+    makeSinglePipeline [] =
+    -- Decide what to do if no tokens are given:
+    -- For example, fallback to a simple 'true' command, or throw an error, etc.
+    -- This snippet uses a fallback T_SimpleCommand with no arguments:
+      T_SimpleCommand (Id 0) [] []
+    makeSinglePipeline (t : ts) =
+    -- Here 't' is the first token, and 'ts' is the rest.
+    -- We create a T_Pipeline node using the first token's 'Id' and
+    -- passing the entire (t:ts) list as the pipeline's commands.
+      T_Pipeline (getId t) [] (t : ts)
 
-translateBoolToken :: Token -> FishExpr TBool
-translateBoolToken token =
-  case token of
-    T_Literal _ "true" -> ExprBool (BoolLiteral True)
-    T_Literal _ "false" -> ExprBool (BoolLiteral False)
-    -- Add more cases as needed
-    _ ->
-      ExprBool (BoolCommand (translateTokenToStatusCmd token))
+-- Translate a single token into a BoolExpr
+translateBoolToken :: Token -> BoolExpr
+translateBoolToken = \case
+  -- e.g. literal "true" => BoolLiteral True
+  T_Literal _ "true" -> BoolLiteral True
+  T_Literal _ "false" -> BoolLiteral False
+  -- otherwise interpret as a command
+  other -> BoolCommand (translateTokenToStatusCmd other)
 
 --------------------------------------------------------------------------------
--- Negation of Boolean Expressions
+-- Negate a FishExpr TBool
 --------------------------------------------------------------------------------
 
 negateTBool :: FishExpr TBool -> FishExpr TBool
-negateTBool (ExprBool (BoolNot b)) = ExprBool b
-negateTBool (ExprBool b) = ExprBool (BoolNot b)
-negateTBool x = ExprBool (BoolNot (boolExpr x))
-  where
-    boolExpr :: FishExpr TBool -> BoolExpr
-    boolExpr (ExprBool b) = b
-    boolExpr y = BoolCommand (translateTokenToStatusCmd (ExprSubstituted y))
+negateTBool = \case
+  -- If it's already an ExprBool with BoolNot, we can remove double negation
+  ExprBool (BoolNot b) -> ExprBool b
+  ExprBool b -> ExprBool (BoolNot b)
+  -- Fallback: if we had any other TBool expression
+  x -> ExprBool (BoolNot (BoolCommand (Command (T.pack "test") []))) -- or something fallback
 
 --------------------------------------------------------------------------------
 -- Command Translation to TStatus
@@ -201,21 +281,46 @@ translateTokenToStatusCmd token =
   case token of
     T_SimpleCommand _ assignments rest ->
       case rest of
+        [] ->
+          -- Just assignments => fish "set" then "true"
+          if null assignments
+            then Command "true" []
+            else Command "true" (assignmentsToArgs assignments)
         (c : args) ->
           Command
             (literalText c)
-            (assignmentsToArgs assignments ++ map translateArgOrRedirect args)
-        [] ->
-          Command "true" (assignmentsToArgs assignments)
+            (assignmentsToArgs assignments <> map translateArgOrRedirect args)
+
     T_Pipeline _ bang commands ->
-      case commands of
-        [] -> Command "true" []
-        [cmd] -> if null bang then translateTokenToStatusCmd cmd else Not (translateTokenToStatusCmd cmd)
-        cmd : cmds -> Pipeline (translateTokenToStatusCmd (cmd) :| map translateTokenToStatusCmd (cmds))
-    T_AndIf l r id -> JobControl ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
-    T_OrIf l r id -> JobControl ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
-    -- Add more command types as needed
-    _ -> Command (literalText token) []
+      translatePipelineToStatus bang commands
+
+    T_AndIf _ l r ->
+      JobControl ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
+
+    T_OrIf _ l r ->
+      JobControl ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
+
+    _ ->
+      -- Fallback: interpret any leftover as a "command <literal of token>"
+      Command (literalText token) []
+
+--------------------------------------------------------------------------------
+
+translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
+translatePipelineToStatus bang cmds =
+  case cmds of
+    [] ->
+      Command "true" []
+    [single] ->
+      if null bang
+        then translateTokenToStatusCmd single
+        else Not (translateTokenToStatusCmd single)
+    (c1 : c2 : rest) ->
+      let firstCmd = translateTokenToStatusCmd c1
+          otherCmds = map translateTokenToStatusCmd (c2 : rest)
+       in if null bang
+            then Pipeline (firstCmd :| otherCmds)
+            else Not (Pipeline (firstCmd :| otherCmds))
 
 --------------------------------------------------------------------------------
 -- Assignments to Args
@@ -223,7 +328,9 @@ translateTokenToStatusCmd token =
 
 assignmentsToArgs :: [Token] -> [FishArgOrRedirect]
 assignmentsToArgs assignments =
-  [ Arg (argLiteralText assignment) | assignment <- assignments, isAssignment assignment
+  [ Arg (argLiteralText assignment)
+    | assignment <- assignments,
+      isAssignment assignment
   ]
 
 --------------------------------------------------------------------------------
@@ -233,41 +340,91 @@ assignmentsToArgs assignments =
 translateArgOrRedirect :: Token -> FishArgOrRedirect
 translateArgOrRedirect tok =
   case tok of
-    T_IoFile id op file ->
+    -- Redirections like > file, < file
+    T_IoFile _ op file ->
       let op' = case op of
             T_Less _ -> RedirectIn
             T_Greater _ -> RedirectOut
             T_DGREAT _ -> RedirectOutAppend
             T_CLOBBER _ -> RedirectOut
-            _ -> error $ "Unsupported IOFile operation: " <> show op
+            _ ->
+              error $
+                "Unsupported IOFile operation: " <> show op
           file' = argLiteralText file
        in Redir op' file'
-    T_IoDuplicate id op num ->
+
+    -- e.g. 2>&1 or 2<&3
+    T_IoDuplicate _ op num ->
       let op' = case op of
             T_LESSAND _ -> RedirectIn
             T_GREATAND _ -> RedirectOut
-            _ -> error $ "Unsupported IoDuplicate operation: " <> show op
-          num' = ArgLiteral (literalText num)
+            _ ->
+              error $
+                "Unsupported IoDuplicate operation: " <> show op
+          num' = ArgLiteral (T.pack num)
        in Redir op' num'
-    -- Add more redirection cases as needed
+
+    -- Otherwise, it's an argument
     _ -> Arg (translateArg tok)
 
 --------------------------------------------------------------------------------
 -- Argument Translation
 --------------------------------------------------------------------------------
 
-translateArg :: Token -> FishArg a
+-- We only return string-typed arguments. If you need TBool, TInt, etc.
+-- you can add separate logic or function overloads.
+translateArg :: Token -> ArgStr
 translateArg tok =
   case tok of
-    T_Literal _ str -> ArgLiteral (literalText tok)
-    T_SingleQuoted _ str -> ArgLiteral (T.pack str)
-    T_DoubleQuoted _ strs -> ArgLiteral (T.concat (map literalText strs))
-    T_DollarBraced _ False var -> ArgVariable (literalText var)
-    T_Backticked _ tokens -> ArgSubstituted (translateTokenToStatusCmd (T_Backticked (getId tok) tokens))
-    T_DollarExpansion _ tokens -> ArgSubstituted (translateTokenToStatusCmd (T_DollarExpansion (getId tok) tokens))
-    T_DollarBraceCommandExpansion _ tokens -> ArgSubstituted (translateTokenToStatusCmd (T_DollarBraceCommandExpansion (getId tok) tokens))
-    -- Add more cases as needed
-    _ -> ArgLiteral (literalText tok)
+    T_Literal _ _ ->
+      ArgLiteral (literalText tok)
+
+    T_SingleQuoted _ s ->
+      ArgLiteral (T.pack s)
+
+    T_DoubleQuoted _ strs ->
+      ArgLiteral (T.concat (map literalText strs))
+
+    -- A bare parameter expansion, e.g. ${VAR}
+    T_DollarBraced _ False var ->
+      ArgVariable (literalText var)
+
+    -- Command substitutions: backticks, $( ), ${ } for commands
+    T_Backticked _ tokens ->
+      ArgSubstituted (translateTokenToStrCmd (T_Backticked (getId tok) tokens))
+
+    T_DollarExpansion _ tokens ->
+      ArgSubstituted (translateTokenToStrCmd (T_DollarExpansion (getId tok) tokens))
+
+    T_DollarBraceCommandExpansion _ tokens ->
+      ArgSubstituted (translateTokenToStrCmd (T_DollarBraceCommandExpansion (getId tok) tokens))
+
+    -- Fallback
+    _ ->
+      ArgLiteral (literalText tok)
+
+--------------------------------------------------------------------------------
+-- Command-substitution translation to FishCommand TStr
+--------------------------------------------------------------------------------
+
+-- In fish, any subcommand that runs is captured as a string if used in $(..).
+-- We'll use our custom 'SubcommandOutput [FishStatement]' constructor for that.
+translateTokenToStrCmd :: Token -> FishCommand TStr
+translateTokenToStrCmd tok =
+  case tok of
+    -- For example, a backtick might be multiple statements
+    T_Backticked _ stmts ->
+      SubcommandOutput (map translateToken stmts)
+
+    T_DollarExpansion _ stmts ->
+      SubcommandOutput (map translateToken stmts)
+
+    T_DollarBraceCommandExpansion _ stmts ->
+      SubcommandOutput (map translateToken stmts)
+
+    -- If we somehow get something else, just wrap it
+    _ ->
+      SubcommandOutput [translateToken tok]
 
 --------------------------------------------------------------------------------
 -- Case Translation
@@ -275,7 +432,9 @@ translateArg tok =
 
 translateCase :: (CaseType, [Token], [Token]) -> CaseItem
 translateCase (_, patterns, body) =
-  CaseItem (map argLiteralText patterns) (map translateToken body)
+  CaseItem
+    (map argLiteralText patterns)
+    (map translateToken body)
 
 --------------------------------------------------------------------------------
 -- Helper: get the literal Text from a Token
@@ -284,5 +443,5 @@ translateCase (_, patterns, body) =
 literalText :: Token -> Text
 literalText tok = T.pack (getLiteralStringDef "" tok)
 
-argLiteralText :: Token -> FishArg TStr
+argLiteralText :: Token -> ArgStr
 argLiteralText tok = ArgLiteral (literalText tok)

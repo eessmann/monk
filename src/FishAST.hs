@@ -142,6 +142,8 @@ data FishCommand (t :: FishType) where
   Source :: FishArg TStr -> FishCommand TUnit
   Brace :: [FishStatement] -> FishCommand TUnit
   HereDoc :: FishArg TStr -> FishArg TStr -> FishCommand TUnit
+  -- | A command substitution that produces a string when executed
+  SubcommandOutput :: [FishStatement] -> FishCommand TStr
   ---------------------------------------------------
   -- IO / Redirection
   ---------------------------------------------------
@@ -240,6 +242,8 @@ eqFishCommandSameType Break Break = True
 eqFishCommandSameType Break _ = False
 eqFishCommandSameType Continue Continue = True
 eqFishCommandSameType Continue _ = False
+eqFishCommandSameType (SubcommandOutput s1) (SubcommandOutput s2) = s1 == s2
+eqFishCommandSameType (SubcommandOutput _) _ = False
 ----------------------------------------
 -- Return
 ----------------------------------------
