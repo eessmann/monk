@@ -1,4 +1,4 @@
-module BashParser
+module Language.Bash.Parser
   ( parseBashScript,
     parseBashFile
   )
