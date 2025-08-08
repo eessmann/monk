@@ -16,14 +16,14 @@ category:            Translate Bash to Fish shell
 build-type:          Simple
 extra-doc-files:     README.md
                      CHANGELOG.md
-tested-with:         GHC == 9.10.1
+tested-with:         GHC == 9.12.2
 
 source-repository head
   type:                git
   location:            https://github.com/eessmann/monk.git
 
 common common-options
-  build-depends:       base ^>= 4.20.0.0
+  build-depends:       base ^>= 4.21.0.0
                      , relude
                      , ShellCheck ^>= 0.10.0
                      , prettyprinter ^>= 1.7.0

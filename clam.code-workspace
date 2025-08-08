@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"haskell.ghcupExecutablePath": "~/.ghcup/bin/ghcup",
+		"haskell.manageHLS": "GHCup"
+	}
+}
