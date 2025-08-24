@@ -130,11 +130,11 @@ prettyJobConjunction (FishJobConjunction mdec job conts semi) =
                   Just d  -> prettyConjunction d <+> prettyJobPipeline job
       rest = map prettyJCont conts
       semiDoc = if semi then ";" else mempty
-   in group (headDoc <> mconcat rest <> semiDoc)
+   in headDoc <> mconcat rest <> semiDoc
   where
     prettyJCont = \case
-      JCAnd jp -> line <> prettyConjunction ConjAnd <+> prettyJobPipeline jp
-      JCOr jp  -> line <> prettyConjunction ConjOr  <+> prettyJobPipeline jp
+      JCAnd jp -> hardline <> prettyConjunction ConjAnd <+> prettyJobPipeline jp
+      JCOr jp  -> hardline <> prettyConjunction ConjOr  <+> prettyJobPipeline jp
 
 prettyConjunction :: Conjunction -> Doc ann
 prettyConjunction = \case
@@ -150,11 +150,13 @@ prettyScope = \case
 
 prettyFunction :: FishFunction -> Doc ann
 prettyFunction (FishFunction name flags params body) =
-  "function" <+> pretty name <+> hsep (map prettyFunctionFlag flags)
-    -- Use FishExpr for params, NonEmpty for body
-    <> (if null params then mempty else " --argument" <+> hsep (map prettyFishExpr params))
-    <> hardline <> indent 2 (vsep (map prettyFishStatement (NE.toList body)))
-    <> hardline <> "end"
+  let flagsDoc = case flags of
+                   [] -> mempty
+                   fs -> space <> hsep (map prettyFunctionFlag fs)
+      paramsDoc = if null params then mempty else " --argument" <+> hsep (map prettyFishExpr params)
+  in "function" <+> pretty name <> flagsDoc <> paramsDoc
+      <> hardline <> indent 2 (vsep (map prettyFishStatement (NE.toList body)))
+      <> hardline <> "end"
 
 prettyFunctionFlag :: FunctionFlag -> Doc ann
 prettyFunctionFlag = \case

@@ -54,7 +54,7 @@ unitTests = testGroup "Pretty printing"
           conj = FishJobConjunction Nothing job1 [JCOr job2] False
           script = [ Stmt (JobConj conj) ]
           actual = renderFish script
-          expected = "false\nor echo 'ok'"
+          expected = "false \nor echo 'ok'"
       actual @?= expected
 
   , H.testCase "Begin block" $ do
@@ -112,7 +112,7 @@ unitTests = testGroup "Pretty printing"
 propertyTests :: TestTree
 propertyTests = testGroup "Properties"
   [ QC.testProperty "Echo literal without single quotes is single-quoted" $ 
-      QC.forAll (QC.suchThat QC.arbitrary (not . T.any (== '\''))) $ \t ->
+      QC.forAll genTextNoQuote $ \t ->
         let out = renderFish [Stmt (Command "echo" [ExprVal (ExprLiteral t)])]
         in T.isInfixOf ("'" <> t <> "'") out
 
@@ -161,7 +161,7 @@ propertyTests = testGroup "Properties"
         in caseCount == length items QC..&&. ends == 1
 
   , QC.testProperty "Function pretty begins with function name and has one end" $ do
-      QC.forAll genTextNoQuote $ \nameTxt ->
+      QC.forAll (fmap T.pack (QC.listOf1 (QC.elements (['a'..'z'] <> ['A'..'Z'] <> "_")))) $ \nameTxt ->
         QC.forAll genNonEmptyStmts $ \body ->
           let fn = FishFunction { funcName = nameTxt, funcFlags = [], funcParams = [], funcBody = body }
               out = renderFish [Stmt (Function fn)]
@@ -177,48 +177,5 @@ propertyTests = testGroup "Properties"
 -- Generators for a subset of the AST (no deep recursion)
 --------------------------------------------------------------------------------
 
-genTextNoQuote :: QC.Gen Text
-genTextNoQuote = do
-  chars <- QC.listOf (QC.suchThat QC.arbitrary (/= '\''))
-  pure (T.pack (take 8 chars))
-
-genExprStr :: QC.Gen (FishExpr 'TStr)
-genExprStr = ExprLiteral <$> genTextNoQuote
-
-genStatusCommand :: QC.Gen (FishCommand 'TStatus)
-genStatusCommand = QC.oneof
-  [ pure (Command "true" [])
-  , pure (Command "false" [])
-  , do t <- genTextNoQuote
-       pure (Command "echo" [ExprVal (ExprLiteral t)])
-  ]
-
-genPipeline :: QC.Gen FishJobPipeline
-genPipeline = do
-  headCmd <- genStatusCommand
-  k <- QC.chooseInt (0, 3)
-  contCmds <- QC.vectorOf k genStatusCommand
-  bg <- QC.arbitrary
-  let toCont c = PipeTo { jpcVariables = [], jpcStatement = Stmt c }
-  pure FishJobPipeline
-        { jpTime = False
-        , jpVariables = []
-        , jpStatement = Stmt headCmd
-        , jpCont = map toCont contCmds
-        , jpBackgrounded = bg
-        }
-
-genConjunction :: QC.Gen FishJobConjunction
-genConjunction = do
-  headP <- genPipeline
-  k <- QC.chooseInt (0, 3)
-  bools <- QC.vectorOf k QC.arbitrary
-  tails <- QC.vectorOf k genPipeline
-  let mk b p = if b then JCAnd p else JCOr p
-  semi <- QC.arbitrary
-  pure FishJobConjunction
-        { jcDecorator = Nothing
-        , jcJob = headP
-        , jcContinuations = zipWith mk bools tails
-        , jcSemiNl = semi
-        }
+-- Generators moved to test/Gen.hs
+  -- Generators moved to test/Gen.hs

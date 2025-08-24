@@ -114,7 +114,7 @@ translateTokenToExpr = \case
     case toNonEmptyStmtList (map translateToken stmts) of
       Just neBody -> ExprCommandSubstStr neBody
       Nothing     -> ExprLiteral ""
-  T_DollarBraceCommandExpansion _ stmts ->
+  T_DollarBraceCommandExpansion _ _ stmts ->
     case toNonEmptyStmtList (map translateToken stmts) of
       Just neBody -> ExprCommandSubstStr neBody
       Nothing     -> ExprLiteral ""

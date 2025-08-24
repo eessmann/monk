@@ -98,6 +98,7 @@ test-suite monk-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
+  other-modules:       Gen
   build-depends:       monk
                      , tasty ^>= 1.5
                      , tasty-hunit ^>= 0.10
