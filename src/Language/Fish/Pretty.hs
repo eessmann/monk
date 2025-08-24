@@ -35,6 +35,12 @@ prettyFishStatement = \case
   Freestanding (FreestandingArgumentList args) -> -- Updated for new AST
     hsep (map prettyFishExpr args)
   SemiNl -> ";" <> hardline -- Represents a semicolon potentially followed by newline
+  AndStmt a b -> prettyFishStatement a <> hardline <> "and" <+> prettyFishStatement b
+  OrStmt  a b -> prettyFishStatement a <> hardline <> "or"  <+> prettyFishStatement b
+  BraceStmt body redirs ->
+    let block = "{" <> hardline <> indent 2 (vsep (map prettyFishStatement (NE.toList body))) <> hardline <> "}"
+        rds   = if null redirs then mempty else space <> hsep (map prettyExprOrRedirect redirs)
+    in block <> rds
 
 --------------------------------------------------------------------------------
 -- 3. FishCommand
@@ -43,7 +49,8 @@ prettyFishStatement = \case
 prettyFishCommand :: FishCommand t -> Doc ann
 prettyFishCommand = \case
   Command txt args ->
-    pretty txt <+> hsep (map prettyExprOrRedirect args) -- Use prettyExprOrRedirect
+    let argsDoc = hsep (map prettyExprOrRedirect args)
+     in if null args then pretty txt else pretty txt <+> argsDoc
   Set scope var expr -> -- Use FishExpr
     "set" <+> prettyScope scope <+> pretty var <+> prettyFishExpr expr
   Function fishFn ->
@@ -74,14 +81,14 @@ prettyFishCommand = \case
     case mexpr of
       Nothing -> "return"
       Just e  -> "return" <+> prettyFishExpr e
-  Source fileExpr -> -- Use FishExpr
-    "source" <+> prettyFishExpr fileExpr
-  Brace stmts -> -- Use NonEmpty body
-    "{" <> hardline <> indent 2 (vsep (map prettyFishStatement (NE.toList stmts)))
-      <> hardline <> "}"
+  Exit mx -> case mx of
+    Nothing -> "exit"
+    Just e  -> "exit" <+> prettyFishExpr e
+  Source fileExpr -> "source" <+> prettyFishExpr fileExpr
+  Eval e -> "eval" <+> prettyFishExpr e
   -- Heredocs are not supported in fish; removed
-  Read var ->
-    "read" <+> pretty var
+  Read flags vars ->
+    "read" <+> hsep (map prettyReadFlag flags) <+> hsep (map pretty vars)
   Echo args -> -- Use NonEmpty FishExpr
     "echo" <+> hsep (map prettyFishExpr (NE.toList args))
   Printf fmt args -> -- Use FishExpr
@@ -94,6 +101,10 @@ prettyFishCommand = \case
     "not" <+> prettyFishCommand cmd
   Background cmd ->
     prettyFishCommand cmd <+> "&"
+  Wait mp -> case mp of
+    Nothing -> "wait"
+    Just p  -> "wait" <+> prettyFishExpr p
+  Exec c args -> "exec" <+> prettyFishExpr c <+> hsep (map prettyExprOrRedirect args)
   Decorated dec cmd ->
     prettyDecoration dec <+> prettyFishCommand cmd
   TryCatch tryStmts catchStmts -> -- Use NonEmpty bodies
@@ -133,8 +144,8 @@ prettyJobConjunction (FishJobConjunction mdec job conts semi) =
    in headDoc <> mconcat rest <> semiDoc
   where
     prettyJCont = \case
-      JCAnd jp -> hardline <> prettyConjunction ConjAnd <+> prettyJobPipeline jp
-      JCOr jp  -> hardline <> prettyConjunction ConjOr  <+> prettyJobPipeline jp
+      JCAnd jp -> space <> hardline <> prettyConjunction ConjAnd <+> prettyJobPipeline jp
+      JCOr jp  -> space <> hardline <> prettyConjunction ConjOr  <+> prettyJobPipeline jp
 
 prettyConjunction :: Conjunction -> Doc ann
 prettyConjunction = \case
@@ -186,10 +197,13 @@ prettyFishExpr = \case
   ExprBoolLiteral b -> if b then "true" else "false" -- Fish uses true/false literals
   ExprVariable var Nothing -> "$" <> pretty var
   ExprVariable var (Just idx) -> "$" <> pretty var <> brackets (prettyFishIndex idx)
+  ExprSpecialVar sv -> prettySpecialVar sv
   ExprStringConcat e1 e2 -> prettyFishExpr e1 <> prettyFishExpr e2 -- Concatenation is implicit
+  ExprStringOp op e -> parens (prettyStringOp op <+> prettyFishExpr e)
   ExprNumArith op e1 e2 ->
     -- Fish uses `math` command for arithmetic
     parens ("math" <+> prettyFishExpr e1 <+> prettyArithOp op <+> prettyFishExpr e2)
+  ExprRange a b -> braces (prettyFishExpr a <> ".." <> prettyFishExpr b)
   ExprBoolExpr bExpr ->
     -- Boolean expressions often evaluated directly or via `test`
     prettyBoolExpr bExpr
@@ -197,6 +211,10 @@ prettyFishExpr = \case
     "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
   ExprCommandSubst stmts ->
     "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
+  ExprListIndex lst idx -> parens (prettyFishExpr lst) <> brackets (prettyFishIndex idx)
+  ExprListConcat a b -> prettyFishExpr a <+> prettyFishExpr b
+  ExprGlob g -> prettyGlob g
+  ExprProcessSubst stmts -> prettyProcessSubst stmts
 
 
 -- | Escape strings for Fish shell.
@@ -228,12 +246,6 @@ escapeFishString s
 --------------------------------------------------------------------------------
 
 -- This might not be directly used if ExprNumArith prints using `math`
-prettyNumExpr :: NumExpr -> Doc ann
-prettyNumExpr = \case
-  NumLit i -> pretty i
-  NumVar var -> "$" <> pretty var
-  NumArth op e1 e2 -> parens (prettyNumExpr e1 <+> prettyArithOp op <+> prettyNumExpr e2)
-
 prettyArithOp :: ArithOp -> Doc ann
 prettyArithOp = \case
   OpPlus -> "+"
@@ -244,7 +256,6 @@ prettyArithOp = \case
 
 prettyBoolExpr :: BoolExpr -> Doc ann
 prettyBoolExpr = \case
-  BoolVar var -> "$" <> pretty var  -- Add the missing pattern
   BoolAnd b1 b2 -> group (prettyFishExpr b1 <+> "&&" <> line <> prettyFishExpr b2)
   BoolOr b1 b2 -> group (prettyFishExpr b1 <+> "||" <> line <> prettyFishExpr b2)
   BoolNot b -> parens ("not" <+> prettyFishExpr b)
@@ -285,6 +296,54 @@ prettyDecoration = \case
   DecBuiltin -> "builtin"
   DecCommand -> "command"
   DecExec -> "exec"
+
+prettyReadFlag :: ReadFlag -> Doc ann
+prettyReadFlag = \case
+  ReadPrompt t -> "--prompt" <+> escapeFishString t
+  ReadLocal -> "--local"
+  ReadGlobal -> "--global"
+  ReadUniversal -> "--universal"
+  ReadExport -> "--export"
+  ReadArray -> "--array"
+
+prettyGlob :: GlobPattern -> Doc ann
+prettyGlob = \case
+  GlobStar -> "*"
+  GlobStarStar -> "**"
+  GlobQuestion -> "?"
+  GlobBraces xs -> braces (hsep (punctuate "," (map escapeFishString xs)))
+  GlobComposite ps -> hcat (map prettyGlob ps)
+
+prettyStringOp :: StringOp -> Doc ann
+prettyStringOp = \case
+  StrLength -> "string length"
+  StrLower -> "string lower"
+  StrUpper -> "string upper"
+  StrEscape -> "string escape"
+  StrUnescape -> "string unescape"
+  StrSplit d -> "string split" <+> escapeFishString d
+  StrJoin d -> "string join" <+> escapeFishString d
+  StrReplace o n -> "string replace" <+> escapeFishString o <+> escapeFishString n
+  StrMatch p -> "string match" <+> escapeFishString p
+
+prettySpecialVar :: SpecialVarRef t -> Doc ann
+prettySpecialVar = \case
+  SVStatus -> "$status"
+  SVPipestatus -> "$pipestatus"
+  SVArgv -> "$argv"
+  SVPID -> "$fish_pid"
+  SVLastPID -> "$last_pid"
+  SVHostname -> "$hostname"
+  SVUser -> "$USER"
+  SVHome -> "$HOME"
+  SVPWD -> "$PWD"
+
+prettyProcessSubst :: NE.NonEmpty FishStatement -> Doc ann
+prettyProcessSubst stmts =
+  let docBody = case NE.toList stmts of
+        [s] -> prettyFishStatement s
+        xs  -> "begin" <> hardline <> indent 2 (vsep (map prettyFishStatement xs)) <> hardline <> "end"
+  in parens (docBody <+> "|" <+> "psub")
 
 prettyTestOpFish :: TestOperator -> Doc ann
 prettyTestOpFish = \case

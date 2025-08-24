@@ -21,7 +21,10 @@ genTextNoQuote = do
   pure (T.pack (take 10 chars))
 
 genExprStr :: Gen (FishExpr 'TStr)
-genExprStr = ExprLiteral <$> genTextNoQuote
+genExprStr = oneof
+  [ ExprLiteral <$> genTextNoQuote
+  , pure (ExprProcessSubst (NE.fromList [Stmt (Command "echo" [])]))
+  ]
 
 genStatusCommand :: Gen (FishCommand 'TStatus)
 genStatusCommand = oneof
@@ -29,6 +32,15 @@ genStatusCommand = oneof
   , pure (Command "false" [])
   , do t <- genTextNoQuote
        pure (Command "echo" [ExprVal (ExprLiteral t)])
+  , pure (Exit Nothing)
+  , do n <- chooseInt (0, 3)
+       pure (Exit (Just (ExprNumLiteral n)))
+  , do t <- genTextNoQuote
+       pure (Eval (ExprLiteral t))
+  , do f <- genTextNoQuote
+       pure (Source (ExprLiteral f))
+  , pure (Exec (ExprLiteral "true") [])
+  , pure (Read [ReadPrompt "Enter:", ReadLocal] ["x"])  
   ]
 
 genPipeline :: Gen FishJobPipeline
@@ -87,4 +99,3 @@ instance Arbitrary FishJobPipeline where
 
 instance Arbitrary FishJobConjunction where
   arbitrary = genConjunction
-

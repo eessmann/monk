@@ -12,6 +12,11 @@ module Language.Fish.AST
     ExprOrRedirect (..),
     FishExpr (..),
     FishIndex (..),
+    -- Special variables and helpers
+    SpecialVarRef (..),
+    GlobPattern (..),
+    StringOp (..),
+    ReadFlag (..),
     -- Job pipeline & conjunction (Fish semantics)
     VariableAssignment (..),
     FishJobPipeline (..),
@@ -36,7 +41,6 @@ module Language.Fish.AST
 
     -- * Arithmetic & Boolean
     ArithOp (..),
-    NumExpr (..), -- Kept for structure, but might be simplified further
     BoolExpr (..),
 
     -- * Operators, Flags, etc.
@@ -95,6 +99,10 @@ data FishStatement where
   Comment :: Text -> FishStatement
   Freestanding :: FreestandingArgumentList -> FishStatement
   SemiNl :: FishStatement -- Represents a semicolon followed by newline potentially
+  -- Statement-level conjunctions
+  AndStmt :: FishStatement -> FishStatement -> FishStatement
+  OrStmt  :: FishStatement -> FishStatement -> FishStatement
+  BraceStmt :: NonEmpty FishStatement -> [ExprOrRedirect] -> FishStatement
 
 deriving stock instance Show FishStatement
 
@@ -107,6 +115,9 @@ instance Eq FishStatement where
   (Comment t1) == (Comment t2) = t1 == t2
   (Freestanding f1) == (Freestanding f2) = f1 == f2
   SemiNl == SemiNl = True
+  (AndStmt a1 b1) == (AndStmt a2 b2) = a1 == a2 && b1 == b2
+  (OrStmt a1 b1) == (OrStmt a2 b2) = a1 == a2 && b1 == b2
+  (BraceStmt b1 r1) == (BraceStmt b2 r2) = b1 == b2 && r1 == r2
   _ == _ = False
 
 --------------------------------------------------------------------------------
@@ -149,13 +160,16 @@ data FishCommand (t :: FishType) where
   Return ::
     Maybe (FishExpr TInt) ->
     FishCommand TStatus
-  Source :: FishExpr TStr -> FishCommand TUnit -- Changed from FishArg
-  Brace :: NonEmpty FishStatement -> FishCommand TUnit -- Changed to NonEmpty
+  -- Control flow / env
+  Exit :: Maybe (FishExpr TInt) -> FishCommand TStatus
+  Source :: FishExpr TStr -> FishCommand TStatus
+  Eval :: FishExpr TStr -> FishCommand TStatus
+  -- Brace removed: use BraceStmt at statement level
 
   ---------------------------------------------------
   -- IO / Redirection
   ---------------------------------------------------
-  Read :: Text -> FishCommand TStatus -- Reads a line into variable(s), returns status
+  Read :: [ReadFlag] -> [Text] -> FishCommand TStatus -- Reads a line into variable(s), returns status
   Echo :: NonEmpty (FishExpr TStr) -> FishCommand TUnit -- Changed from FishArg, made NonEmpty
   Printf :: FishExpr TStr -> [FishExpr TStr] -> FishCommand TUnit -- Changed from FishArg
 
@@ -173,6 +187,8 @@ data FishCommand (t :: FishType) where
     FishCommand TStatus -> -- 'not' primarily operates on status
     FishCommand TStatus
   Background :: FishCommand TStatus -> FishCommand TStatus -- Backgrounding returns status
+  Wait :: Maybe (FishExpr TInt) -> FishCommand TStatus
+  Exec :: FishExpr TStr -> [ExprOrRedirect] -> FishCommand TStatus
 
   ---------------------------------------------------
   -- Decorated
@@ -210,9 +226,13 @@ eqFishCommandSameType (Return e1) (Return e2) = case (e1, e2) of
   (Nothing, Nothing) -> True
   (Just x, Just y) -> eqFishExpr x y
   _ -> False
+eqFishCommandSameType (Exit x1) (Exit x2) = case (x1, x2) of
+  (Nothing, Nothing) -> True
+  (Just a, Just b) -> eqFishExpr a b
+  _ -> False
 eqFishCommandSameType (Source e1) (Source e2) = eqFishExpr e1 e2
-eqFishCommandSameType (Brace s1) (Brace s2) = s1 == s2
-eqFishCommandSameType (Read v1) (Read v2) = v1 == v2
+eqFishCommandSameType (Eval e1) (Eval e2) = eqFishExpr e1 e2
+eqFishCommandSameType (Read f1 vs1) (Read f2 vs2) = f1 == f2 && vs1 == vs2
 eqFishCommandSameType (Echo es1) (Echo es2) = es1 == es2
 eqFishCommandSameType (Printf f1 a1) (Printf f2 a2) = eqFishExpr f1 f2 && a1 == a2
 eqFishCommandSameType (Pipeline p1) (Pipeline p2) = p1 == p2
@@ -220,6 +240,11 @@ eqFishCommandSameType (JobConj j1) (JobConj j2) = j1 == j2
 eqFishCommandSameType (Semicolon c1a c1b) (Semicolon c2a c2b) = eqGADT eqFishCommandSameType c1a c2a && eqFishCommandSameType c1b c2b
 eqFishCommandSameType (Not c1) (Not c2) = c1 == c2
 eqFishCommandSameType (Background c1) (Background c2) = c1 == c2
+eqFishCommandSameType (Wait a1) (Wait a2) = case (a1, a2) of
+  (Nothing, Nothing) -> True
+  (Just x, Just y) -> eqFishExpr x y
+  _ -> False
+eqFishCommandSameType (Exec c1 a1) (Exec c2 a2) = eqFishExpr c1 c2 && a1 == a2
 eqFishCommandSameType (Decorated d1 c1) (Decorated d2 c2) = d1 == d2 && eqFishCommandSameType c1 c2
 eqFishCommandSameType (TryCatch t1 c1) (TryCatch t2 c2) = t1 == t2 && c1 == c2
 -- Fallback for constructors not matching or different types
@@ -253,12 +278,16 @@ data FishExpr (t :: FishType) where
 
   -- Variables (generalized)
   ExprVariable :: (Typeable a) => Text -> Maybe FishIndex -> FishExpr a
+  -- Special variables (typed)
+  ExprSpecialVar :: SpecialVarRef t -> FishExpr t
 
   -- String operations
   ExprStringConcat :: FishExpr TStr -> FishExpr TStr -> FishExpr TStr
+  ExprStringOp :: StringOp -> FishExpr TStr -> FishExpr TStr
 
   -- Arithmetic operations
   ExprNumArith :: ArithOp -> FishExpr TInt -> FishExpr TInt -> FishExpr TInt
+  ExprRange :: FishExpr TInt -> FishExpr TInt -> FishExpr (TList TInt)
 
   -- Boolean operations
   ExprBoolExpr :: BoolExpr -> FishExpr TBool
@@ -267,6 +296,16 @@ data FishExpr (t :: FishType) where
   -- In fish, command substitutions yield strings (often multiple; split on newlines)
   ExprCommandSubstStr :: NonEmpty FishStatement -> FishExpr TStr
   ExprCommandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
+
+  -- List operations
+  ExprListIndex :: (Typeable a) => FishExpr (TList a) -> FishIndex -> FishExpr a
+  ExprListConcat :: (Typeable a) => FishExpr (TList a) -> FishExpr (TList a) -> FishExpr (TList a)
+
+  -- Glob patterns
+  ExprGlob :: GlobPattern -> FishExpr (TList TStr)
+
+  -- Process substitution (psub)
+  ExprProcessSubst :: NonEmpty FishStatement -> FishExpr TStr
 
 deriving stock instance Show (FishExpr t)
 
@@ -281,10 +320,17 @@ eqFishExprSameType (ExprNumLiteral n1) (ExprNumLiteral n2) = n1 == n2
 eqFishExprSameType (ExprBoolLiteral b1) (ExprBoolLiteral b2) = b1 == b2
 eqFishExprSameType (ExprVariable v1 i1) (ExprVariable v2 i2) = v1 == v2 && i1 == i2
 eqFishExprSameType (ExprStringConcat x1 y1) (ExprStringConcat x2 y2) = x1 == x2 && y1 == y2
+eqFishExprSameType (ExprStringOp o1 a1) (ExprStringOp o2 a2) = o1 == o2 && a1 == a2
 eqFishExprSameType (ExprNumArith op1 l1 r1) (ExprNumArith op2 l2 r2) = op1 == op2 && l1 == l2 && r1 == r2
+eqFishExprSameType (ExprRange a1 b1) (ExprRange a2 b2) = a1 == a2 && b1 == b2
 eqFishExprSameType (ExprBoolExpr b1) (ExprBoolExpr b2) = b1 == b2
 eqFishExprSameType (ExprCommandSubstStr s1) (ExprCommandSubstStr s2) = s1 == s2
 eqFishExprSameType (ExprCommandSubst s1) (ExprCommandSubst s2) = s1 == s2
+eqFishExprSameType (ExprListIndex l1 i1) (ExprListIndex l2 i2) = eqFishExpr l1 l2 && i1 == i2
+eqFishExprSameType (ExprListConcat a1 b1) (ExprListConcat a2 b2) = eqFishExpr a1 a2 && eqFishExpr b1 b2
+eqFishExprSameType (ExprGlob g1) (ExprGlob g2) = g1 == g2
+eqFishExprSameType (ExprProcessSubst s1) (ExprProcessSubst s2) = s1 == s2
+eqFishExprSameType (ExprSpecialVar v1) (ExprSpecialVar v2) = v1 == v2
 eqFishExprSameType _ _ = False
 
 -- | Heterogeneous equality check for FishExpr using Typeable
@@ -314,15 +360,8 @@ data ArithOp
 
 -- Potentially NumExpr could be removed if ExprNumArith handles all cases,
 -- but kept for now if direct representation of e.g. `math` expressions is needed.
-data NumExpr
-  = NumLit Int
-  | NumVar Text -- Now redundant with ExprVariable?
-  | NumArth ArithOp NumExpr NumExpr
-  deriving stock (Show, Eq)
-
 data BoolExpr where
-  -- Note: BoolLiteral is now handled by ExprBoolLiteral
-  BoolVar :: Text -> BoolExpr -- Redundant with ExprVariable?
+  -- Note: BoolLiteral is now handled by ExprBoolLiteral via ExprBoolExpr
   BoolAnd :: FishExpr TBool -> FishExpr TBool -> BoolExpr
   BoolOr :: FishExpr TBool -> FishExpr TBool -> BoolExpr
   BoolNot :: FishExpr TBool -> BoolExpr
@@ -337,7 +376,6 @@ data BoolExpr where
 deriving stock instance Show BoolExpr
 
 instance Eq BoolExpr where
-  BoolVar v1 == BoolVar v2 = v1 == v2
   BoolAnd a1 b1 == BoolAnd a2 b2 = eqFishExpr a1 a2 && eqFishExpr b1 b2
   BoolOr a1 b1 == BoolOr a2 b2 = eqFishExpr a1 a2 && eqFishExpr b1 b2
   BoolNot x1 == BoolNot x2 = eqFishExpr x1 x2
@@ -526,6 +564,65 @@ type ExprStatus = FishExpr TStatus -- Usually via ExprSubstituted
 type ExprUnit = FishExpr TUnit -- Less common, maybe via ExprSubstituted
 
 --------------------------------------------------------------------------------
+---- 11. Special variables, glob patterns, string ops, read flags
+--------------------------------------------------------------------------------
+
+-- Typed special variables available in fish
+data SpecialVarRef (t :: FishType) where
+  SVStatus :: SpecialVarRef TInt
+  SVPipestatus :: SpecialVarRef (TList TInt)
+  SVArgv :: SpecialVarRef (TList TStr)
+  SVPID :: SpecialVarRef TInt
+  SVLastPID :: SpecialVarRef TInt
+  SVHostname :: SpecialVarRef TStr
+  SVUser :: SpecialVarRef TStr
+  SVHome :: SpecialVarRef TStr
+  SVPWD :: SpecialVarRef TStr
+
+deriving stock instance Show (SpecialVarRef t)
+
+instance Eq (SpecialVarRef t) where
+  SVStatus == SVStatus = True
+  SVPipestatus == SVPipestatus = True
+  SVArgv == SVArgv = True
+  SVPID == SVPID = True
+  SVLastPID == SVLastPID = True
+  SVHostname == SVHostname = True
+  SVUser == SVUser = True
+  SVHome == SVHome = True
+  SVPWD == SVPWD = True
+  _ == _ = False
+
+data GlobPattern
+  = GlobStar           -- *
+  | GlobStarStar       -- ** (recursive)
+  | GlobQuestion       -- ?
+  | GlobBraces [Text]  -- {a,b,c}
+  | GlobComposite [GlobPattern]
+  deriving stock (Show, Eq)
+
+data StringOp
+  = StrLength
+  | StrLower
+  | StrUpper
+  | StrEscape
+  | StrUnescape
+  | StrSplit Text  -- split by delimiter
+  | StrJoin Text   -- join with delimiter
+  | StrReplace Text Text  -- replace old new
+  | StrMatch Text  -- match against pattern
+  deriving stock (Show, Eq)
+
+data ReadFlag
+  = ReadPrompt Text
+  | ReadLocal
+  | ReadGlobal
+  | ReadUniversal
+  | ReadExport
+  | ReadArray
+  deriving stock (Show, Eq)
+
+--------------------------------------------------------------------------------
 ---- Example AST (Updated)
 --------------------------------------------------------------------------------
 
@@ -618,4 +715,5 @@ exampleAST =
             }
            ]
         )
+  , BraceStmt (Stmt (Command "echo" [ExprVal (ExprLiteral "brace body")]) :| []) [RedirectVal RedirectOut (ExprLiteral "/dev/null")]
   ]

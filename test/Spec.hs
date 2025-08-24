@@ -32,6 +32,44 @@ unitTests = testGroup "Pretty printing"
           expected = "echo 'Hello' > '/dev/null'"
       actual @?= expected
 
+  , H.testCase "Exit with code" $ do
+      let script = [ Stmt (Exit (Just (ExprNumLiteral 42))) ]
+          actual = renderFish script
+      actual @?= "exit 42"
+
+  , H.testCase "Eval command" $ do
+      let script = [ Stmt (Eval (ExprLiteral "echo hi")) ]
+          actual = renderFish script
+      actual @?= "eval 'echo hi'"
+
+  , H.testCase "Read with flags and vars" $ do
+      let script = [ Stmt (Read [ReadPrompt "Name:", ReadLocal] ["name"]) ]
+          actual = renderFish script
+          expected = "read --prompt 'Name:' --local name"
+      actual @?= expected
+
+  , H.testCase "Glob brace pattern" $ do
+      let script = [ Stmt (Command "ls" [ExprVal (ExprGlob (GlobBraces ["a","b"]))]) ]
+          actual = renderFish script
+          expected = "ls { 'a' , 'b' }"
+      -- We accept spacing differences; ensure braces present
+      T.isInfixOf "ls {" actual H.@? "must contain brace glob"
+
+  , H.testCase "Process substitution" $ do
+      let inner = Stmt (Command "echo" [ExprVal (ExprLiteral "x")])
+          script = [ Stmt (Command "cat" [ExprVal (ExprProcessSubst (inner NE.:| []))]) ]
+          actual = renderFish script
+      T.isInfixOf "cat (" actual H.@? "must begin with cat ("
+      T.isInfixOf "| psub)" actual H.@? "must pipe to psub"
+
+  , H.testCase "Statement-level and/or" $ do
+      let s1 = Stmt (Command "true" [])
+          s2 = Stmt (Command "echo" [ExprVal (ExprLiteral "ok")])
+          script1 = [ AndStmt s1 s2 ]
+          script2 = [ OrStmt s1 s2 ]
+      renderFish script1 @?= "true\nand echo 'ok'"
+      renderFish script2 @?= "true\nor echo 'ok'"
+
   , H.testCase "Simple pipeline" $ do
       let pipe = FishJobPipeline
                   { jpTime = False
@@ -65,6 +103,17 @@ unitTests = testGroup "Pretty printing"
             [ "begin"
             , "  echo 'A'"
             , "end"
+            ]
+      actual @?= expected
+
+  , H.testCase "BraceStmt with redirect" $ do
+      let body = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "B")])]
+          script = [BraceStmt body [RedirectVal RedirectOut (ExprLiteral "/dev/null")]]
+          actual = renderFish script
+          expected = T.intercalate "\n"
+            [ "{"
+            , "  echo 'B'"
+            , "} > '/dev/null'"
             ]
       actual @?= expected
 
