@@ -11,7 +11,7 @@ cache:
 
 jobs:
   include:
-  - ghc: 9.8.2
+  - ghc: 9.12.2
 
 install:
   # HLint check

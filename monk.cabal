@@ -23,11 +23,11 @@ source-repository head
   location:            https://github.com/eessmann/monk.git
 
 common common-options
-  build-depends:       base ^>= 4.21.0.0
+  build-depends:       base ^>= 4.21
                      , relude
-                     , ShellCheck ^>= 0.10.0
-                     , prettyprinter ^>= 1.7.0
-                     , safe-exceptions ^>= 0.1.7.4
+                     , ShellCheck ^>= 0.11
+                     , prettyprinter ^>= 1.7
+                     , safe-exceptions ^>= 0.1.7
 
   mixins:              base hiding (Prelude)
                      , relude (Relude as Prelude)
@@ -99,6 +99,11 @@ test-suite monk-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   build-depends:       monk
+                     , tasty ^>= 1.5
+                     , tasty-hunit ^>= 0.10
+                     , tasty-quickcheck ^>= 0.11
+                     , QuickCheck ^>= 2.16
+
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N

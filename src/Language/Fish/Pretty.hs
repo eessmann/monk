@@ -48,8 +48,8 @@ prettyFishCommand = \case
     "set" <+> prettyScope scope <+> pretty var <+> prettyFishExpr expr
   Function fishFn ->
     prettyFunction fishFn
-  For var listExpr body -> -- Use FishExpr, NonEmpty body
-    "for" <+> pretty var <+> "in" <+> prettyFishExpr listExpr <> hardline <>
+  For var listArgs body -> -- NonEmpty list of expressions
+    "for" <+> pretty var <+> "in" <+> hsep (map prettyFishExpr (NE.toList listArgs)) <> hardline <>
       indent 2 (vsep (map prettyFishStatement (NE.toList body))) <> hardline <> "end"
   While cond body -> -- Use NonEmpty body
     "while" <+> prettyFishExpr cond <> hardline <>
@@ -70,44 +70,30 @@ prettyFishCommand = \case
     "break"
   Continue ->
     "continue"
-  Return expr -> -- Use FishExpr
-    "return" <+> prettyFishExpr expr
+  Return mexpr -> -- Optional status expression
+    case mexpr of
+      Nothing -> "return"
+      Just e  -> "return" <+> prettyFishExpr e
   Source fileExpr -> -- Use FishExpr
     "source" <+> prettyFishExpr fileExpr
   Brace stmts -> -- Use NonEmpty body
     "{" <> hardline <> indent 2 (vsep (map prettyFishStatement (NE.toList stmts)))
       <> hardline <> "}"
-  HereDoc typeExpr contentExpr -> -- Use FishExpr
-    "<<" <+> prettyFishExpr typeExpr <> hardline <> prettyFishExpr contentExpr -- Common heredoc syntax
-  SubcommandOutputStr stmts -> -- Use NonEmpty body
-    "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
-  SubcommandOutputList stmts -> -- Print same as string output
-    "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
+  -- Heredocs are not supported in fish; removed
   Read var ->
     "read" <+> pretty var
   Echo args -> -- Use NonEmpty FishExpr
     "echo" <+> hsep (map prettyFishExpr (NE.toList args))
   Printf fmt args -> -- Use FishExpr
     "printf" <+> prettyFishExpr fmt <+> hsep (map prettyFishExpr args)
-  Redirect cmd op redirExpr -> -- Use FishExpr
-    group (prettyFishCommand cmd <+> prettyRedirectOp op <+> prettyFishExpr redirExpr) -- Group redirection
-  Pipeline neCmds ->
-    let cmds = NE.toList neCmds
-     in group (hsep (punctuate (" |" <> line) (map prettyFishCommand cmds))) -- Allow breaking after pipe
-  JobControl conj leftCmd rightCmd ->
-    group (prettyFishCommand leftCmd <+> prettyJobConjunction conj <> line <> prettyFishCommand rightCmd) -- Allow break after &&/||
+  Pipeline jp -> prettyJobPipeline jp
+  JobConj jc -> prettyJobConjunction jc
   Semicolon cmd1 cmd2 ->
      prettyFishCommand cmd1 <> ";" <> line <> prettyFishCommand cmd2 -- Allow break after ;
   Not cmd -> -- Takes FishCommand TStatus
     "not" <+> prettyFishCommand cmd
   Background cmd ->
     prettyFishCommand cmd <+> "&"
-  Disown cmd ->
-    -- Fish doesn't have a direct `disown` command applied like this.
-    -- Typically done via `cmd &; disown` or separate `disown %jobid`.
-    -- This AST node might need rethinking during translation or printing.
-    -- Printing as sequence for now:
-    prettyFishCommand cmd <+> "&;" <+> "disown"
   Decorated dec cmd ->
     prettyDecoration dec <+> prettyFishCommand cmd
   TryCatch tryStmts catchStmts -> -- Use NonEmpty bodies
@@ -121,10 +107,39 @@ prettyFishCommand = \case
 -- 4. Job conjunction, scopes, function, etc.
 --------------------------------------------------------------------------------
 
-prettyJobConjunction :: JobConjunction -> Doc ann
-prettyJobConjunction = \case
-  ConjAnd -> "&&"
-  ConjOr -> "||"
+-- New Fish job model pretty printers
+prettyJobPipeline :: FishJobPipeline -> Doc ann
+prettyJobPipeline (FishJobPipeline time vars stmt conts bg) =
+  let timeDoc = if time then "time" <> space else mempty
+      varsDoc = if null vars then mempty else hsep (map prettyVarAssign vars) <> space
+      headDoc = group (timeDoc <> varsDoc <> prettyFishStatement stmt)
+      restDocs = map (\(PipeTo v s) -> space <> "|" <+> (if null v then mempty else hsep (map prettyVarAssign v) <> space) <> prettyFishStatement s) conts
+      pipesDoc = mconcat restDocs
+   in group (headDoc <> pipesDoc <> if bg then space <> "&" else mempty)
+
+prettyVarAssign :: VariableAssignment -> Doc ann
+prettyVarAssign (VariableAssignment name mval) =
+  case mval of
+    Nothing -> pretty name <> "="
+    Just v  -> pretty name <> "=" <> prettyFishExpr v
+
+prettyJobConjunction :: FishJobConjunction -> Doc ann
+prettyJobConjunction (FishJobConjunction mdec job conts semi) =
+  let headDoc = case mdec of
+                  Nothing -> prettyJobPipeline job
+                  Just d  -> prettyConjunction d <+> prettyJobPipeline job
+      rest = map prettyJCont conts
+      semiDoc = if semi then ";" else mempty
+   in group (headDoc <> mconcat rest <> semiDoc)
+  where
+    prettyJCont = \case
+      JCAnd jp -> line <> prettyConjunction ConjAnd <+> prettyJobPipeline jp
+      JCOr jp  -> line <> prettyConjunction ConjOr  <+> prettyJobPipeline jp
+
+prettyConjunction :: Conjunction -> Doc ann
+prettyConjunction = \case
+  ConjAnd -> "and"
+  ConjOr  -> "or"
 
 prettyScope :: VariableScope -> Doc ann
 prettyScope = \case
@@ -170,16 +185,16 @@ prettyFishExpr = \case
   ExprVariable var Nothing -> "$" <> pretty var
   ExprVariable var (Just idx) -> "$" <> pretty var <> brackets (prettyFishIndex idx)
   ExprStringConcat e1 e2 -> prettyFishExpr e1 <> prettyFishExpr e2 -- Concatenation is implicit
-  ExprListLit xs -> parens (hsep (map prettyFishExpr xs)) -- List expansion syntax
   ExprNumArith op e1 e2 ->
     -- Fish uses `math` command for arithmetic
     parens ("math" <+> prettyFishExpr e1 <+> prettyArithOp op <+> prettyFishExpr e2)
   ExprBoolExpr bExpr ->
     -- Boolean expressions often evaluated directly or via `test`
     prettyBoolExpr bExpr
-  ExprSubstituted cmd ->
-    -- Print the command itself, assuming it returns the correct type (e.g., string)
-    prettyFishCommand cmd -- Already wrapped in parens by command substitution constructors
+  ExprCommandSubstStr stmts ->
+    "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
+  ExprCommandSubst stmts ->
+    "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
 
 
 -- | Escape strings for Fish shell.
@@ -234,7 +249,7 @@ prettyBoolExpr = \case
   -- BoolTestOp needs to become `test` or a direct evaluation if possible
   BoolTestOp op e1 e2 ->
     -- Use `test` command
-    "test" <+> prettyFishExpr e1 <+> prettyTestOp op <+> prettyFishExpr e2
+    "test" <+> prettyFishExpr e1 <+> prettyTestOpFish op <+> prettyFishExpr e2
   BoolCommand cmd ->
     -- Commands used in boolean context are executed directly
     prettyFishCommand cmd
@@ -269,29 +284,23 @@ prettyDecoration = \case
   DecCommand -> "command"
   DecExec -> "exec"
 
-prettyTestOp :: TestOperator -> Doc ann
-prettyTestOp = \case
-  Eq -> "="   -- Fish uses = for string and numeric equality in `test`
-  Neq -> "!=" -- Fish uses != for string and numeric inequality in `test`
+prettyTestOpFish :: TestOperator -> Doc ann
+prettyTestOpFish = \case
+  Eq -> "="
+  Neq -> "!="
   Gt -> "-gt"
   Lt -> "-lt"
   Ge -> "-ge"
   Le -> "-le"
-  StrEq -> "=" -- Deprecated -eq maps to =
-  StrNeq -> "!=" -- Deprecated -ne maps to !=
   IsFile -> "-f"
   IsDir -> "-d"
-  IsSymlink -> "-L" -- Fish uses -L for symlink check
+  IsSymlink -> "-L"
   Exists -> "-e"
   IsReadable -> "-r"
   IsWritable -> "-w"
   IsExecutable -> "-x"
   IsEmpty -> "-z"
   NotEmpty -> "-n"
-  -- These need specific command forms in Fish, `test` doesn't directly support them
-  StringContains -> error "`test` cannot directly print StringContains" -- Requires `string match -q -- '*pattern*'`
-  StringMatchRegex -> error "`test` cannot directly print StringMatchRegex" -- Requires `string match -qr`
-  StringMatchGlob -> error "`test` cannot directly print StringMatchGlob" -- Requires `string match -q`
 
 --------------------------------------------------------------------------------
 -- Removed Freestanding helper

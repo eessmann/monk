@@ -1,6 +1,6 @@
 module Main (main) where
 
-import Clam (projectName)
+import Monk (projectName)
 
 
 main :: IO ()
