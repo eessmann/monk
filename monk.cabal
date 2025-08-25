@@ -82,6 +82,12 @@ library
   other-modules:       Language.Fish.AST
                      , Language.Fish.Pretty
                      , Language.Fish.Translator
+                     , Language.Fish.Translator.Monad
+                     , Language.Fish.Translator.Variables
+                     , Language.Fish.Translator.Commands
+                     , Language.Fish.Translator.Control
+                     , Language.Fish.Translator.IO
+                     , Language.Fish.Translator.Redirections
                      , Language.Bash.Parser
 
 executable monk
