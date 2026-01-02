@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Monk
+import Language.Fish.Translator.Monad (defaultConfig)
 import ShellCheck.Interface
 
 
@@ -18,9 +19,7 @@ main = do
       print (prRoot parseRes)            -- The AST root
       print (prComments parseRes)        -- Any warnings/comments
       putTextLn "Translating to Fish:"
-      let fishAST = do
-            bashAST <- prRoot parseRes
-            pure (translateToken bashAST)
+      let fishAST = translateParseResult defaultConfig parseRes
       putTextLn $ show fishAST
 
   putTextLn "\nDone!"

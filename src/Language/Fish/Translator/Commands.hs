@@ -17,11 +17,10 @@ module Language.Fish.Translator.Commands
   , concatWithSpaces
   ) where
 
-import Relude
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
+import Data.Char (isAlpha, isAlphaNum)
 import Language.Fish.AST
-import Text.Read (readMaybe)
 import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Redirections (parseRedirectTokens)
 import ShellCheck.AST
@@ -31,33 +30,87 @@ import ShellCheck.AST
 --------------------------------------------------------------------------------
 
 toNonEmptyStmtList :: [FishStatement] -> Maybe (NonEmpty FishStatement)
-toNonEmptyStmtList stmts = NE.nonEmpty (filter (/= SemiNl) stmts)
+toNonEmptyStmtList stmts = NE.nonEmpty (filter (not . isEmptyStatement) stmts)
+
+isEmptyStatement :: FishStatement -> Bool
+isEmptyStatement = \case
+  EmptyStmt -> True
+  StmtList [] -> True
+  _ -> False
 
 --------------------------------------------------------------------------------
 -- Simple commands & Assignments
 --------------------------------------------------------------------------------
 
-translateSimpleCommand :: [Token] -> [Token] -> FishStatement
-translateSimpleCommand assignments cmdTokens =
-  let fishAssignments = mapMaybe translateAssignment assignments
-   in case (cmdTokens, NE.nonEmpty fishAssignments) of
-        -- Handle a brace group with possible trailing redirections: { ...; } > file
-        (T_BraceGroup _ inner : rest, _) ->
-          case toNonEmptyStmtList (map translateToken inner) of
-            Just neBody ->
-              let (reds, _unparsed) = parseRedirectTokens rest
-              in BraceStmt neBody reds
-            Nothing -> Comment "Skipped empty brace group in simple command"
-        _ ->
-          let fishCmd = translateCommandTokens cmdTokens in
-          case (fishCmd, NE.nonEmpty fishAssignments) of
-            (Just fCmd, Just neAssigns) ->
-              case toNonEmptyStmtList (NE.toList neAssigns ++ [Stmt fCmd]) of
-                Just body -> Stmt $ Begin body
-                Nothing   -> Comment "Empty command with assignments"
-            (Nothing, Just neAssigns) -> StmtList (NE.toList neAssigns)
-            (Just fCmd, Nothing) -> Stmt fCmd
-            (Nothing, Nothing) -> SemiNl
+translateSimpleCommand :: (Text -> [SetFlag]) -> [Token] -> [Token] -> FishStatement
+translateSimpleCommand scopeFlags assignments cmdTokens =
+  let fishAssignments = concatMap (translateScopedAssignment scopeFlags) assignments
+      cmdIsAssignment = not (null cmdTokens) && all isAssignmentWord cmdTokens
+      hasCmd = not (null cmdTokens) && not cmdIsAssignment
+  in case cmdTokens of
+        [] -> assignOnly fishAssignments
+        (c:_)
+          | T.null (tokenToLiteralText c) || cmdIsAssignment -> assignOnly fishAssignments
+        _ | hasCmd && not (null assignments) ->
+            translateEnvPrefix assignments cmdTokens
+          | otherwise ->
+              let fishCmd = translateCommandTokens cmdTokens in
+              case (fishCmd, NE.nonEmpty fishAssignments) of
+                (Just fCmd, Just neAssigns) ->
+                  case toNonEmptyStmtList (NE.toList neAssigns ++ [Stmt fCmd]) of
+                    Just body -> Stmt (Begin body [])
+                    Nothing   -> Comment "Empty command with assignments"
+                (Nothing, Just neAssigns) -> StmtList (NE.toList neAssigns)
+                (Just fCmd, Nothing) -> Stmt fCmd
+                (Nothing, Nothing) -> EmptyStmt
+  where
+    assignOnly assigns =
+      case NE.nonEmpty assigns of
+        Just neAssigns -> StmtList (NE.toList neAssigns)
+        Nothing -> EmptyStmt
+
+    translateScopedAssignment :: (Text -> [SetFlag]) -> Token -> [FishStatement]
+    translateScopedAssignment scope tok =
+      case tok of
+        T_Assignment _ _ var _ _ ->
+          translateAssignmentWithFlags (scope (toText var)) tok
+        _ -> translateAssignmentWithFlags (scope "") tok
+
+    translateEnvPrefix :: [Token] -> [Token] -> FishStatement
+    translateEnvPrefix assigns tokens =
+      let envFlags = [SetLocal, SetExport]
+          envAssigns = concatMap (translateAssignmentWithFlags envFlags) assigns
+          fishCmd = translateCommandTokens tokens
+      in case (fishCmd, NE.nonEmpty envAssigns) of
+          (Just fCmd, Just neAssigns) ->
+            case toNonEmptyStmtList (NE.toList neAssigns ++ [Stmt fCmd]) of
+              Just body -> Stmt (Begin body [])
+              Nothing   -> Comment "Empty command with env assignments"
+          (Just fCmd, Nothing) -> Stmt fCmd
+          (Nothing, Just neAssigns) -> StmtList (NE.toList neAssigns)
+          (Nothing, Nothing) -> EmptyStmt
+
+isAssignmentWord :: Token -> Bool
+isAssignmentWord tok =
+  case tok of
+    T_Assignment {} -> True
+    _ -> looksLikeAssignment (tokenToLiteralText tok)
+
+looksLikeAssignment :: Text -> Bool
+looksLikeAssignment txt =
+  case T.breakOn "=" txt of
+    (_, rhs) | T.null rhs -> False
+    (lhs, _) ->
+      let base = T.takeWhile (/= '[') lhs
+      in isValidVarName base
+
+isValidVarName :: Text -> Bool
+isValidVarName name =
+  case T.uncons name of
+    Just (c, rest) | isAlpha c || c == '_' -> T.all isIdentChar rest
+    _ -> False
+  where
+    isIdentChar ch = isAlphaNum ch || ch == '_'
 
 --------------------------------------------------------------------------------
 -- Command translation & builtins
@@ -68,17 +121,26 @@ translateCommandTokens cmdTokens =
   case cmdTokens of
     [] -> Nothing
     (c : args) ->
-      let name = tokenToLiteralText c in
-      Just $ case isSingleBracketTest c args of
-        Just testCmd -> testCmd
-        Nothing -> case T.unpack name of
-          "exit" -> translateExit args
-          "source" -> translateSource args
-          "." -> translateSource args
-          "eval" -> translateEval args
-          "exec" -> translateExec args
-          "read" -> translateRead args
-          _ -> Command name (map translateTokenToExprOrRedirect args)
+      let name = tokenToLiteralText c
+          (redirs, plainArgs) = parseRedirectTokens args
+          argExprs = map translateTokenToExprOrRedirect plainArgs
+          fallback = Command name (argExprs ++ redirs)
+      in if T.null name
+           then Nothing
+           else Just $ if null redirs
+             then case isSingleBracketTest c plainArgs of
+               Just testCmd -> testCmd
+               Nothing -> case isDoubleBracketTest c plainArgs of
+                 Just testCmd -> testCmd
+                 Nothing -> case T.unpack name of
+                   "exit" -> translateExit plainArgs
+                   "source" -> translateSource plainArgs
+                   "." -> translateSource plainArgs
+                   "eval" -> translateEval plainArgs
+                   "exec" -> translateExec plainArgs
+                   "read" -> translateRead plainArgs
+                   _ -> Command name argExprs
+             else fallback
 
 -- exit [n]
 translateExit :: [Token] -> FishCommand TStatus
@@ -87,7 +149,7 @@ translateExit [t] =
   case tokenToLiteralText t of
     txt | T.all isDigit txt && not (T.null txt)
         , Just n <- readMaybe (T.unpack txt) -> Exit (Just (ExprNumLiteral n))
-        | otherwise -> Exit Nothing
+        | otherwise -> Command "exit" [translateTokenToExprOrRedirect t]
   where
     isDigit = (\c -> c >= '0' && c <= '9')
 translateExit ts = Command "exit" (map translateTokenToExprOrRedirect ts)
@@ -152,6 +214,28 @@ isSingleBracketTest bracketToken args =
           Nothing -> Nothing
       else Nothing
 
+isDoubleBracketTest :: Token -> [Token] -> Maybe (FishCommand TStatus)
+isDoubleBracketTest bracketToken args =
+  let bracketTxt = tokenToLiteralText bracketToken
+   in if bracketTxt == "[[" then
+        case NE.nonEmpty args of
+          Just neArgs ->
+            let lastToken = NE.last neArgs
+                lastText = tokenToLiteralText lastToken
+                middle = NE.init neArgs
+             in if lastText == "]]"
+                  then translateDoubleBracketArgs middle
+                  else Nothing
+          Nothing -> Nothing
+      else Nothing
+
+translateDoubleBracketArgs :: [Token] -> Maybe (FishCommand TStatus)
+translateDoubleBracketArgs toks =
+  case toks of
+    [lhs, opTok, rhs] ->
+      Just (translateBinaryCondition (tokenToLiteralText opTok) lhs rhs)
+    _ -> Nothing
+
 --------------------------------------------------------------------------------
 -- Status command helpers (used by control/IO)
 --------------------------------------------------------------------------------
@@ -160,31 +244,117 @@ translateTokensToStatusCmd :: [Token] -> FishCommand TStatus
 translateTokensToStatusCmd tokens =
   case tokens of
     [] -> Command "true" []
+    [T_Condition _ _ condTok] -> translateConditionToken condTok
+    [T_Arithmetic _ exprTok] -> translateArithmetic exprTok
     [T_SimpleCommand _ a r] -> translateCommandTokensToStatus a r
     [T_Pipeline _ b c] -> translatePipelineToStatus b c
     [T_AndIf _ l r] ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (FishJobConjunction Nothing lp [JCAnd rp] False)
+       in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
     [T_OrIf _ l r] ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (FishJobConjunction Nothing lp [JCOr rp] False)
+       in JobConj (FishJobConjunction Nothing lp [JCOr rp])
     (c:args) -> Command (tokenToLiteralText c) (map translateTokenToExprOrRedirect args)
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
 translateTokenToStatusCmd = translateTokensToStatusCmd . pure
+
+translateConditionToken :: Token -> FishCommand TStatus
+translateConditionToken = \case
+  TC_Group _ _ inner -> translateConditionToken inner
+  TC_And _ _ _ l r ->
+    let lp = pipelineOf (translateConditionToken l)
+        rp = pipelineOf (translateConditionToken r)
+     in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+  TC_Or _ _ _ l r ->
+    let lp = pipelineOf (translateConditionToken l)
+        rp = pipelineOf (translateConditionToken r)
+     in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+  TC_Unary _ _ "!" inner ->
+    Not (translateConditionToken inner)
+  TC_Unary _ _ op inner ->
+    Command "test" [ExprVal (ExprLiteral (toText op)), ExprVal (translateTokenToExpr inner)]
+  TC_Binary _ _ op lhs rhs ->
+    translateBinaryCondition (toText op) lhs rhs
+  TC_Nullary _ _ tok ->
+    Command "test" [ExprVal (translateTokenToExpr tok)]
+  TC_Empty {} ->
+    Command "true" []
+  other ->
+    Command "test" [ExprVal (ExprLiteral (tokenToLiteralText other))]
+
+translateBinaryCondition :: Text -> Token -> Token -> FishCommand TStatus
+translateBinaryCondition op lhs rhs
+  | op == "=~" = stringMatch "-qr"
+  | op == "==" || op == "=" = stringMatch "-q"
+  | op == "!=" = Not (stringMatch "-q")
+  | otherwise =
+      let testArgs =
+            [ ExprVal (translateTokenToExpr lhs)
+            , ExprVal (ExprLiteral op)
+            , ExprVal (translateTokenToExpr rhs)
+            ]
+       in Command "test" testArgs
+  where
+    stringMatch flag =
+      Command "string"
+        [ ExprVal (ExprLiteral "match")
+        , ExprVal (ExprLiteral flag)
+        , ExprVal (ExprLiteral "--")
+        , ExprVal (translateTokenToExpr rhs)
+        , ExprVal (translateTokenToExpr lhs)
+        ]
 
 translateCommandTokensToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translateCommandTokensToStatus assignments cmdTokens = fromMaybe (Command "true" []) $ do
   fishCmd <- translateCommandTokens cmdTokens
   if null assignments
     then pure fishCmd
-    else pure fishCmd -- TODO: handle env-var scoping; simplified for now
+    else
+      let envFlags = [SetLocal, SetExport]
+          envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
+      in case NE.nonEmpty (envAssigns ++ [Stmt fishCmd]) of
+          Just body -> pure (Begin body [])
+          Nothing -> pure fishCmd
 
 -- Placeholder to break the import cycle; IO will override via qualified import
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
-translatePipelineToStatus _ _ = Command "true" []
+translatePipelineToStatus bang cmds =
+  case mapMaybe translateTokenToMaybeStatusCmd cmds of
+    [] -> Command "true" []
+    (c:cs) ->
+      let pipe = Pipeline (jobPipelineFromList (c:cs))
+      in if null bang then pipe else Not pipe
+
+translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
+translateTokenToMaybeStatusCmd token =
+  case token of
+    T_SimpleCommand _ assignments rest -> Just (translateCommandTokensToStatus assignments rest)
+    T_Condition {} -> Just (translateTokenToStatusCmd token)
+    T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmd inner
+    T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
+    T_AndIf _ l r ->
+      let lp = pipelineOf (translateTokenToStatusCmd l)
+          rp = pipelineOf (translateTokenToStatusCmd r)
+       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+    T_OrIf _ l r ->
+      let lp = pipelineOf (translateTokenToStatusCmd l)
+          rp = pipelineOf (translateTokenToStatusCmd r)
+       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+    _ -> Nothing
+
+jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
+jobPipelineFromList [] = pipelineOf (Command "true" [])
+jobPipelineFromList (c:cs) =
+  FishJobPipeline
+    { jpTime = False
+    , jpVariables = []
+    , jpStatement = Stmt c
+    , jpCont = map (\cmd -> PipeTo { jpcVariables = [], jpcStatement = Stmt cmd }) cs
+    , jpBackgrounded = False
+    }
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =

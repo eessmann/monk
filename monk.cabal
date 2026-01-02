@@ -1,6 +1,6 @@
-cabal-version:       3.0
+cabal-version:       3.14
 name:                monk
-version:             0.1.0.0
+version:             0.2.0
 synopsis:            Translate Bash scripts to Fish shell scripts.
 description:
     Monk translates shell scripts (Bash, etc.) into fish-shell code.
@@ -29,6 +29,7 @@ common common-options
                      , prettyprinter ^>= 1.7
                      , safe-exceptions ^>= 0.1.7
 
+  -- Use relude as the Prelude via mixins.
   mixins:              base hiding (Prelude)
                      , relude (Relude as Prelude)
                      , relude
@@ -40,28 +41,17 @@ common common-options
                        -Wincomplete-record-updates
                        -Wredundant-constraints
                        -Wnoncanonical-monad-instances
-  if impl(ghc >= 8.2)
-    ghc-options:       -fhide-source-paths
-  if impl(ghc >= 8.4)
-    ghc-options:       -Wmissing-export-lists
+                       -fhide-source-paths
+                       -Wmissing-export-lists
                        -Wpartial-fields
-  if impl(ghc >= 8.8)
-    ghc-options:       -Wmissing-deriving-strategies
+                       -Wmissing-deriving-strategies
                        -fwrite-ide-info
                        -hiedir=.hie
-  --if impl(ghc >= 8.10)
-    --ghc-options:       -Wunused-packages
-  if impl(ghc >= 9.0)
-    ghc-options:       -Winvalid-haddock
-  if impl(ghc >= 9.2)
-    ghc-options:       -Wredundant-bang-patterns
+                       -Winvalid-haddock
+                       -Wredundant-bang-patterns
                        -Woperator-whitespace
-  if impl(ghc >= 9.4  && < 9.10)
-    ghc-options:       -Wforall-identifier
-  if impl(ghc >= 9.4)
-    ghc-options:       -Wredundant-strictness-flags
-  if impl(ghc >= 9.8)
-    ghc-options:       -Wterm-variable-capture
+                       -Wredundant-strictness-flags
+                       -Wterm-variable-capture
                        -Winconsistent-flags
 
   default-language:    GHC2024
@@ -105,11 +95,21 @@ test-suite monk-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   other-modules:       Gen
+                     , TestSupport
+                     , Golden
+                     , Integration
+                     , Unit.Pretty
+                     , Unit.Translation
+                     , Property.Pretty
+                     , Property.Translation
   build-depends:       monk
+                     , containers
+                     , directory
+                     , process
                      , tasty ^>= 1.5
                      , tasty-hunit ^>= 0.10
                      , tasty-quickcheck ^>= 0.11
-                     , QuickCheck ^>= 2.16
+                     , QuickCheck >= 2.14 && < 2.17
 
   ghc-options:         -threaded
                        -rtsopts

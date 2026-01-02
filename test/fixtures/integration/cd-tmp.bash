@@ -1,0 +1,3 @@
+pwd
+cd /tmp
+pwd

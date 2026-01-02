@@ -1,39 +1,21 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- `src/`: Core library. Key modules: `Monk` (public API), `Language/Fish/AST.hs` (Fish AST), `Language/Fish/Translator.hs` (Bash→Fish), `Language/Fish/Pretty.hs` (rendering).
-- `app/`: CLI entrypoint (`Main.hs`) for the `monk` executable.
-- `test/`: Tests (`Spec.hs` driver, helpers under `test/`).
-- `benchmark/`: Optional micro-bench (`Main.hs`).
-- Generated artifacts: `dist-newstyle/`, `.hie/` — do not commit.
+Source code lives in `src/` as the `Monk` library and `Language.*` modules for parsing and translation. The CLI entry point is `app/Main.hs`, and the benchmark entry point is `benchmark/Main.hs`. Tests are under `test/` (notably `test/Spec.hs` and `test/Gen.hs`), with any extra fixtures stored alongside. Top-level project metadata and build configuration are in `monk.cabal`, `cabal.project.local`, `CHANGELOG.md`, and `LICENSE`.
 
 ## Build, Test, and Development Commands
-- `cabal update`: Refresh package index.
-- `cabal build all`: Build library, executable, tests, and benchmarks.
-- `cabal run monk`: Run the CLI (defaults to reading `test.sh` in `app/Main.hs`).
-- `cabal test all`: Run the full test suite.
-- `cabal repl monk`: REPL for iterative development.
-- `hlint .`: Lint the code (also run in CI via `.travis.yml`).
+- `cabal build` builds the library and executable.
+- `cabal run monk` runs the CLI (currently reads `test.sh`; adjust `app/Main.hs` for other inputs).
+- `cabal test` runs the Tasty test suite.
+- `cabal test --enable-coverage` runs tests with coverage.
+- `cabal bench` runs the benchmark target.
+- `hlint .` runs lint checks across the codebase.
 
 ## Coding Style & Naming Conventions
-- Language: Haskell with Relude. Enable warnings (`-Wall` + extras in `monk.cabal`) and keep code warning-free.
-- Modules mirror paths (e.g., `Language.Fish.Translator` → `src/Language/Fish/Translator.hs`).
-- Prefer explicit export lists, total functions, and descriptive names; avoid single-letter identifiers beyond tiny scopes.
-- Formatting: idiomatic Haskell (aligned `let/in`, grouped imports). Match existing style when unsure.
+Use Ormolu formatting (standard 2-space indentation) and keep code aligned with the GHC2024 defaults in `monk.cabal`. Address `hlint` suggestions unless they reduce clarity. Follow existing naming patterns: modules in `PascalCase` file paths (for example, `Language/Fish/Translator.hs`), types and constructors in `UpperCamelCase`, and values in `lowerCamelCase`.
 
 ## Testing Guidelines
-- Frameworks: `tasty`, `tasty-hunit`, `tasty-quickcheck`.
-- Organization: group tests by feature under `test/`; wire them through `Spec.hs`.
-- Run: `cabal test`. Keep property tests fast and deterministic.
+Tests use `tasty`, `tasty-hunit`, and `tasty-quickcheck` with `QuickCheck`. Put unit tests in `test/Spec.hs` and generators in `test/Gen.hs`. When extending translation behavior, add a focused unit test and a property-based test when practical.
 
 ## Commit & Pull Request Guidelines
-- Commits: present tense, concise (e.g., `Add Bash parser`, `Extend Fish translator`). Group related changes.
-- PRs: include purpose, summary, linked issues, and before/after examples for translator/pretty changes. Note behavior differences vs. Bash.
-
-## Architecture Overview & Workflow
-- Pipeline: ShellCheck AST → Fish AST (`Language.Fish.AST`) → text via pretty-printer (`Language.Fish.Pretty`).
-- Edit flow: update AST types first, then `Translator`, then `Pretty`. Keep all three in sync.
-
-## Security & Configuration Tips
-- Avoid committing build outputs or local overrides (`dist-newstyle/`, `.hie/`, `cabal.project.local`).
-- Prefer pure builds; avoid network I/O at runtime. Keep translations side-effect-free.
+Commit subjects in history are short, sentence-style summaries (for example, “AST Rework”). Keep subjects concise and descriptive; avoid extra prefixes unless they add clarity. For pull requests, describe behavioral changes, link related issues, and include tests or a short rationale if tests are not added. Provide sample input/output when changing translation logic.

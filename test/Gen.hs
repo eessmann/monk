@@ -63,14 +63,12 @@ genConjunction = do
   headP <- genPipeline
   k <- chooseInt (0, 3)
   bools <- vectorOf k arbitrary
-  tails <- vectorOf k genPipeline
+  tailPipes <- vectorOf k genPipeline
   let mk b p = if b then JCAnd p else JCOr p
-  semi <- arbitrary
   pure FishJobConjunction
         { jcDecorator = Nothing
         , jcJob = headP
-        , jcContinuations = zipWith mk bools tails
-        , jcSemiNl = semi
+        , jcContinuations = zipWith mk bools tailPipes
         }
 
 genNonEmptyStmts :: Gen (NE.NonEmpty FishStatement)
@@ -81,21 +79,4 @@ genNonEmptyStmts = do
 
 -- Arbitrary instances for convenience ---------------------------------------
 
-instance Arbitrary (FishExpr 'TStr) where
-  arbitrary = genExprStr
-
-instance Arbitrary (FishExpr 'TBool) where
-  arbitrary = oneof
-    [ pure (ExprBoolLiteral True)
-    , pure (ExprBoolLiteral False)
-    , pure (ExprBoolExpr (BoolCommand (Command "true" [])))
-    ]
-
-instance Arbitrary (FishCommand 'TStatus) where
-  arbitrary = genStatusCommand
-
-instance Arbitrary FishJobPipeline where
-  arbitrary = genPipeline
-
-instance Arbitrary FishJobConjunction where
-  arbitrary = genConjunction
+-- Arbitrary instances are intentionally omitted to avoid orphan warnings.

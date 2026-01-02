@@ -9,18 +9,9 @@ module Language.Fish.Translator.IO
   , jobPipelineFromList
   ) where
 
-import Relude
 import Language.Fish.AST
-import Language.Fish.Translator.Variables
-import Language.Fish.Translator.Redirections ()
 import Language.Fish.Translator.Commands (translateCommandTokensToStatus, translateTokenToStatusCmd)
 import ShellCheck.AST
-
---------------------------------------------------------------------------------
--- Simple redirection token parser based on literal tokens following a brace-group
---------------------------------------------------------------------------------
-
--- Redirection parsing lives in Redirections module (imported for side effects).
 
 --------------------------------------------------------------------------------
 -- Pipelines and status commands
@@ -53,15 +44,17 @@ translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
 translateTokenToMaybeStatusCmd token =
   case token of
     T_SimpleCommand _ assignments rest -> Just (translateCommandTokensToStatus assignments rest)
+    T_Condition {} -> Just (translateTokenToStatusCmd token)
+    T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmd inner
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
     T_AndIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp] False))
+       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
     T_OrIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp] False))
+       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
     _ -> Nothing
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus

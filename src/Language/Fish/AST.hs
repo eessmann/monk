@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -5,25 +6,29 @@
 {-# LANGUAGE RankNTypes #-}
 
 module Language.Fish.AST
-  ( -- * Types
+  ( -- * Core types
     FishType (..),
     FishStatement (..),
     FishCommand (..),
     ExprOrRedirect (..),
     FishExpr (..),
+    FishVarRef (..),
     FishIndex (..),
-    -- Special variables and helpers
+    -- * Special variables and helpers
     SpecialVarRef (..),
     GlobPattern (..),
+    GlobPart (..),
     StringOp (..),
     ReadFlag (..),
-    -- Job pipeline & conjunction (Fish semantics)
+    SetFlag (..),
+    -- * Job model
     VariableAssignment (..),
     FishJobPipeline (..),
     JobPipeCont (..),
     Conjunction (..),
     FishJobConjCont (..),
     FishJobConjunction (..),
+    FishJobList (..),
 
     -- * Type synonyms
     CmdStr,
@@ -39,26 +44,23 @@ module Language.Fish.AST
     ExprStatus,
     ExprUnit,
 
-    -- * Arithmetic & Boolean
-    ArithOp (..),
-    BoolExpr (..),
-
-    -- * Operators, Flags, etc.
-    TestOperator (..),
+    -- * Operators and flags
+    Redirect (..),
     RedirectOp (..),
+    RedirectSource (..),
+    RedirectTarget (..),
     Decoration (..),
     CaseItem (..),
-    FreestandingArgumentList (..),
 
-    -- * Function & Variable Details
+    -- * Functions
     FishFunction (..),
     FunctionFlag (..),
-    VariableScope (..),
 
-    -- * Source
+    -- * Source tracking
+    SourcePos (..),
     SourceRange (..),
 
-    -- * Helper for Eq instances
+    -- * Equality helpers
     eqGADT,
     eqFishExprSameType,
 
@@ -67,42 +69,35 @@ module Language.Fish.AST
   )
 where
 
-import Relude
-import Data.Coerce (coerce)
 import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Type.Reflection (typeRep)
-import Data.Typeable (Typeable)
-import Data.List.NonEmpty (NonEmpty((:|)))
 
 --------------------------------------------------------------------------------
----- 1. FishType
+-- | Phantom-typed tags for expressions and commands.
 --------------------------------------------------------------------------------
 
 data FishType
-  = TStr -- String/Text
-  | TInt -- Integer
-  | TBool -- Boolean
+  = TStr
+  | TInt
+  | TBool
   | TList FishType
-  | TStatus -- Status of a command - 0 for success, non-zero for failure
-  | TUnit -- No meaningful return value (void-like)
+  | TStatus
+  | TUnit
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 2. Statements
+-- | Top-level statements in a fish script.
 --------------------------------------------------------------------------------
+
 data FishStatement where
-  Stmt ::
-    (Typeable a) =>
-    FishCommand a ->
-    FishStatement
-  StmtList :: [FishStatement] -> FishStatement -- Keep as list for empty blocks/scripts
+  -- | A single command or block.
+  Stmt :: Typeable a => FishCommand a -> FishStatement
+  -- | A list of statements (used for scripts and block bodies).
+  StmtList :: [FishStatement] -> FishStatement
+  -- | A line comment (without the leading '#').
   Comment :: Text -> FishStatement
-  Freestanding :: FreestandingArgumentList -> FishStatement
-  SemiNl :: FishStatement -- Represents a semicolon followed by newline potentially
-  -- Statement-level conjunctions
-  AndStmt :: FishStatement -> FishStatement -> FishStatement
-  OrStmt  :: FishStatement -> FishStatement -> FishStatement
-  BraceStmt :: NonEmpty FishStatement -> [ExprOrRedirect] -> FishStatement
+  -- | An explicit empty statement.
+  EmptyStmt :: FishStatement
 
 deriving stock instance Show FishStatement
 
@@ -113,69 +108,55 @@ instance Eq FishStatement where
       Nothing -> False
   (StmtList xs1) == (StmtList xs2) = xs1 == xs2
   (Comment t1) == (Comment t2) = t1 == t2
-  (Freestanding f1) == (Freestanding f2) = f1 == f2
-  SemiNl == SemiNl = True
-  (AndStmt a1 b1) == (AndStmt a2 b2) = a1 == a2 && b1 == b2
-  (OrStmt a1 b1) == (OrStmt a2 b2) = a1 == a2 && b1 == b2
-  (BraceStmt b1 r1) == (BraceStmt b2 r2) = b1 == b2 && r1 == r2
+  EmptyStmt == EmptyStmt = True
   _ == _ = False
 
 --------------------------------------------------------------------------------
----- 3. Commands
+-- | Fish commands and block forms.
 --------------------------------------------------------------------------------
 
 data FishCommand (t :: FishType) where
-  ---------------------------------------------------
-  -- Basic Commands
-  ---------------------------------------------------
+  -- | Basic commands and blocks.
   Command :: Text -> [ExprOrRedirect] -> FishCommand TStatus
-  Set ::
-    (Typeable a) =>
-    VariableScope ->
-    Text ->
-    FishExpr a -> -- Changed from FishArg
-    FishCommand TUnit
+  Set :: [SetFlag] -> Text -> FishExpr (TList TStr) -> FishCommand TUnit
   Function :: FishFunction -> FishCommand TUnit
   For ::
     Text ->
-    NonEmpty (FishExpr TStr) ->
-    NonEmpty FishStatement -> -- Changed to NonEmpty
-    FishCommand TUnit
+    FishExpr (TList TStr) ->
+    NonEmpty FishStatement ->
+    [ExprOrRedirect] ->
+    FishCommand TStatus
   While ::
-    FishExpr TBool ->
-    NonEmpty FishStatement -> -- Changed to NonEmpty
-    FishCommand TUnit
-  Begin :: NonEmpty FishStatement -> FishCommand TUnit -- Changed to NonEmpty
+    FishJobList ->
+    NonEmpty FishStatement ->
+    [ExprOrRedirect] ->
+    FishCommand TStatus
+  Begin :: NonEmpty FishStatement -> [ExprOrRedirect] -> FishCommand TStatus
   If ::
-    FishExpr TBool ->
-    NonEmpty FishStatement -> -- then branch - Changed to NonEmpty
-    [FishStatement] -> -- else branch (can be empty)
-    FishCommand TUnit
+    FishJobList ->
+    NonEmpty FishStatement ->
+    [FishStatement] ->
+    [ExprOrRedirect] ->
+    FishCommand TStatus
   Switch ::
-    FishExpr TStr -> -- Changed from FishArg
-    NonEmpty CaseItem -> -- Changed to NonEmpty
-    FishCommand TUnit
+    FishExpr TStr ->
+    NonEmpty CaseItem ->
+    [ExprOrRedirect] ->
+    FishCommand TStatus
   Break :: FishCommand TUnit
   Continue :: FishCommand TUnit
-  Return ::
-    Maybe (FishExpr TInt) ->
-    FishCommand TStatus
-  -- Control flow / env
+  Return :: Maybe (FishExpr TInt) -> FishCommand TStatus
+  -- | Control flow and environment.
   Exit :: Maybe (FishExpr TInt) -> FishCommand TStatus
   Source :: FishExpr TStr -> FishCommand TStatus
   Eval :: FishExpr TStr -> FishCommand TStatus
-  -- Brace removed: use BraceStmt at statement level
 
-  ---------------------------------------------------
-  -- IO / Redirection
-  ---------------------------------------------------
-  Read :: [ReadFlag] -> [Text] -> FishCommand TStatus -- Reads a line into variable(s), returns status
-  Echo :: NonEmpty (FishExpr TStr) -> FishCommand TUnit -- Changed from FishArg, made NonEmpty
-  Printf :: FishExpr TStr -> [FishExpr TStr] -> FishCommand TUnit -- Changed from FishArg
+  -- | IO commands.
+  Read :: [ReadFlag] -> [Text] -> FishCommand TStatus
+  Echo :: NonEmpty (FishExpr TStr) -> FishCommand TUnit
+  Printf :: FishExpr TStr -> [FishExpr TStr] -> FishCommand TUnit
 
-  ---------------------------------------------------
-  -- Combining Commands / Job Control
-  ---------------------------------------------------
+  -- | Combining commands and job control.
   Pipeline :: FishJobPipeline -> FishCommand TStatus
   JobConj :: FishJobConjunction -> FishCommand TStatus
   Semicolon ::
@@ -183,28 +164,17 @@ data FishCommand (t :: FishType) where
     FishCommand a ->
     FishCommand b ->
     FishCommand b
-  Not ::
-    FishCommand TStatus -> -- 'not' primarily operates on status
-    FishCommand TStatus
-  Background :: FishCommand TStatus -> FishCommand TStatus -- Backgrounding returns status
+  Not :: FishCommand TStatus -> FishCommand TStatus
+  Background :: (Typeable a) => FishCommand a -> FishCommand TStatus
   Wait :: Maybe (FishExpr TInt) -> FishCommand TStatus
   Exec :: FishExpr TStr -> [ExprOrRedirect] -> FishCommand TStatus
 
-  ---------------------------------------------------
-  -- Decorated
-  ---------------------------------------------------
+  -- | Command decoration (`builtin`, `command`, `exec`).
   Decorated ::
     (Typeable a) =>
     Decoration ->
     FishCommand a ->
     FishCommand a
-  ---------------------------------------------------
-  -- Try/Catch
-  ---------------------------------------------------
-  TryCatch ::
-    NonEmpty FishStatement -> -- try block
-    NonEmpty FishStatement -> -- catch block
-    FishCommand TUnit
 
 deriving stock instance Show (FishCommand t)
 
@@ -213,13 +183,13 @@ instance (Typeable t) => Eq (FishCommand t) where
 
 eqFishCommandSameType :: FishCommand a -> FishCommand a -> Bool
 eqFishCommandSameType (Command txt1 args1) (Command txt2 args2) = txt1 == txt2 && args1 == args2
-eqFishCommandSameType (Set s1 v1 e1) (Set s2 v2 e2) = s1 == s2 && v1 == v2 && eqFishExpr e1 e2
+eqFishCommandSameType (Set f1 v1 e1) (Set f2 v2 e2) = f1 == f2 && v1 == v2 && eqFishExpr e1 e2
 eqFishCommandSameType (Function f1) (Function f2) = f1 == f2
-eqFishCommandSameType (For v1 l1 b1) (For v2 l2 b2) = v1 == v2 && l1 == l2 && b1 == b2
-eqFishCommandSameType (While c1 b1) (While c2 b2) = c1 == c2 && b1 == b2
-eqFishCommandSameType (Begin s1) (Begin s2) = s1 == s2
-eqFishCommandSameType (If c1 t1 e1) (If c2 t2 e2) = c1 == c2 && t1 == t2 && e1 == e2
-eqFishCommandSameType (Switch e1 cs1) (Switch e2 cs2) = eqFishExpr e1 e2 && cs1 == cs2
+eqFishCommandSameType (For v1 l1 b1 r1) (For v2 l2 b2 r2) = v1 == v2 && eqFishExpr l1 l2 && b1 == b2 && r1 == r2
+eqFishCommandSameType (While c1 b1 r1) (While c2 b2 r2) = c1 == c2 && b1 == b2 && r1 == r2
+eqFishCommandSameType (Begin s1 r1) (Begin s2 r2) = s1 == s2 && r1 == r2
+eqFishCommandSameType (If c1 t1 e1 r1) (If c2 t2 e2 r2) = c1 == c2 && t1 == t2 && e1 == e2 && r1 == r2
+eqFishCommandSameType (Switch e1 cs1 r1) (Switch e2 cs2 r2) = eqFishExpr e1 e2 && cs1 == cs2 && r1 == r2
 eqFishCommandSameType Break Break = True
 eqFishCommandSameType Continue Continue = True
 eqFishCommandSameType (Return e1) (Return e2) = case (e1, e2) of
@@ -239,208 +209,186 @@ eqFishCommandSameType (Pipeline p1) (Pipeline p2) = p1 == p2
 eqFishCommandSameType (JobConj j1) (JobConj j2) = j1 == j2
 eqFishCommandSameType (Semicolon c1a c1b) (Semicolon c2a c2b) = eqGADT eqFishCommandSameType c1a c2a && eqFishCommandSameType c1b c2b
 eqFishCommandSameType (Not c1) (Not c2) = c1 == c2
-eqFishCommandSameType (Background c1) (Background c2) = c1 == c2
+eqFishCommandSameType (Background (c1 :: FishCommand a)) (Background (c2 :: FishCommand b)) =
+  eqGADT eqFishCommandSameType c1 c2
 eqFishCommandSameType (Wait a1) (Wait a2) = case (a1, a2) of
   (Nothing, Nothing) -> True
   (Just x, Just y) -> eqFishExpr x y
   _ -> False
 eqFishCommandSameType (Exec c1 a1) (Exec c2 a2) = eqFishExpr c1 c2 && a1 == a2
 eqFishCommandSameType (Decorated d1 c1) (Decorated d2 c2) = d1 == d2 && eqFishCommandSameType c1 c2
-eqFishCommandSameType (TryCatch t1 c1) (TryCatch t2 c2) = t1 == t2 && c1 == c2
--- Fallback for constructors not matching or different types
+-- | Fallback for constructors not matching or different types.
 eqFishCommandSameType _ _ = False
 
-
 --------------------------------------------------------------------------------
----- 4. Expressions & Redirects (Unified Arg/Expr)
+-- | Expressions and command arguments.
 --------------------------------------------------------------------------------
 
--- | Represents either an expression (value) or a redirection.
--- Used in command argument lists.
+-- | A command argument or redirection.
 data ExprOrRedirect where
   ExprVal :: (Typeable a) => FishExpr a -> ExprOrRedirect
-  RedirectVal :: RedirectOp -> FishExpr TStr -> ExprOrRedirect
+  RedirectVal :: Redirect -> ExprOrRedirect
 
 deriving stock instance Show ExprOrRedirect
 
 instance Eq ExprOrRedirect where
   (ExprVal e1) == (ExprVal e2) = eqFishExpr e1 e2
-  (RedirectVal op1 e1) == (RedirectVal op2 e2) = op1 == op2 && eqFishExpr e1 e2
+  (RedirectVal r1) == (RedirectVal r2) = r1 == r2
   _ == _ = False
 
--- | GADT for Fish expressions (replaces FishArg).
--- Typeable t constraint needed for Eq instance via eqGADT.
+-- | GADT for fish expressions.
 data FishExpr (t :: FishType) where
-  -- Literals
+  -- | Literals.
   ExprLiteral :: Text -> FishExpr TStr
   ExprNumLiteral :: Int -> FishExpr TInt
-  ExprBoolLiteral :: Bool -> FishExpr TBool
 
-  -- Variables (generalized)
-  ExprVariable :: (Typeable a) => Text -> Maybe FishIndex -> FishExpr a
-  -- Special variables (typed)
+  -- | Variables.
+  ExprVariable :: FishVarRef t -> FishExpr t
+  -- | Special variables.
   ExprSpecialVar :: SpecialVarRef t -> FishExpr t
 
-  -- String operations
+  -- | String operations.
   ExprStringConcat :: FishExpr TStr -> FishExpr TStr -> FishExpr TStr
   ExprStringOp :: StringOp -> FishExpr TStr -> FishExpr TStr
+  ExprJoinList :: FishExpr (TList TStr) -> FishExpr TStr
 
-  -- Arithmetic operations
-  ExprNumArith :: ArithOp -> FishExpr TInt -> FishExpr TInt -> FishExpr TInt
-  ExprRange :: FishExpr TInt -> FishExpr TInt -> FishExpr (TList TInt)
+  -- | Arithmetic operations.
+  ExprMath :: NonEmpty (FishExpr TStr) -> FishExpr TInt
 
-  -- Boolean operations
-  ExprBoolExpr :: BoolExpr -> FishExpr TBool
-
-  -- Command Substitution
-  -- In fish, command substitutions yield strings (often multiple; split on newlines)
-  ExprCommandSubstStr :: NonEmpty FishStatement -> FishExpr TStr
+  -- | Command substitution (fish produces a list of strings).
   ExprCommandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
 
-  -- List operations
-  ExprListIndex :: (Typeable a) => FishExpr (TList a) -> FishIndex -> FishExpr a
+  -- | List operations.
+  ExprListLiteral :: [FishExpr TStr] -> FishExpr (TList TStr)
   ExprListConcat :: (Typeable a) => FishExpr (TList a) -> FishExpr (TList a) -> FishExpr (TList a)
 
-  -- Glob patterns
+  -- | Glob patterns.
   ExprGlob :: GlobPattern -> FishExpr (TList TStr)
 
-  -- Process substitution (psub)
+  -- | Process substitution (psub).
   ExprProcessSubst :: NonEmpty FishStatement -> FishExpr TStr
 
 deriving stock instance Show (FishExpr t)
 
--- | Eq instance using eqGADT helper
+-- | Eq instance using eqGADT helper.
 instance (Typeable t) => Eq (FishExpr t) where
   (==) = eqGADT eqFishExprSameType
 
--- | Helper to compare FishExpr when types are known to be equal (a ~ b)
+-- | Helper to compare FishExpr when types are known to be equal (a ~ b).
 eqFishExprSameType :: FishExpr a -> FishExpr a -> Bool
 eqFishExprSameType (ExprLiteral t1) (ExprLiteral t2) = t1 == t2
 eqFishExprSameType (ExprNumLiteral n1) (ExprNumLiteral n2) = n1 == n2
-eqFishExprSameType (ExprBoolLiteral b1) (ExprBoolLiteral b2) = b1 == b2
-eqFishExprSameType (ExprVariable v1 i1) (ExprVariable v2 i2) = v1 == v2 && i1 == i2
+eqFishExprSameType (ExprVariable v1) (ExprVariable v2) = v1 == v2
 eqFishExprSameType (ExprStringConcat x1 y1) (ExprStringConcat x2 y2) = x1 == x2 && y1 == y2
 eqFishExprSameType (ExprStringOp o1 a1) (ExprStringOp o2 a2) = o1 == o2 && a1 == a2
-eqFishExprSameType (ExprNumArith op1 l1 r1) (ExprNumArith op2 l2 r2) = op1 == op2 && l1 == l2 && r1 == r2
-eqFishExprSameType (ExprRange a1 b1) (ExprRange a2 b2) = a1 == a2 && b1 == b2
-eqFishExprSameType (ExprBoolExpr b1) (ExprBoolExpr b2) = b1 == b2
-eqFishExprSameType (ExprCommandSubstStr s1) (ExprCommandSubstStr s2) = s1 == s2
+eqFishExprSameType (ExprJoinList a1) (ExprJoinList a2) = eqFishExpr a1 a2
+eqFishExprSameType (ExprMath xs1) (ExprMath xs2) = xs1 == xs2
 eqFishExprSameType (ExprCommandSubst s1) (ExprCommandSubst s2) = s1 == s2
-eqFishExprSameType (ExprListIndex l1 i1) (ExprListIndex l2 i2) = eqFishExpr l1 l2 && i1 == i2
+eqFishExprSameType (ExprListLiteral s1) (ExprListLiteral s2) = s1 == s2
 eqFishExprSameType (ExprListConcat a1 b1) (ExprListConcat a2 b2) = eqFishExpr a1 a2 && eqFishExpr b1 b2
 eqFishExprSameType (ExprGlob g1) (ExprGlob g2) = g1 == g2
 eqFishExprSameType (ExprProcessSubst s1) (ExprProcessSubst s2) = s1 == s2
 eqFishExprSameType (ExprSpecialVar v1) (ExprSpecialVar v2) = v1 == v2
 eqFishExprSameType _ _ = False
 
--- | Heterogeneous equality check for FishExpr using Typeable
+-- | Heterogeneous equality check for FishExpr using Typeable.
 eqFishExpr :: forall a b. (Typeable a, Typeable b) => FishExpr a -> FishExpr b -> Bool
 eqFishExpr = eqGADT eqFishExprSameType
 
 --------------------------------------------------------------------------------
----- 5. Indexing
+-- | Variables and indexing.
 --------------------------------------------------------------------------------
 
-data FishIndex
-  = SingleIndex (FishExpr TInt)
-  | RangeIndex (FishExpr TInt) (FishExpr TInt)
-  deriving stock (Show, Eq)
+-- | Variable references.
+data FishVarRef (t :: FishType) where
+  VarAll :: Text -> FishVarRef (TList TStr)
+  VarScalar :: Text -> FishVarRef TStr
+  VarIndex :: Text -> FishIndex TStr t -> FishVarRef t
 
---------------------------------------------------------------------------------
----- 6. Numeric & Boolean Sub-AST (Simplified)
---------------------------------------------------------------------------------
+deriving stock instance Show (FishVarRef t)
 
-data ArithOp
-  = OpPlus
-  | OpMinus
-  | OpMultiply
-  | OpDivide
-  | OpModulo
-  deriving stock (Show, Eq)
-
--- Potentially NumExpr could be removed if ExprNumArith handles all cases,
--- but kept for now if direct representation of e.g. `math` expressions is needed.
-data BoolExpr where
-  -- Note: BoolLiteral is now handled by ExprBoolLiteral via ExprBoolExpr
-  BoolAnd :: FishExpr TBool -> FishExpr TBool -> BoolExpr
-  BoolOr :: FishExpr TBool -> FishExpr TBool -> BoolExpr
-  BoolNot :: FishExpr TBool -> BoolExpr
-  BoolTestOp ::
-    (Typeable a, Typeable b) =>
-    TestOperator ->
-    FishExpr a -> -- Changed from FishArg
-    FishExpr b -> -- Changed from FishArg
-    BoolExpr
-  BoolCommand :: FishCommand TStatus -> BoolExpr
-
-deriving stock instance Show BoolExpr
-
-instance Eq BoolExpr where
-  BoolAnd a1 b1 == BoolAnd a2 b2 = eqFishExpr a1 a2 && eqFishExpr b1 b2
-  BoolOr a1 b1 == BoolOr a2 b2 = eqFishExpr a1 a2 && eqFishExpr b1 b2
-  BoolNot x1 == BoolNot x2 = eqFishExpr x1 x2
-  BoolTestOp op1 x1 y1 == BoolTestOp op2 x2 y2 =
-      op1 == op2 && eqFishExpr x1 x2 && eqFishExpr y1 y2
-  BoolCommand c1 == BoolCommand c2 = c1 == c2
+instance Eq (FishVarRef t) where
+  VarAll a == VarAll b = a == b
+  VarScalar a == VarScalar b = a == b
+  VarIndex a i == VarIndex b j = a == b && i == j
   _ == _ = False
 
+-- | Indexing into a list (supports ranges and index lists).
+data FishIndex (a :: FishType) (b :: FishType) where
+  IndexSingle :: FishExpr TInt -> FishIndex a a
+  IndexRange :: Maybe (FishExpr TInt) -> Maybe (FishExpr TInt) -> FishIndex a (TList a)
+  IndexList :: NonEmpty (FishExpr TInt) -> FishIndex a (TList a)
+
+deriving stock instance Show (FishIndex a b)
+
+instance Eq (FishIndex a b) where
+  IndexSingle a1 == IndexSingle a2 = a1 == a2
+  IndexRange s1 e1 == IndexRange s2 e2 = s1 == s2 && e1 == e2
+  IndexList xs1 == IndexList xs2 = xs1 == xs2
+  _ == _ = False
 
 --------------------------------------------------------------------------------
----- 7. Function-Related Types
+-- | Function definitions and flags.
 --------------------------------------------------------------------------------
 
+-- | Function flags accepted by `function`.
 data FunctionFlag
   = FuncDescription Text
   | FuncOnEvent Text
+  | FuncOnVariable Text
+  | FuncOnJobExit Text
+  | FuncOnProcessExit Text
+  | FuncWraps Text
   | FuncHelp
   | FuncInheritVariable
   | FuncUnknownFlag Text
   deriving stock (Show, Eq)
 
+-- | Function definition.
 data FishFunction = FishFunction
   { funcName :: Text,
     funcFlags :: [FunctionFlag],
-    funcParams :: [FishExpr TStr], -- Changed from FishArg
-    funcBody :: NonEmpty FishStatement -- Changed to NonEmpty
+    funcParams :: [Text],
+    funcBody :: NonEmpty FishStatement
   }
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 8. Variable Scopes for 'set'
+-- | Flags accepted by `set`.
 --------------------------------------------------------------------------------
 
-data VariableScope
-  = ScopeLocal
-  | ScopeGlobal
-  | ScopeExported
-  | ScopeUniversal
+data SetFlag
+  = SetLocal
+  | SetGlobal
+  | SetUniversal
+  | SetExport
+  | SetUnexport
+  | SetAppend
+  | SetPrepend
+  | SetErase
+  | SetPath
+  | SetQuery
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- 9. Job Control
+-- | Job model (pipelines and conjunctions).
 --------------------------------------------------------------------------------
 
-
-
---------------------------------------------------------------------------------
----- 9b. Job Model (Fish semantics)
---------------------------------------------------------------------------------
-
--- Variable assignment like FOO=bar, attached to a job or continuation
+-- | Variable assignment attached to a job or continuation.
 data VariableAssignment = VariableAssignment
   { vaName :: Text,
     vaValue :: Maybe (FishExpr TStr)
   }
   deriving stock (Show, Eq)
 
--- Pipeline continuation: `|` followed by variables and a statement
+-- | Pipeline continuation: `|` followed by variables and a statement.
 data JobPipeCont = PipeTo
   { jpcVariables :: [VariableAssignment]
   , jpcStatement :: FishStatement
   }
   deriving stock (Show, Eq)
 
--- Pipeline: optional `time`, variables, a statement, continuations, and optional background `&`
+-- | Pipeline with optional `time`, leading variables, and backgrounding.
 data FishJobPipeline = FishJobPipeline
   { jpTime :: Bool
   , jpVariables :: [VariableAssignment]
@@ -450,87 +398,102 @@ data FishJobPipeline = FishJobPipeline
   }
   deriving stock (Show, Eq)
 
--- Conjunction keywords used by fish: `and` / `or`
+-- | Conjunction keywords used by fish: `and` / `or`.
 data Conjunction
   = ConjAnd
   | ConjOr
   deriving stock (Show, Eq)
 
--- Conjunction continuation: `and job` or `or job`
+-- | Conjunction continuation: `and job` or `or job`.
 data FishJobConjCont
   = JCAnd FishJobPipeline
   | JCOr FishJobPipeline
   deriving stock (Show, Eq)
 
--- A job conjunction consisting of an optional leading decorator, a job, and continuations
+-- | A job conjunction consisting of an optional leading decorator and continuations.
 data FishJobConjunction = FishJobConjunction
   { jcDecorator :: Maybe Conjunction,
     jcJob :: FishJobPipeline,
-    jcContinuations :: [FishJobConjCont],
-    jcSemiNl :: Bool
+    jcContinuations :: [FishJobConjCont]
   }
   deriving stock (Show, Eq)
 
+-- | A list of job conjunctions (used for if/while conditions).
+newtype FishJobList = FishJobList (NonEmpty FishJobConjunction)
+  deriving stock (Show, Eq)
+
 --------------------------------------------------------------------------------
----- 10. Case Items, Redirection, Etc.
+-- | Case items and redirections.
 --------------------------------------------------------------------------------
 
+-- | A switch case item with one or more patterns and a body.
 data CaseItem = CaseItem
-  { casePatterns :: NonEmpty (FishExpr TStr), -- Changed from FishArg, NonEmpty
-    caseBody :: NonEmpty FishStatement -- Changed to NonEmpty
+  { casePatterns :: NonEmpty (FishExpr TStr),
+    caseBody :: NonEmpty FishStatement
   }
   deriving stock (Show, Eq)
 
--- Represents arguments passed directly on the command line perhaps?
-newtype FreestandingArgumentList = FreestandingArgumentList [FishExpr TStr] -- Changed from FishArg
+-- | Detailed redirection model.
+data Redirect = Redirect
+  { redirSource :: RedirectSource
+  , redirOp :: RedirectOp
+  , redirTarget :: RedirectTarget
+  }
   deriving stock (Show, Eq)
 
+-- | Redirection source.
+data RedirectSource
+  = RedirectStdout
+  | RedirectStderr
+  | RedirectStdin
+  | RedirectBoth
+  | RedirectFD Int
+  deriving stock (Show, Eq)
+
+-- | Redirection operator.
 data RedirectOp
-  = RedirectOut -- >
-  | RedirectOutAppend -- >>
-  | RedirectIn -- <
-  | RedirectErr -- 2>
-  | RedirectErrAppend -- 2>>
-  | RedirectBoth -- &>
-  | RedirectBothAppend -- &>>
+  = RedirectOut
+  | RedirectOutAppend
+  | RedirectIn
+  | RedirectClobber
+  | RedirectReadWrite
   deriving stock (Show, Eq)
 
+-- | Redirection target.
+data RedirectTarget
+  = RedirectFile (FishExpr TStr)
+  | RedirectTargetFD Int
+  | RedirectClose
+  deriving stock (Show, Eq)
+
+-- | Command decoration (`builtin`, `command`, `exec`).
 data Decoration
   = DecBuiltin
   | DecCommand
   | DecExec
   deriving stock (Show, Eq)
 
-data TestOperator
-  = Eq -- = (numeric/string)
-  | Neq -- != (numeric/string)
-  | Gt -- > (numeric)
-  | Lt -- < (numeric)
-  | Ge -- >= (numeric)
-  | Le -- <= (numeric)
-  | IsFile -- -f
-  | IsDir -- -d
-  | IsSymlink -- -h / -L
-  | Exists -- -e
-  | IsReadable -- -r
-  | IsWritable -- -w
-  | IsExecutable -- -x
-  | IsEmpty -- -z (string)
-  | NotEmpty -- -n (string)
-  deriving stock (Show, Eq)
-
 --------------------------------------------------------------------------------
----- 11. Source Tracking
+-- | Source tracking.
 --------------------------------------------------------------------------------
 
-data SourceRange = SourceRange
-  { startPos :: Int,
-    endPos :: Int
+-- | A source position in an input file (1-based line/column).
+data SourcePos = SourcePos
+  { srcFile :: Text,
+    srcLine :: Int,
+    srcColumn :: Int
   }
-  deriving stock (Show, Eq)
+  deriving stock (Show, Eq, Ord)
+
+-- | A source range with start and end positions.
+data SourceRange = SourceRange
+  { rangeStart :: SourcePos,
+    rangeEnd :: SourcePos
+  }
+  deriving stock (Show, Eq, Ord)
 
 --------------------------------------------------------------------------------
----- Equality Helper for GADTs
+-- | Equality helper for GADTs.
 --------------------------------------------------------------------------------
 
 eqGADT ::
@@ -546,7 +509,7 @@ eqGADT eqSameType left right =
     Nothing -> False
 
 --------------------------------------------------------------------------------
----- Type synonyms (Updated)
+-- | Type synonyms for convenience.
 --------------------------------------------------------------------------------
 
 type CmdStr = FishCommand TStr
@@ -560,14 +523,15 @@ type ExprStr = FishExpr TStr
 type ExprInt = FishExpr TInt
 type ExprBool = FishExpr TBool
 type ExprList a = FishExpr (TList a)
-type ExprStatus = FishExpr TStatus -- Usually via ExprSubstituted
-type ExprUnit = FishExpr TUnit -- Less common, maybe via ExprSubstituted
+type ExprStatus = FishExpr TStatus
+
+type ExprUnit = FishExpr TUnit
 
 --------------------------------------------------------------------------------
----- 11. Special variables, glob patterns, string ops, read flags
+-- | Special variables, glob patterns, string ops, and read flags.
 --------------------------------------------------------------------------------
 
--- Typed special variables available in fish
+-- | Typed special variables available in fish.
 data SpecialVarRef (t :: FishType) where
   SVStatus :: SpecialVarRef TInt
   SVPipestatus :: SpecialVarRef (TList TInt)
@@ -593,26 +557,34 @@ instance Eq (SpecialVarRef t) where
   SVPWD == SVPWD = True
   _ == _ = False
 
-data GlobPattern
-  = GlobStar           -- *
-  | GlobStarStar       -- ** (recursive)
-  | GlobQuestion       -- ?
-  | GlobBraces [Text]  -- {a,b,c}
-  | GlobComposite [GlobPattern]
+-- | A glob pattern composed of parts.
+newtype GlobPattern = GlobPattern [GlobPart]
   deriving stock (Show, Eq)
 
+-- | A component of a glob pattern.
+data GlobPart
+  = GlobLiteral Text
+  | GlobStar
+  | GlobStarStar
+  | GlobQuestion
+  | GlobCharClass Text
+  | GlobBraces (NonEmpty Text)
+  deriving stock (Show, Eq)
+
+-- | String operations used by `string`.
 data StringOp
   = StrLength
   | StrLower
   | StrUpper
   | StrEscape
   | StrUnescape
-  | StrSplit Text  -- split by delimiter
-  | StrJoin Text   -- join with delimiter
-  | StrReplace Text Text  -- replace old new
-  | StrMatch Text  -- match against pattern
+  | StrSplit Text
+  | StrJoin Text
+  | StrReplace Text Text
+  | StrMatch Text
   deriving stock (Show, Eq)
 
+-- | Flags for the `read` builtin.
 data ReadFlag
   = ReadPrompt Text
   | ReadLocal
@@ -623,97 +595,99 @@ data ReadFlag
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
----- Example AST (Updated)
+-- | Example AST.
 --------------------------------------------------------------------------------
 
 exampleAST :: [FishStatement]
 exampleAST =
-  [ -- 1) A comment
-    Comment "Example test script",
+  [ Comment "Example test script"
 
-    -- 2) A simple command: echo "Hello Fish!"
-    Stmt $
-      Command "echo" [ExprVal (ExprLiteral "Hello Fish!")],
+  , Stmt (Command "echo" [ExprVal (ExprLiteral "Hello Fish!")])
 
-    -- 3) An if-statement
-    Stmt $
-      If
-        (ExprBoolLiteral True)
-        (Stmt (Command "echo" [ExprVal (ExprLiteral "In the if!")]) :| [])
-        [Stmt (Command "echo" [ExprVal (ExprLiteral "In the else!")])], -- Else can be empty list
+  , Stmt
+      ( If
+          (FishJobList (FishJobConjunction Nothing (FishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] :| []))
+          (Stmt (Command "echo" [ExprVal (ExprLiteral "In the if!")]) :| [])
+          [Stmt (Command "echo" [ExprVal (ExprLiteral "In the else!")])]
+          []
+      )
 
-    -- 4) A function definition
-    Stmt $
-      Function $
-        FishFunction
-          { funcName = "greet",
-            funcFlags = [],
-            funcParams = [ExprLiteral "name"], -- function greet name
-            funcBody =
-              Stmt (
-                Command "echo"
-                  [ ExprVal (ExprLiteral "Hello,"),
-                    ExprVal (ExprVariable @TStr "name" Nothing) -- Explicit type application
+  , Stmt
+      ( Function
+          FishFunction
+            { funcName = "greet"
+            , funcFlags = []
+            , funcParams = ["name"]
+            , funcBody =
+                Stmt
+                  ( Command "echo"
+                      [ ExprVal (ExprLiteral "Hello,")
+                      , ExprVal (ExprVariable (VarIndex "name" (IndexSingle (ExprNumLiteral 1))))
+                      ]
+                  ) :| []
+            }
+      )
+
+  , Stmt
+      ( For
+          "x"
+          (ExprListLiteral [ExprLiteral "1", ExprLiteral "2", ExprLiteral "3"])
+          ( Stmt
+              ( Command "echo"
+                  [ ExprVal (ExprLiteral "Number:")
+                  , ExprVal (ExprVariable (VarAll "x"))
                   ]
               ) :| []
-          },
+          )
+          []
+      )
 
-    -- 5a) A for-loop over literals
-    Stmt $
-      For
-        "x"
-        (ExprLiteral "1" :| [ExprLiteral "2", ExprLiteral "3"])
-        ( Stmt (
-            Command "echo"
-              [ ExprVal (ExprLiteral "Number:"),
-                ExprVal (ExprVariable @TStr "x" Nothing)
-              ]
-          ) :| []
-        ),
+  , Stmt
+      ( For
+          "x"
+          (ExprListConcat
+            (ExprVariable (VarAll "var1"))
+            (ExprListConcat (ExprVariable (VarAll "var2")) (ExprVariable (VarAll "var3"))))
+          ( Stmt
+              ( Command "echo"
+                  [ ExprVal (ExprLiteral "Variable:")
+                  , ExprVal (ExprVariable (VarAll "x"))
+                  ]
+              ) :| []
+          )
+          []
+      )
 
-    SemiNl,
+  , Stmt
+      ( Pipeline
+          FishJobPipeline
+            { jpTime = False
+            , jpVariables = []
+            , jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "something")])
+            , jpCont = [PipeTo { jpcVariables = [], jpcStatement = Stmt (Command "wc" [ExprVal (ExprLiteral "-l")]) }]
+            , jpBackgrounded = False
+            }
+      )
 
-    -- 5b) A for-loop over variables
-    Stmt $
-      For
-        "x"
-        ( ExprVariable @TStr "var1" Nothing
-          :| [ ExprVariable @TStr "var2" Nothing
-             , ExprVariable @TStr "var3" Nothing
+  , Stmt
+      ( Switch
+          (ExprJoinList (ExprVariable (VarAll "myvar")))
+          ( CaseItem
+              { casePatterns = ExprLiteral "foo" :| []
+              , caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was foo")]) :| []
+              }
+          :| [ CaseItem
+                { casePatterns = ExprLiteral "bar" :| [ExprLiteral "baz"]
+                , caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was bar or baz")]) :| []
+                }
              ]
-        )
-        ( Stmt (
-            Command "echo"
-              [ ExprVal (ExprLiteral "Variable:"),
-                ExprVal (ExprVariable @TStr "x" Nothing)
-              ]
-          ) :| []
-        ),
+          )
+          []
+      )
 
-    -- 6) A pipeline of commands
-    Stmt $
-      Pipeline $
-        FishJobPipeline
-          { jpTime = False
-          , jpVariables = []
-          , jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "something")])
-          , jpCont = [PipeTo { jpcVariables = [], jpcStatement = Stmt (Command "wc" [ExprVal (ExprLiteral "-l")]) }]
-          , jpBackgrounded = False
-          },
-
-    -- 7) A switch statement
-    Stmt $
-      Switch
-        (ExprVariable @TStr "myvar" Nothing)
-        ( CaseItem
-            { casePatterns = ExprLiteral "foo" :| [],
-              caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was foo")]) :| []
-            }
-        :| [ CaseItem
-            { casePatterns = ExprLiteral "bar" :| [ExprLiteral "baz"], -- Multiple patterns
-              caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was bar or baz")]) :| []
-            }
-           ]
-        )
-  , BraceStmt (Stmt (Command "echo" [ExprVal (ExprLiteral "brace body")]) :| []) [RedirectVal RedirectOut (ExprLiteral "/dev/null")]
+  , Stmt
+      ( Begin
+          (Stmt (Command "echo" [ExprVal (ExprLiteral "brace body")]) :| [])
+          [RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))]
+      )
   ]

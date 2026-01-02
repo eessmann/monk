@@ -53,13 +53,14 @@ parseBashScript fileName scriptText = do
 --   or the successful 'ParseResult'.
 parseBashFile :: FilePath -> IO (Either [PositionedComment] ParseResult)
 parseBashFile filePath = do
-  scriptTextOrErr <- tryAny (readFile filePath)
+  scriptTextOrErr <- tryAny (readFileBS filePath)
   case scriptTextOrErr of
     Left ex ->
       -- I/O error: wrap it in a synthetic "PositionedComment".
       pure $ Left [fakeComment (toText (displayException ex))]
-    Right scriptText -> do
-      parseResult <- parseBashScript filePath (toText scriptText)
+    Right scriptBytes -> do
+      let scriptText = decodeUtf8 scriptBytes
+      parseResult <- parseBashScript filePath scriptText
       if isJust (prRoot parseResult)
         then pure (Right parseResult)
         else pure (Left (prComments parseResult))
