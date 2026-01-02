@@ -14,8 +14,8 @@ module Language.Fish.Translator.Variables
   ) where
 
 import qualified Data.List.NonEmpty as NE
-import qualified Data.Text as T
 import Data.Char (isAlpha, isAlphaNum, isDigit, isSpace)
+import qualified Data.Text as T
 import Language.Fish.AST
 import ShellCheck.AST
 import ShellCheck.ASTLib (getBracedModifier, getBracedReference, getLiteralStringDef, oversimplify)

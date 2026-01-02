@@ -4,12 +4,12 @@
 
 module Main (main) where
 
-import Control.Monad (foldM, forM_, unless, when)
+import Control.Monad (foldM)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
 import qualified Data.Text as T
-import Data.Foldable (toList)
+import qualified GHC.Show as GHC
 import Monk
 import Options.Applicative
 import ShellCheck.AST (Token(..), pattern T_SourceCommand, pattern T_SimpleCommand)
@@ -17,7 +17,7 @@ import ShellCheck.ASTLib (getLiteralStringDef)
 import ShellCheck.Interface (ParseResult(..), PositionedComment(..), Position(..))
 import System.Directory (canonicalizePath, doesFileExist)
 import System.FilePath (isRelative, replaceExtension, takeDirectory, (</>))
-import System.IO (hPutStrLn, stderr)
+import System.IO (hPutStrLn)
 
 data SourceMode
   = SourceInline
@@ -398,7 +398,7 @@ renderParseComment :: PositionedComment -> Text
 renderParseComment pc =
   let pos = pcStartPos pc
       loc = formatPosition pos
-  in loc <> ": " <> toText (show (pcComment pc))
+  in loc <> ": " <> toText (GHC.show (pcComment pc))
 
 formatPosition :: Position -> Text
 formatPosition pos =

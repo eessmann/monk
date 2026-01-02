@@ -20,8 +20,9 @@ module Language.Fish.Translator.Commands
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Data.Char (isAlpha, isAlphaNum, isDigit)
+import Data.Char (isDigit)
 import Language.Fish.AST
+import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Redirections (parseRedirectTokens)
 import ShellCheck.AST
@@ -104,14 +105,6 @@ looksLikeAssignment txt =
     (lhs, _) ->
       let base = T.takeWhile (/= '[') lhs
       in isValidVarName base
-
-isValidVarName :: Text -> Bool
-isValidVarName name =
-  case T.uncons name of
-    Just (c, rest) | isAlpha c || c == '_' -> T.all isIdentChar rest
-    _ -> False
-  where
-    isIdentChar ch = isAlphaNum ch || ch == '_'
 
 --------------------------------------------------------------------------------
 -- Command translation & builtins

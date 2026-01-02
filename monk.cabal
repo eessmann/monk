@@ -1,6 +1,6 @@
 cabal-version:       3.14
 name:                monk
-version:             0.2.0
+version:             0.2.1
 synopsis:            Translate Bash scripts to Fish shell scripts.
 description:
     Monk translates shell scripts (Bash, etc.) into fish-shell code.
@@ -72,10 +72,13 @@ library
   other-modules:       Language.Fish.AST
                      , Language.Fish.Pretty
                      , Language.Fish.Translator
+                     , Language.Fish.Translator.Builtins
                      , Language.Fish.Translator.Monad
+                     , Language.Fish.Translator.Names
                      , Language.Fish.Translator.Variables
                      , Language.Fish.Translator.Commands
                      , Language.Fish.Translator.Control
+                     , Language.Fish.Translator.ForArithmetic
                      , Language.Fish.Translator.IO
                      , Language.Fish.Translator.Redirections
                      , Language.Bash.Parser
