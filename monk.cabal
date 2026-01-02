@@ -85,6 +85,10 @@ executable monk
   hs-source-dirs:      app
   main-is:             Main.hs
   build-depends:       monk
+                     , optparse-applicative ^>= 0.19
+                     , containers
+                     , directory
+                     , filepath
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N

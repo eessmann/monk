@@ -34,6 +34,7 @@ import Language.Fish.Translator.Monad
   , TranslationContext(..)
   , runTranslateWithPositions
   , addWarning
+  , unsupportedStmt
   , addLocalVars
   , withTokenRange
   )
@@ -97,6 +98,9 @@ translateToken token =
           (cmdTok:args)
             | tokenToLiteralText cmdTok == "shift" ->
                 translateShiftCommand args
+          (cmdTok:args)
+            | tokenToLiteralText cmdTok == "unset" ->
+                translateUnsetCommand args
           (cmdTok:args)
             | tokenToLiteralText cmdTok == "trap" ->
                 translateTrapCommand args
@@ -185,14 +189,15 @@ translateToken token =
 
       T_CaseExpression _ switchExpr cases -> Control.translateCaseExpression translateToken switchExpr cases
 
-      T_CoProc {} -> pure (Comment "Unsupported: Coprocess (coproc)")
+      T_CoProc {} -> unsupportedStmt "Coprocess (coproc)"
+      T_CoProcBody {} -> unsupportedStmt "Coprocess body (coproc)"
 
       T_Redirecting _ redirs cmd -> do
         let redirExprs = mapMaybe translateRedirectToken redirs
         translated <- translateToken cmd
         pure (attachRedirs redirExprs translated)
 
-      _ -> pure (Comment ("Skipped token at statement level: " <> T.pack (show token)))
+      _ -> unsupportedStmt ("Skipped token at statement level: " <> T.pack (show token))
 
 wrapStmtList :: [FishStatement] -> FishStatement
 wrapStmtList [stmt] = stmt
@@ -357,6 +362,39 @@ parseShiftCount tok =
   case tok of
     T_Literal _ s -> readMaybe (toString (toText s))
     _ -> readMaybe (toString (tokenToLiteralText tok))
+
+data UnsetMode
+  = UnsetVar
+  | UnsetFunc
+  deriving stock (Show, Eq)
+
+translateUnsetCommand :: [Token] -> TranslateM FishStatement
+translateUnsetCommand args = do
+  stmts <- go UnsetVar [] args
+  pure $ case stmts of
+    [] -> Comment "Skipped unset with no arguments"
+    _ -> wrapStmtList stmts
+  where
+    go _ acc [] = pure (reverse acc)
+    go mode acc (tok:rest) =
+      let txt = tokenToLiteralText tok
+      in if T.isPrefixOf "-" txt
+           then case txt of
+             "-f" -> go UnsetFunc acc rest
+             "-v" -> go UnsetVar acc rest
+             "--" -> go mode acc rest
+             _ -> do
+               addWarning ("Unsupported unset flag: " <> txt)
+               go mode acc rest
+           else if T.null txt
+             then do
+               addWarning "Unsupported unset argument: empty name"
+               go mode acc rest
+             else do
+               let stmt = case mode of
+                     UnsetFunc -> Stmt (Command "functions" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
+                     UnsetVar -> Stmt (Command "set" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
+               go mode (stmt : acc) rest
 
 translateTrapCommand :: [Token] -> TranslateM FishStatement
 translateTrapCommand args =

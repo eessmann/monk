@@ -15,11 +15,12 @@ module Language.Fish.Translator.Commands
   , isSingleBracketTest
   , toNonEmptyStmtList
   , concatWithSpaces
+  , stripTimePrefix
   ) where
 
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Text as T
-import Data.Char (isAlpha, isAlphaNum)
+import Data.Char (isAlpha, isAlphaNum, isDigit)
 import Language.Fish.AST
 import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Redirections (parseRedirectTokens)
@@ -127,20 +128,43 @@ translateCommandTokens cmdTokens =
           fallback = Command name (argExprs ++ redirs)
       in if T.null name
            then Nothing
-           else Just $ if null redirs
-             then case isSingleBracketTest c plainArgs of
-               Just testCmd -> testCmd
-               Nothing -> case isDoubleBracketTest c plainArgs of
-                 Just testCmd -> testCmd
-                 Nothing -> case T.unpack name of
-                   "exit" -> translateExit plainArgs
-                   "source" -> translateSource plainArgs
-                   "." -> translateSource plainArgs
-                   "eval" -> translateEval plainArgs
-                   "exec" -> translateExec plainArgs
-                   "read" -> translateRead plainArgs
-                   _ -> Command name argExprs
-             else fallback
+           else case translateTimeReserved name plainArgs of
+             Just timedCmd -> Just timedCmd
+             Nothing ->
+               Just $ if null redirs
+                 then case isSingleBracketTest c plainArgs of
+                   Just testCmd -> testCmd
+                   Nothing -> case isDoubleBracketTest c plainArgs of
+                     Just testCmd -> testCmd
+                     Nothing -> case T.unpack name of
+                       "exit" -> translateExit plainArgs
+                       "source" -> translateSource plainArgs
+                       "." -> translateSource plainArgs
+                       "eval" -> translateEval plainArgs
+                       "exec" -> translateExec plainArgs
+                       "read" -> translateRead plainArgs
+                       _ -> Command name argExprs
+                 else fallback
+
+translateTimeReserved :: Text -> [Token] -> Maybe (FishCommand TStatus)
+translateTimeReserved name args
+  | name /= "time" = Nothing
+  | otherwise = case args of
+      [tok] -> translateTimedToken tok
+      _ -> Nothing
+  where
+    translateTimedToken tok =
+      case tok of
+        T_Pipeline _ bang cmds -> Just (timedPipeline bang cmds)
+        T_Redirecting _ _ inner -> translateTimedToken inner
+        _ -> Nothing
+
+    timedPipeline bang cmds =
+      case mapMaybe translateTokenToMaybeStatusCmd cmds of
+        [] -> Command "true" []
+        (c:cs) ->
+          let pipe = Pipeline (jobPipelineFromListWithTime True (c:cs))
+          in if null bang then pipe else Not pipe
 
 -- exit [n]
 translateExit :: [Token] -> FishCommand TStatus
@@ -150,8 +174,6 @@ translateExit [t] =
     txt | T.all isDigit txt && not (T.null txt)
         , Just n <- readMaybe (T.unpack txt) -> Exit (Just (ExprNumLiteral n))
         | otherwise -> Command "exit" [translateTokenToExprOrRedirect t]
-  where
-    isDigit = (\c -> c >= '0' && c <= '9')
 translateExit ts = Command "exit" (map translateTokenToExprOrRedirect ts)
 
 -- source FILE
@@ -322,10 +344,11 @@ translateCommandTokensToStatus assignments cmdTokens = fromMaybe (Command "true"
 -- Placeholder to break the import cycle; IO will override via qualified import
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translatePipelineToStatus bang cmds =
-  case mapMaybe translateTokenToMaybeStatusCmd cmds of
+  let (timed, cmds') = stripTimePrefix cmds
+  in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
     [] -> Command "true" []
     (c:cs) ->
-      let pipe = Pipeline (jobPipelineFromList (c:cs))
+      let pipe = Pipeline (jobPipelineFromListWithTime timed (c:cs))
       in if null bang then pipe else Not pipe
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
@@ -345,11 +368,11 @@ translateTokenToMaybeStatusCmd token =
        in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
     _ -> Nothing
 
-jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
-jobPipelineFromList [] = pipelineOf (Command "true" [])
-jobPipelineFromList (c:cs) =
+jobPipelineFromListWithTime :: Bool -> [FishCommand TStatus] -> FishJobPipeline
+jobPipelineFromListWithTime _ [] = pipelineOf (Command "true" [])
+jobPipelineFromListWithTime timed (c:cs) =
   FishJobPipeline
-    { jpTime = False
+    { jpTime = timed
     , jpVariables = []
     , jpStatement = Stmt c
     , jpCont = map (\cmd -> PipeTo { jpcVariables = [], jpcStatement = Stmt cmd }) cs
@@ -359,3 +382,19 @@ jobPipelineFromList (c:cs) =
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
   FishJobPipeline { jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False }
+
+stripTimePrefix :: [Token] -> (Bool, [Token])
+stripTimePrefix cmds =
+  case cmds of
+    (T_SimpleCommand tokId assignments (cmdTok:rest) : xs)
+      | tokenToLiteralText cmdTok == "time"
+      , not (null rest) ->
+          case rest of
+            (arg1:_)
+              | isTimeOption arg1 -> (False, cmds)
+            _ -> (True, T_SimpleCommand tokId assignments rest : xs)
+    _ -> (False, cmds)
+  where
+    isTimeOption tok =
+      let txt = tokenToLiteralText tok
+      in T.isPrefixOf "-" txt

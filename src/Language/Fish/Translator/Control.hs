@@ -13,7 +13,6 @@ module Language.Fish.Translator.Control
   ) where
 
 import qualified Data.List.NonEmpty as NE
-import Data.List (foldl')
 import qualified Data.Text as T
 import Language.Fish.AST
 import Language.Fish.Translator.Variables

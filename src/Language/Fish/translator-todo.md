@@ -8,7 +8,7 @@
   - [x] Define TranslateError for unsupported constructs
   - [x] Add TranslateConfig for user options
 - [x] Add source location preservation from ShellCheck AST
-- [ ] Implement error recovery and warning accumulation
+- [x] Implement error recovery and warning accumulation
 
 ### Missing Core Constructs
 - [x] Handle `T_DollarBraced` parameter expansions
@@ -72,11 +72,11 @@
 - [x] Glob patterns (`T_Glob`): Translate glob syntax differences
 - [ ] Command substitution variations
   - [x] Backticks: `` `cmd` `` → `(cmd)`
-  - [ ] Nested substitutions
+  - [x] Nested substitutions
 
 ### Bash Built-ins
-- [ ] Map bash built-ins to Fish equivalents
-  - [ ] `pushd`/`popd` → Fish has these
+- [x] Map bash built-ins to Fish equivalents
+  - [x] `pushd`/`popd` → Fish has these
   - [x] `declare` → `set` with appropriate flags
   - [x] `readonly` → No direct equivalent
   - [x] `shift` → `set argv $argv[2..-1]`
@@ -158,19 +158,17 @@
 ## ✅ Quick Wins (Can do immediately)
 
 - [x] Fix `translateExit` to handle non-numeric arguments
-- [ ] Add `T_Glob` basic handling
+- [x] Add `T_Glob` basic handling
 - [x] Implement `T_HereString`: `<<<` → echo piping
-- [ ] Handle `time` command prefix
-- [ ] Add `T_CoProcBody` with warning (not supported in Fish)
-- [ ] Improve error messages from generic "Skipped token"
+- [x] Handle `time` command prefix
+- [x] Add `T_CoProcBody` with warning (not supported in Fish)
+- [x] Improve error messages from generic "Skipped token"
 
 ## ▶ Next Up (Recommended Order)
 
-1. **Error recovery + strict mode**
-   - Accumulate warnings, surface `Unsupported` in strict mode.
-2. **Built-in mapping**
-   - `declare`, `readonly`, `shift`, and other bash built-ins.
-3. **Nested command substitutions**
-   - Ensure nested `$(...)` and backticks translate fully.
-4. **Output-equivalence property tests**
+1. **Output-equivalence property tests**
    - Property: translated script output ≈ original script output.
+2. **Built-in parity checks**
+   - Validate `pushd`/`popd` and `time` semantics with real scripts.
+3. **User experience polish**
+   - Add confidence scores and improve translation notes.

@@ -8,6 +8,7 @@ import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import qualified Data.Text as T
 import TestSupport
+import Monk (parseBashScript, translateParseResult, strictConfig)
 
 unitTranslationTests :: TestTree
 unitTranslationTests = testGroup "Translation"
@@ -15,6 +16,10 @@ unitTranslationTests = testGroup "Translation"
       out <- translateScript "echo hi > >(cat)"
       T.isInfixOf "mkfifo" out H.@? "expected mkfifo in translation"
       T.isInfixOf "__monk_psub_fifo" out H.@? "expected fifo var name in translation"
+
+  , H.testCase "Process substitution input uses psub" $ do
+      out <- translateScript "cat <(echo 123)"
+      T.isInfixOf "psub" out H.@? "expected psub for input process substitution"
 
   , H.testCase "Unsupported extglob uses bash shim" $ do
       out <- translateScript "echo !(foo|bar)"
@@ -29,6 +34,53 @@ unitTranslationTests = testGroup "Translation"
   , H.testCase "Declare export maps to set --global --export" $ do
       out <- translateScript "declare -x FOO=bar"
       out @?= "set --global --export FOO 'bar'"
+
+  , H.testCase "Default expansion uses set -q for unset" $ do
+      out <- translateScript "echo ${JAVA_HOME-}"
+      T.isInfixOf "set '-q' 'JAVA_HOME'" out H.@? "expected set -q for default expansion"
+
+  , H.testCase "Alternate expansion uses test -n" $ do
+      out <- translateScript "echo ${NIX_PATH:+:$NIX_PATH}"
+      T.isInfixOf "set '-q' 'NIX_PATH'" out H.@? "expected set -q for alternate expansion"
+      T.isInfixOf "test '-n'" out H.@? "expected test -n for non-empty check"
+
+  , H.testCase "Length expansion for argv uses count" $ do
+      out <- translateScript "echo ${#@}"
+      T.isInfixOf "count $argv" out H.@? "expected count for argv length"
+
+  , H.testCase "Length expansion for arrays uses count" $ do
+      out <- translateScript "echo ${#arr[@]}"
+      T.isInfixOf "count $arr" out H.@? "expected count for array length"
+
+  , H.testCase "Unset functions and variables translate to functions -e / set -e" $ do
+      out <- translateScript "unset -f foo -v bar"
+      out @?= "functions '-e' 'foo'\nset '-e' 'bar'"
+
+  , H.testCase "Unset variable without flags maps to set -e" $ do
+      out <- translateScript "unset ASPELL_CONF"
+      out @?= "set '-e' 'ASPELL_CONF'"
+
+  , H.testCase "Hash in word is preserved" $ do
+      out <- translateScript "a=nixpkgs\nnix run $a#hello"
+      T.isInfixOf "set --global a 'nixpkgs'" out H.@? "expected assignment translation"
+      T.isInfixOf "string join ' ' $a" out H.@? "expected variable join in word"
+      T.isInfixOf "#hello" out H.@? "expected hash in word preserved"
+
+  , H.testCase "Pushd and popd pass through" $ do
+      outPushd <- translateScript "pushd /tmp"
+      outPopd <- translateScript "popd"
+      outPushd @?= "pushd '/tmp'"
+      outPopd @?= "popd"
+
+  , H.testCase "Nested command substitution translates inner" $ do
+      out <- translateScript "echo $(echo $(echo hi))"
+      out @?= "echo (string join ' ' (echo (string join ' ' (echo 'hi'))))"
+
+  , H.testCase "Strict mode fails on unsupported coproc" $ do
+      result <- parseBashScript "spec.sh" "coproc echo hi"
+      case translateParseResult strictConfig result of
+        Left _ -> pure ()
+        Right _ -> H.assertFailure "expected translation failure in strict mode"
 
   , H.testCase "Array index assignment is 1-based" $ do
       out <- translateScript "arr[0]=foo"
@@ -70,6 +122,18 @@ unitTranslationTests = testGroup "Translation"
       T.isInfixOf "set --global i" out H.@? "expected init set"
       T.isInfixOf "while test" out H.@? "expected while test condition"
       T.isInfixOf "math $i" out H.@? "expected increment math"
+
+  , H.testCase "Until loop negates condition" $ do
+      out <- translateScript "until true; do echo 1; done"
+      T.isInfixOf "while not true" out H.@? "expected while not for until loop"
+
+  , H.testCase "Time prefix is preserved in pipelines" $ do
+      out <- translateScript "time sleep 1"
+      T.isInfixOf "time sleep" out H.@? "expected time prefix in output"
+
+  , H.testCase "Pipeline to source stays piped" $ do
+      out <- translateScript "echo 123 | source"
+      T.isInfixOf "| source" out H.@? "expected pipeline to source"
 
   , H.testCase "Double bracket pattern match uses string match -q" $ do
       out <- translateScript "if [[ $x == foo* ]]; then echo ok; fi"

@@ -10,7 +10,11 @@ module Language.Fish.Translator.IO
   ) where
 
 import Language.Fish.AST
-import Language.Fish.Translator.Commands (translateCommandTokensToStatus, translateTokenToStatusCmd)
+import Language.Fish.Translator.Commands
+  ( translateCommandTokensToStatus
+  , translateTokenToStatusCmd
+  , stripTimePrefix
+  )
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------
@@ -22,10 +26,13 @@ pipelineOf cmd =
   FishJobPipeline { jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False }
 
 jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
-jobPipelineFromList [] = pipelineOf (Command "true" [])
-jobPipelineFromList (c:cs) =
+jobPipelineFromList = jobPipelineFromListWithTime False
+
+jobPipelineFromListWithTime :: Bool -> [FishCommand TStatus] -> FishJobPipeline
+jobPipelineFromListWithTime _ [] = pipelineOf (Command "true" [])
+jobPipelineFromListWithTime timed (c:cs) =
   FishJobPipeline
-    { jpTime = False
+    { jpTime = timed
     , jpVariables = []
     , jpStatement = Stmt c
     , jpCont = map (\cmd' -> PipeTo { jpcVariables = [], jpcStatement = Stmt cmd' }) cs
@@ -34,10 +41,11 @@ jobPipelineFromList (c:cs) =
 
 translatePipeline :: [Token] -> [Token] -> FishStatement
 translatePipeline bang cmds =
-  case mapMaybe translateTokenToMaybeStatusCmd cmds of
+  let (timed, cmds') = stripTimePrefix cmds
+  in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
     [] -> Stmt (Command "true" [])
     (c:cs) ->
-      let pipe = Pipeline (jobPipelineFromList (c:cs))
+      let pipe = Pipeline (jobPipelineFromListWithTime timed (c:cs))
        in if null bang then Stmt pipe else Stmt (Not pipe)
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
@@ -59,7 +67,8 @@ translateTokenToMaybeStatusCmd token =
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translatePipelineToStatus bang cmds =
-  case mapMaybe translateTokenToMaybeStatusCmd cmds of
+  let (timed, cmds') = stripTimePrefix cmds
+  in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
     [] -> Command "true" []
-    (c:cs) -> let pipe = Pipeline (jobPipelineFromList (c:cs))
+    (c:cs) -> let pipe = Pipeline (jobPipelineFromListWithTime timed (c:cs))
               in if null bang then pipe else Not pipe

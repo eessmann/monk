@@ -15,6 +15,8 @@ module Language.Fish.Translator.Monad
   , evalTranslate
   , evalTranslateWithPositions
   , addWarning
+  , unsupported
+  , unsupportedStmt
   , withFunctionScope
   , addLocalVars
   , isLocalVar
@@ -23,7 +25,7 @@ module Language.Fish.Translator.Monad
 
 import qualified Data.Map.Strict as M
 import qualified Data.Set as Set
-import Language.Fish.AST (SourcePos(..), SourceRange(..))
+import Language.Fish.AST (FishStatement(..), SourcePos(..), SourceRange(..))
 import ShellCheck.AST (Id, Token, getId)
 import ShellCheck.Interface (Position(..))
 
@@ -105,6 +107,20 @@ addWarning msg = do
   st <- get
   let range = listToMaybe (rangeStack st)
   modify' (\s -> s { warnings = warnings s <> [Warning msg range] })
+
+unsupported :: Text -> TranslateM ()
+unsupported msg = do
+  st <- get
+  let range = listToMaybe (rangeStack st)
+      isStrict = strictMode (config st)
+  if isStrict
+    then lift (Left (Unsupported msg range))
+    else modify' (\s -> s { warnings = warnings s <> [Warning msg range] })
+
+unsupportedStmt :: Text -> TranslateM FishStatement
+unsupportedStmt msg = do
+  unsupported msg
+  pure (Comment ("Unsupported: " <> msg))
 
 withFunctionScope :: TranslateM a -> TranslateM a
 withFunctionScope action = do

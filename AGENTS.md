@@ -5,7 +5,7 @@ Source code lives in `src/` as the `Monk` library and `Language.*` modules for p
 
 ## Build, Test, and Development Commands
 - `cabal build` builds the library and executable.
-- `cabal run monk` runs the CLI (currently reads `test.sh`; adjust `app/Main.hs` for other inputs).
+- `cabal run monk -- path/to/script.sh` runs the CLI.
 - `cabal test` runs the Tasty test suite.
 - `cabal test --enable-coverage` runs tests with coverage.
 - `cabal bench` runs the benchmark target.
@@ -15,7 +15,7 @@ Source code lives in `src/` as the `Monk` library and `Language.*` modules for p
 Use Ormolu formatting (standard 2-space indentation) and keep code aligned with the GHC2024 defaults in `monk.cabal`. Address `hlint` suggestions unless they reduce clarity. Follow existing naming patterns: modules in `PascalCase` file paths (for example, `Language/Fish/Translator.hs`), types and constructors in `UpperCamelCase`, and values in `lowerCamelCase`.
 
 ## Testing Guidelines
-Tests use `tasty`, `tasty-hunit`, and `tasty-quickcheck` with `QuickCheck`. Put unit tests in `test/Spec.hs` and generators in `test/Gen.hs`. When extending translation behavior, add a focused unit test and a property-based test when practical.
+Tests use `tasty`, `tasty-hunit`, and `tasty-quickcheck` with `QuickCheck`. Unit tests live in `test/Unit/*.hs`, property tests in `test/Property/*.hs`, and fixtures under `test/fixtures/`. When extending translation behavior, add a focused unit test and a property-based test when practical.
 
 ## Commit & Pull Request Guidelines
 Commit subjects in history are short, sentence-style summaries (for example, “AST Rework”). Keep subjects concise and descriptive; avoid extra prefixes unless they add clarity. For pull requests, describe behavioral changes, link related issues, and include tests or a short rationale if tests are not added. Provide sample input/output when changing translation logic.

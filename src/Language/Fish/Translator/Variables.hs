@@ -53,18 +53,12 @@ translateTokenToExpr = \case
     ExprJoinList (ExprCommandSubst (Stmt (mathCommandFromToken True exprTok) NE.:| []))
   -- Backticks and $(...) command substitutions
   T_Backticked _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprJoinList (ExprCommandSubst neBody)
-      Nothing     -> ExprLiteral ""
+    commandSubstExprStr stmts
   T_DollarExpansion _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprJoinList (ExprCommandSubst neBody)
-      Nothing     -> ExprLiteral ""
+    commandSubstExprStr stmts
   -- ${ ... $(cmd) ... } style
   T_DollarBraceCommandExpansion _ _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprJoinList (ExprCommandSubst neBody)
-      Nothing     -> ExprLiteral ""
+    commandSubstExprStr stmts
   T_ProcSub _ dir stmts ->
     case NE.nonEmpty (map translateStmt stmts) of
       Just neBody -> procSubExpr dir neBody
@@ -100,17 +94,11 @@ translateTokenToListExpr = \case
   T_Arithmetic _ exprTok ->
     ExprCommandSubst (Stmt (mathCommandFromToken True exprTok) NE.:| [])
   T_Backticked _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprCommandSubst neBody
-      Nothing     -> ExprListLiteral []
+    commandSubstExprList stmts
   T_DollarExpansion _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprCommandSubst neBody
-      Nothing     -> ExprListLiteral []
+    commandSubstExprList stmts
   T_DollarBraceCommandExpansion _ _ stmts ->
-    case NE.nonEmpty (map translateStmt stmts) of
-      Just neBody -> ExprCommandSubst neBody
-      Nothing     -> ExprListLiteral []
+    commandSubstExprList stmts
   T_ProcSub _ dir stmts ->
     case NE.nonEmpty (map translateStmt stmts) of
       Just neBody -> procSubListExpr dir neBody
@@ -118,9 +106,7 @@ translateTokenToListExpr = \case
   T_Array _ elems -> translateArrayElements elems
   other -> ExprListLiteral [ExprLiteral (tokenToLiteralText other)]
   where
-    translateStmt = \t -> case t of
-      T_Script _ _ ts -> StmtList (map translateStmt ts)
-      _               -> Stmt (Command (tokenToLiteralText t) [])
+    translateStmt = translateSubstToken
 
 translateTokenToExprOrRedirect :: Token -> ExprOrRedirect
 translateTokenToExprOrRedirect tok = ExprVal (translateTokenToListExpr tok)
@@ -388,13 +374,13 @@ translateAltExpansionUnset word rest =
   in translateAltExpansionWith varSetCond name altExpr
 
 splitParamOperator :: Token -> Maybe (Text, [Token])
-splitParamOperator (T_NormalWord _ parts) =
+splitParamOperator word@(T_NormalWord _ parts) =
   case break isParamOp parts of
-    (_, []) -> Nothing
+    (_, []) -> splitLiteralOperator word parts
     (_, T_ParamSubSpecialChar _ op : rest) ->
       let opTxt = toText op
       in if opTxt `elem` paramOps then Just (opTxt, rest) else Nothing
-    _ -> Nothing
+    _ -> splitLiteralOperator word parts
   where
     isParamOp (T_ParamSubSpecialChar _ _) = True
     isParamOp _ = False
@@ -408,6 +394,22 @@ splitParamOperator (T_NormalWord _ parts) =
       , ":+"
       , "+"
       ]
+    splitLiteralOperator word' parts' = do
+      name <- paramNameFrom word'
+      (literal, rest) <- case parts' of
+        (T_Literal _ s : xs) -> Just (toText s, xs)
+        _ -> Nothing
+      op <- findOp name literal
+      let prefix = name <> op
+          suffix = T.drop (T.length prefix) literal
+          suffixTokens =
+            if T.null suffix
+              then []
+              else [T_Literal (Id 0) (toString suffix)]
+      pure (op, suffixTokens <> rest)
+    findOp name literal =
+      let matches op = T.isPrefixOf (name <> op) literal
+      in find matches paramOps
 splitParamOperator _ = Nothing
 
 paramNameFrom :: Token -> Maybe Text
@@ -568,6 +570,206 @@ translateDoubleQuotedExpr parts =
 translateWordPartsToExpr :: [Token] -> FishExpr TStr
 translateWordPartsToExpr = translateDoubleQuotedExpr
 
+--------------------------------------------------------------------------------
+-- Command substitution helpers (nested substitutions)
+--------------------------------------------------------------------------------
+
+commandSubstExprList :: [Token] -> FishExpr (TList TStr)
+commandSubstExprList stmts =
+  case NE.nonEmpty (map translateSubstToken stmts) of
+    Just neBody -> ExprCommandSubst neBody
+    Nothing -> ExprListLiteral []
+
+commandSubstExprStr :: [Token] -> FishExpr TStr
+commandSubstExprStr stmts =
+  case NE.nonEmpty (map translateSubstToken stmts) of
+    Just neBody -> ExprJoinList (ExprCommandSubst neBody)
+    Nothing -> ExprLiteral ""
+
+translateSubstToken :: Token -> FishStatement
+translateSubstToken = \case
+  T_Script _ _ ts -> StmtList (map translateSubstToken ts)
+  T_SimpleCommand _ assignments cmdToks ->
+    translateSubstSimpleCommand assignments cmdToks
+  T_Pipeline _ bang cmds ->
+    Stmt (translateSubstPipeline bang cmds)
+  T_AndIf _ l r ->
+    let lp = substPipelineOf (translateSubstStatusCmd l)
+        rp = substPipelineOf (translateSubstStatusCmd r)
+    in Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+  T_OrIf _ l r ->
+    let lp = substPipelineOf (translateSubstStatusCmd l)
+        rp = substPipelineOf (translateSubstStatusCmd r)
+    in Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+  T_Backgrounded _ tok ->
+    Stmt (Background (translateSubstStatusCmd tok))
+  T_BraceGroup _ tokens ->
+    substBegin tokens
+  T_Subshell _ tokens ->
+    substBegin tokens
+  T_Redirecting _ _ inner ->
+    translateSubstToken inner
+  T_Arithmetic _ exprTok ->
+    Stmt (translateArithmetic exprTok)
+  T_Condition _ _ condTok ->
+    Stmt (translateSubstConditionToken condTok)
+  other ->
+    Stmt (Command (tokenToLiteralText other) [])
+
+substBegin :: [Token] -> FishStatement
+substBegin tokens =
+  case NE.nonEmpty (map translateSubstToken tokens) of
+    Just body -> Stmt (Begin body [])
+    Nothing -> Comment "Skipped empty substitution block"
+
+translateSubstSimpleCommand :: [Token] -> [Token] -> FishStatement
+translateSubstSimpleCommand assignments cmdToks =
+  let envFlags = [SetLocal, SetExport]
+      envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
+      cmd = translateSubstCommandTokens cmdToks
+  in case (envAssigns, cmd) of
+      ([], Just fishCmd) -> Stmt fishCmd
+      ([], Nothing) -> Comment "Skipped empty command in substitution"
+      (_, Just fishCmd) ->
+        case NE.nonEmpty (envAssigns ++ [Stmt fishCmd]) of
+          Just body -> Stmt (Begin body [])
+          Nothing -> Comment "Skipped empty command in substitution"
+      (_, Nothing) ->
+        case NE.nonEmpty envAssigns of
+          Just body -> Stmt (Begin body [])
+          Nothing -> Comment "Skipped empty command in substitution"
+
+translateSubstCommandTokens :: [Token] -> Maybe (FishCommand TStatus)
+translateSubstCommandTokens cmdTokens =
+  case cmdTokens of
+    [] -> Nothing
+    (c:args) ->
+      let name = tokenToLiteralText c
+          argExprs = map translateTokenToExprOrRedirect args
+      in if T.null name
+           then Nothing
+           else Just (Command name argExprs)
+
+translateSubstStatusCmd :: Token -> FishCommand TStatus
+translateSubstStatusCmd tok =
+  case tok of
+    T_SimpleCommand _ assignments cmdToks ->
+      translateSubstCommandTokensToStatus assignments cmdToks
+    T_Pipeline _ bang cmds ->
+      translateSubstPipeline bang cmds
+    T_Condition _ _ condTok ->
+      translateSubstConditionToken condTok
+    T_Redirecting _ _ inner ->
+      translateSubstStatusCmd inner
+    T_AndIf _ l r ->
+      let lp = substPipelineOf (translateSubstStatusCmd l)
+          rp = substPipelineOf (translateSubstStatusCmd r)
+      in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+    T_OrIf _ l r ->
+      let lp = substPipelineOf (translateSubstStatusCmd l)
+          rp = substPipelineOf (translateSubstStatusCmd r)
+      in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+    _ -> Command "true" []
+
+translateSubstCommandTokensToStatus :: [Token] -> [Token] -> FishCommand TStatus
+translateSubstCommandTokensToStatus assignments cmdTokens =
+  let baseCmd = fromMaybe (Command "true" []) (translateSubstCommandTokens cmdTokens)
+  in if null assignments
+       then baseCmd
+       else
+         let envFlags = [SetLocal, SetExport]
+             envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
+         in case NE.nonEmpty (envAssigns ++ [Stmt baseCmd]) of
+              Just body -> Begin body []
+              Nothing -> baseCmd
+
+translateSubstPipeline :: [Token] -> [Token] -> FishCommand TStatus
+translateSubstPipeline bang cmds =
+  case mapMaybe translateSubstTokenToMaybeStatusCmd cmds of
+    [] -> Command "true" []
+    (c:cs) ->
+      let pipe = Pipeline (substJobPipelineFromList (c:cs))
+      in if null bang then pipe else Not pipe
+
+translateSubstTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
+translateSubstTokenToMaybeStatusCmd token =
+  case token of
+    T_SimpleCommand _ assignments rest ->
+      Just (translateSubstCommandTokensToStatus assignments rest)
+    T_Condition {} -> Just (translateSubstStatusCmd token)
+    T_Redirecting _ _ inner -> translateSubstTokenToMaybeStatusCmd inner
+    T_Pipeline _ bang cmds -> Just (translateSubstPipeline bang cmds)
+    T_AndIf _ l r ->
+      let lp = substPipelineOf (translateSubstStatusCmd l)
+          rp = substPipelineOf (translateSubstStatusCmd r)
+      in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+    T_OrIf _ l r ->
+      let lp = substPipelineOf (translateSubstStatusCmd l)
+          rp = substPipelineOf (translateSubstStatusCmd r)
+      in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+    _ -> Nothing
+
+substJobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
+substJobPipelineFromList [] = substPipelineOf (Command "true" [])
+substJobPipelineFromList (c:cs) =
+  FishJobPipeline
+    { jpTime = False
+    , jpVariables = []
+    , jpStatement = Stmt c
+    , jpCont = map (\cmd -> PipeTo { jpcVariables = [], jpcStatement = Stmt cmd }) cs
+    , jpBackgrounded = False
+    }
+
+substPipelineOf :: FishCommand TStatus -> FishJobPipeline
+substPipelineOf cmd =
+  FishJobPipeline { jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False }
+
+translateSubstConditionToken :: Token -> FishCommand TStatus
+translateSubstConditionToken = \case
+  TC_Group _ _ inner -> translateSubstConditionToken inner
+  TC_And _ _ _ l r ->
+    let lp = substPipelineOf (translateSubstConditionToken l)
+        rp = substPipelineOf (translateSubstConditionToken r)
+    in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+  TC_Or _ _ _ l r ->
+    let lp = substPipelineOf (translateSubstConditionToken l)
+        rp = substPipelineOf (translateSubstConditionToken r)
+    in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+  TC_Unary _ _ "!" inner ->
+    Not (translateSubstConditionToken inner)
+  TC_Unary _ _ op inner ->
+    Command "test" [ExprVal (ExprLiteral (toText op)), ExprVal (translateTokenToExpr inner)]
+  TC_Binary _ _ op lhs rhs ->
+    translateSubstBinaryCondition (toText op) lhs rhs
+  TC_Nullary _ _ tok ->
+    Command "test" [ExprVal (translateTokenToExpr tok)]
+  TC_Empty {} ->
+    Command "true" []
+  other ->
+    Command "test" [ExprVal (ExprLiteral (tokenToLiteralText other))]
+
+translateSubstBinaryCondition :: Text -> Token -> Token -> FishCommand TStatus
+translateSubstBinaryCondition op lhs rhs
+  | op == "=~" = stringMatch "-qr"
+  | op == "==" || op == "=" = stringMatch "-q"
+  | op == "!=" = Not (stringMatch "-q")
+  | otherwise =
+      let testArgs =
+            [ ExprVal (translateTokenToExpr lhs)
+            , ExprVal (ExprLiteral op)
+            , ExprVal (translateTokenToExpr rhs)
+            ]
+      in Command "test" testArgs
+  where
+    stringMatch flag =
+      Command "string"
+        [ ExprVal (ExprLiteral "match")
+        , ExprVal (ExprLiteral flag)
+        , ExprVal (ExprLiteral "--")
+        , ExprVal (translateTokenToExpr rhs)
+        , ExprVal (translateTokenToExpr lhs)
+        ]
+
 translateDefaultExpansionWith :: (Text -> FishJobList) -> Text -> FishExpr (TList TStr) -> FishExpr (TList TStr)
 translateDefaultExpansionWith condFn name defaultExpr =
   let cond = condFn name
@@ -612,7 +814,7 @@ translateModifierExpansion word = do
       modifier = toText (getBracedModifier (toString rawTxt))
       varName = specialVarName name
   if isLengthExpansion rawTxt modifier
-    then Just (translateLengthExpansion varName)
+    then Just (translateLengthExpansion name varName modifier)
     else case parseSubstringModifier modifier of
       Just (offsetTxt, lenTxt) ->
         Just (translateSubstringExpansion varName offsetTxt lenTxt)
@@ -635,11 +837,22 @@ data PatternAnchor = AnchorStart | AnchorEnd | AnchorNone
 
 isLengthExpansion :: Text -> Text -> Bool
 isLengthExpansion rawTxt modifier =
-  T.isPrefixOf "#" rawTxt && T.null modifier
+  T.isPrefixOf "#" rawTxt && (T.null modifier || isArrayLengthModifier modifier)
 
-translateLengthExpansion :: Text -> FishExpr (TList TStr)
-translateLengthExpansion name =
-  ExprListLiteral [ExprStringOp StrLength (varAsString name)]
+isArrayLengthModifier :: Text -> Bool
+isArrayLengthModifier modifier =
+  modifier `elem` ["[@]", "[*]", "@", "*"]
+
+translateLengthExpansion :: Text -> Text -> Text -> FishExpr (TList TStr)
+translateLengthExpansion rawName varName modifier =
+  if isCountLengthExpansion rawName modifier
+    then countVarExpr varName
+    else ExprListLiteral [ExprStringOp StrLength (varAsString varName)]
+  where
+    isCountLengthExpansion name modTxt =
+      name `elem` ["@", "*"] || isArrayLengthModifier modTxt
+    countVarExpr name =
+      commandSubst (Stmt (Command "count" [ExprVal (ExprVariable (VarAll name))]) NE.:| [])
 
 parseSubstringModifier :: Text -> Maybe (Text, Maybe Text)
 parseSubstringModifier modifier = do
