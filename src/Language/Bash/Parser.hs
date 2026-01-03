@@ -1,6 +1,6 @@
 module Language.Bash.Parser
   ( parseBashScript,
-    parseBashFile
+    parseBashFile,
   )
 where
 

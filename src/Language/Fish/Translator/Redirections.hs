@@ -1,13 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Redirections
-  ( parseRedirectTokens
-  , translateRedirectToken
-  ) where
+  ( parseRedirectTokens,
+    translateRedirectToken,
+  )
+where
 
 import Data.Char (isDigit)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Variables
 import ShellCheck.AST
@@ -17,20 +18,20 @@ parseRedirectTokens :: [Token] -> ([ExprOrRedirect], [Token])
 parseRedirectTokens = go [] []
   where
     go redirs args [] = (reverse redirs, reverse args)
-    go redirs args (opTok:rest) =
+    go redirs args (opTok : rest) =
       case translateRedirectToken opTok of
         Just redir -> go (redir : redirs) args rest
         Nothing ->
           case parseRedirectToken (tokenToLiteralText opTok) of
             Just (src, op, Just target) ->
               let redir = RedirectVal (Redirect src op target)
-              in go (redir : redirs) args rest
+               in go (redir : redirs) args rest
             Just (src, op, Nothing) ->
               case rest of
-                (t:ts) ->
+                (t : ts) ->
                   let target = RedirectFile (translateTokenToExpr t)
                       redir = RedirectVal (Redirect src op target)
-                  in go (redir : redirs) args ts
+                   in go (redir : redirs) args ts
                 [] -> go redirs (opTok : args) rest
             Nothing -> go redirs (opTok : args) rest
 
@@ -76,8 +77,8 @@ sourceFromFd :: String -> RedirectDir -> RedirectSource
 sourceFromFd src dir =
   case src of
     "" -> case dir of
-            InputRedirect -> RedirectStdin
-            OutputRedirect -> RedirectStdout
+      InputRedirect -> RedirectStdin
+      OutputRedirect -> RedirectStdout
     "&" -> RedirectBoth
     _ | Just n <- readMaybe src -> RedirectFD n
     _ -> RedirectStdout
@@ -98,16 +99,20 @@ hereStringExpr = hereExpr "%s\n"
 hereExpr :: Text -> [Token] -> FishExpr TStr
 hereExpr fmt toks =
   let expr = concatHereDoc toks
-      printfStmt = Stmt (Command "printf"
-        [ ExprVal (ExprLiteral fmt)
-        , ExprVal expr
-        ])
-  in ExprProcessSubst (printfStmt NE.:| [])
+      printfStmt =
+        Stmt
+          ( Command
+              "printf"
+              [ ExprVal (ExprLiteral fmt),
+                ExprVal expr
+              ]
+          )
+   in ExprProcessSubst (printfStmt NE.:| [])
 
 concatHereDoc :: [Token] -> FishExpr TStr
 concatHereDoc [] = ExprLiteral ""
 concatHereDoc [t] = translateTokenToExpr t
-concatHereDoc (t:ts) =
+concatHereDoc (t : ts) =
   foldl' ExprStringConcat (translateTokenToExpr t) (map translateTokenToExpr ts)
 
 parseRedirectToken :: Text -> Maybe (RedirectSource, RedirectOp, Maybe RedirectTarget)

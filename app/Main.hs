@@ -5,16 +5,16 @@
 module Main (main) where
 
 import Control.Monad (foldM)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Map.Strict as M
-import qualified Data.Set as Set
-import qualified Data.Text as T
-import qualified GHC.Show as GHC
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as M
+import Data.Set qualified as Set
+import Data.Text qualified as T
+import GHC.Show qualified as GHC
 import Monk
 import Options.Applicative
-import ShellCheck.AST (Token(..), pattern T_SourceCommand, pattern T_SimpleCommand)
+import ShellCheck.AST (Token (..), pattern T_SimpleCommand, pattern T_SourceCommand)
 import ShellCheck.ASTLib (getLiteralStringDef)
-import ShellCheck.Interface (ParseResult(..), PositionedComment(..), Position(..))
+import ShellCheck.Interface (ParseResult (..), Position (..), PositionedComment (..))
 import System.Directory (canonicalizePath, doesFileExist)
 import System.FilePath (isRelative, replaceExtension, takeDirectory, (</>))
 import System.IO (hPutStrLn)
@@ -25,20 +25,22 @@ data SourceMode
   deriving stock (Show, Eq)
 
 data Options = Options
-  { optInput :: FilePath
-  , optOutput :: Maybe FilePath
-  , optStrict :: Bool
-  , optQuietWarnings :: Bool
-  , optRecursive :: Bool
-  , optSourceMode :: SourceMode
-  } deriving stock (Show, Eq)
+  { optInput :: FilePath,
+    optOutput :: Maybe FilePath,
+    optStrict :: Bool,
+    optQuietWarnings :: Bool,
+    optRecursive :: Bool,
+    optSourceMode :: SourceMode
+  }
+  deriving stock (Show, Eq)
 
 data Translation = Translation
-  { trPath :: FilePath
-  , trStatements :: [FishStatement]
-  , trState :: TranslateState
-  , trSourceMap :: M.Map Text (Maybe FilePath)
-  } deriving stock (Show, Eq)
+  { trPath :: FilePath,
+    trStatements :: [FishStatement],
+    trState :: TranslateState,
+    trSourceMap :: M.Map Text (Maybe FilePath)
+  }
+  deriving stock (Show, Eq)
 
 main :: IO ()
 main = do
@@ -53,13 +55,14 @@ optionsParser =
     <*> switch (long "strict" <> help "Fail on unsupported constructs")
     <*> switch (short 'q' <> long "quiet-warnings" <> help "Suppress warnings")
     <*> switch (long "recursive" <> help "Recursively translate sourced scripts")
-    <*> option (eitherReader parseSourceMode)
-        ( long "sources"
-       <> metavar "MODE"
-       <> value SourceSeparate
-       <> showDefaultWith renderSourceMode
-       <> help "Source handling mode when --recursive is set (inline|separate)"
-        )
+    <*> option
+      (eitherReader parseSourceMode)
+      ( long "sources"
+          <> metavar "MODE"
+          <> value SourceSeparate
+          <> showDefaultWith renderSourceMode
+          <> help "Source handling mode when --recursive is set (inline|separate)"
+      )
 
 parseSourceMode :: String -> Either String SourceMode
 parseSourceMode = \case
@@ -88,7 +91,7 @@ translateAll opts cfg rootPath =
   go Set.empty M.empty [rootPath]
   where
     go _ acc [] = pure acc
-    go seen acc (path:rest)
+    go seen acc (path : rest)
       | Set.member path seen = go seen acc rest
       | otherwise = do
           translation <- translateFile opts cfg path
@@ -120,12 +123,13 @@ translateFile opts cfg path = do
               then collectSourceMap opts path (prRoot parseRes)
               else pure mempty
           let stmts = flattenStatements stmt
-          pure Translation
-            { trPath = path
-            , trStatements = stmts
-            , trState = st
-            , trSourceMap = sourceMap
-            }
+          pure
+            Translation
+              { trPath = path,
+                trStatements = stmts,
+                trState = st,
+                trSourceMap = sourceMap
+              }
 
 flattenStatements :: FishStatement -> [FishStatement]
 flattenStatements = \case
@@ -165,10 +169,10 @@ collectSourceArgs tok =
   let direct =
         case tok of
           T_SourceCommand _ _ pathTok -> [pathTok]
-          T_SimpleCommand _ _ (cmdTok:argTok:_)
+          T_SimpleCommand _ _ (cmdTok : argTok : _)
             | isSourceCmd cmdTok -> [argTok]
           _ -> []
-  in direct <> concatMap collectSourceArgs (children tok)
+   in direct <> concatMap collectSourceArgs (children tok)
 
 children :: Token -> [Token]
 children (OuterToken _ inner) = toList inner
@@ -176,7 +180,7 @@ children (OuterToken _ inner) = toList inner
 isSourceCmd :: Token -> Bool
 isSourceCmd tok =
   let name = tokenToLiteralText tok
-  in name == "source" || name == "."
+   in name == "source" || name == "."
 
 outputInline :: Options -> M.Map FilePath Translation -> FilePath -> IO ()
 outputInline opts translations rootPath =
@@ -274,7 +278,7 @@ inlineCommand opts translations stack tr = \case
     pure (Switch expr cases' suffix)
   Function func -> do
     body' <- inlineBody opts translations stack tr (funcBody func)
-    pure (Function func { funcBody = body' })
+    pure (Function func {funcBody = body'})
   other -> pure other
 
 inlineBody ::
@@ -333,10 +337,11 @@ rewriteCommand f = \case
   Source expr -> Source (rewriteSourceExpr f expr)
   Begin body suffix -> Begin (NE.map (rewriteStatement f) body) suffix
   If cond thn els suffix ->
-    If (rewriteJobList f cond)
-       (NE.map (rewriteStatement f) thn)
-       (map (rewriteStatement f) els)
-       suffix
+    If
+      (rewriteJobList f cond)
+      (NE.map (rewriteStatement f) thn)
+      (map (rewriteStatement f) els)
+      suffix
   While cond body suffix ->
     While (rewriteJobList f cond) (NE.map (rewriteStatement f) body) suffix
   For var listExpr body suffix ->
@@ -344,7 +349,7 @@ rewriteCommand f = \case
   Switch expr cases suffix ->
     Switch expr (NE.map (rewriteCaseItem f) cases) suffix
   Function func ->
-    Function func { funcBody = NE.map (rewriteStatement f) (funcBody func) }
+    Function func {funcBody = NE.map (rewriteStatement f) (funcBody func)}
   Pipeline pipe -> Pipeline (rewritePipeline f pipe)
   JobConj jc -> JobConj (rewriteConjunction f jc)
   Semicolon c1 c2 -> Semicolon (rewriteCommand f c1) (rewriteCommand f c2)
@@ -369,8 +374,8 @@ rewriteJobList f (FishJobList conj) =
 rewriteConjunction :: (Text -> Text) -> FishJobConjunction -> FishJobConjunction
 rewriteConjunction f jc =
   jc
-    { jcJob = rewritePipeline f (jcJob jc)
-    , jcContinuations = map (rewriteConjCont f) (jcContinuations jc)
+    { jcJob = rewritePipeline f (jcJob jc),
+      jcContinuations = map (rewriteConjCont f) (jcContinuations jc)
     }
 
 rewriteConjCont :: (Text -> Text) -> FishJobConjCont -> FishJobConjCont
@@ -381,12 +386,12 @@ rewriteConjCont f = \case
 rewritePipeline :: (Text -> Text) -> FishJobPipeline -> FishJobPipeline
 rewritePipeline f pipe =
   pipe
-    { jpStatement = rewriteStatement f (jpStatement pipe)
-    , jpCont = map rewritePipeCont (jpCont pipe)
+    { jpStatement = rewriteStatement f (jpStatement pipe),
+      jpCont = map rewritePipeCont (jpCont pipe)
     }
   where
     rewritePipeCont cont =
-      cont { jpcStatement = rewriteStatement f (jpcStatement cont) }
+      cont {jpcStatement = rewriteStatement f (jpcStatement cont)}
 
 emitParseWarnings :: [PositionedComment] -> IO ()
 emitParseWarnings = mapM_ (hPutStrLn stderr . toString . renderParseComment)
@@ -398,7 +403,7 @@ renderParseComment :: PositionedComment -> Text
 renderParseComment pc =
   let pos = pcStartPos pc
       loc = formatPosition pos
-  in loc <> ": " <> toText (GHC.show (pcComment pc))
+   in loc <> ": " <> toText (GHC.show (pcComment pc))
 
 formatPosition :: Position -> Text
 formatPosition pos =
@@ -408,7 +413,7 @@ emitTranslateWarnings :: [Warning] -> IO ()
 emitTranslateWarnings = mapM_ (hPutStrLn stderr . toString . renderWarning)
 
 renderWarning :: Warning -> Text
-renderWarning Warning { warnMessage = msg, warnRange = mRange } =
+renderWarning Warning {warnMessage = msg, warnRange = mRange} =
   case mRange of
     Nothing -> "warning: " <> msg
     Just range -> formatRange range <> ": warning: " <> msg
@@ -426,7 +431,7 @@ renderTranslateError = \case
   InternalError msg -> "error: " <> msg
 
 formatRange :: SourceRange -> Text
-formatRange SourceRange { rangeStart = SourcePos {..} } =
+formatRange SourceRange {rangeStart = SourcePos {..}} =
   srcFile <> ":" <> show srcLine <> ":" <> show srcColumn
 
 emitWarn :: Options -> Text -> IO ()
@@ -434,7 +439,7 @@ emitWarn opts msg =
   unless (optQuietWarnings opts) $
     hPutStrLn stderr (toString msg)
 
-concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
+concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = fmap concat (mapM f xs)
 
 tokenToLiteralText :: Token -> Text

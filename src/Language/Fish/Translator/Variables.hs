@@ -2,20 +2,21 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Variables
-  ( translateTokenToExpr
-  , translateTokenToListExpr
-  , translateTokenToExprOrRedirect
-  , translateAssignment
-  , translateAssignmentWithFlags
-  , translateArithmetic
-  , arithArgsFromToken
-  , arithArgsFromText
-  , tokenToLiteralText
-  ) where
+  ( translateTokenToExpr,
+    translateTokenToListExpr,
+    translateTokenToExprOrRedirect,
+    translateAssignment,
+    translateAssignmentWithFlags,
+    translateArithmetic,
+    arithArgsFromToken,
+    arithArgsFromText,
+    tokenToLiteralText,
+  )
+where
 
-import qualified Data.List.NonEmpty as NE
 import Data.Char (isAlpha, isAlphaNum, isDigit, isSpace)
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 import Language.Fish.AST
 import ShellCheck.AST
 import ShellCheck.ASTLib (getBracedModifier, getBracedReference, getLiteralStringDef, oversimplify)
@@ -56,19 +57,19 @@ translateTokenToExpr = \case
     commandSubstExprStr stmts
   T_DollarExpansion _ stmts ->
     commandSubstExprStr stmts
-  -- ${ ... $(cmd) ... } style
+  -- \${ ... $(cmd) ... } style
   T_DollarBraceCommandExpansion _ _ stmts ->
     commandSubstExprStr stmts
   T_ProcSub _ dir stmts ->
     case NE.nonEmpty (map translateStmt stmts) of
       Just neBody -> procSubExpr dir neBody
-      Nothing     -> ExprLiteral ""
+      Nothing -> ExprLiteral ""
   -- Fallback: take literal interpretation where possible
   other -> ExprLiteral (tokenToLiteralText other)
   where
     translateStmt = \t -> case t of
       T_Script _ _ ts -> StmtList (map translateStmt ts)
-      _               -> Stmt (Command (tokenToLiteralText t) [])
+      _ -> Stmt (Command (tokenToLiteralText t) [])
 
 translateTokenToListExpr :: Token -> FishExpr (TList TStr)
 translateTokenToListExpr = \case
@@ -83,10 +84,11 @@ translateTokenToListExpr = \case
   T_NormalWord _ parts ->
     case parts of
       [T_DollarBraced _ _ word] -> translateDollarBraced word
-      _ | wordIsGlob parts ->
-          if wordNeedsExtglobShim parts
-            then extglobShimListExpr (renderGlobWordRaw parts)
-            else ExprGlob (parseGlobPattern (renderGlobWord parts))
+      _
+        | wordIsGlob parts ->
+            if wordNeedsExtglobShim parts
+              then extglobShimListExpr (renderGlobWordRaw parts)
+              else ExprGlob (parseGlobPattern (renderGlobWord parts))
         | otherwise -> ExprListLiteral [translateWordPartsToExpr parts]
   T_DollarBraced _ _ word -> translateDollarBraced word
   T_DollarArithmetic _ exprTok ->
@@ -102,7 +104,7 @@ translateTokenToListExpr = \case
   T_ProcSub _ dir stmts ->
     case NE.nonEmpty (map translateStmt stmts) of
       Just neBody -> procSubListExpr dir neBody
-      Nothing     -> ExprListLiteral []
+      Nothing -> ExprListLiteral []
   T_Array _ elems -> translateArrayElements elems
   other -> ExprListLiteral [ExprLiteral (tokenToLiteralText other)]
   where
@@ -131,9 +133,11 @@ wordIsGlob parts =
 
 wordNeedsExtglobShim :: [Token] -> Bool
 wordNeedsExtglobShim =
-  any (\case
-    T_Extglob _ op _ -> extglobNeedsShim op
-    _ -> False)
+  any
+    ( \case
+        T_Extglob _ op _ -> extglobNeedsShim op
+        _ -> False
+    )
 
 extglobNeedsShim :: String -> Bool
 extglobNeedsShim op = op /= "@"
@@ -170,15 +174,15 @@ translateAssignmentWithFlags baseFlags tok =
             Assign -> baseFlags
             Append -> baseFlags <> [SetAppend]
           indexedVar = indexedVarText fishVar indices
-      in case indexedVar of
-           Just varTxt ->
-             [Stmt (Set flags varTxt (translateTokenToListExpr val))]
-           Nothing ->
-             case val of
-               T_Array _ elems ->
-                 translateArrayAssignment fishVar flags elems
-               _ ->
-                 [Stmt (Set flags fishVar (translateTokenToListExpr val))]
+       in case indexedVar of
+            Just varTxt ->
+              [Stmt (Set flags varTxt (translateTokenToListExpr val))]
+            Nothing ->
+              case val of
+                T_Array _ elems ->
+                  translateArrayAssignment fishVar flags elems
+                _ ->
+                  [Stmt (Set flags fishVar (translateTokenToListExpr val))]
     _ -> []
 
 --------------------------------------------------------------------------------
@@ -193,7 +197,7 @@ mathCommandFromToken suppressOutput exprToken =
   let args = map ExprVal (NE.toList (arithArgsFromToken exprToken))
       mathRedir = RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
       allArgs = if suppressOutput then args <> [mathRedir] else args
-  in Command "math" allArgs
+   in Command "math" allArgs
 
 arithArgsFromToken :: Token -> NonEmpty (FishExpr TStr)
 arithArgsFromToken exprToken =
@@ -216,7 +220,7 @@ arithArgsFromTokenList = \case
   T_SingleQuoted _ s -> [ExprLiteral (toText s)]
   tok ->
     let txt = tokenToLiteralText tok
-    in [ExprLiteral txt]
+     in [ExprLiteral txt]
 
 wrapParens :: [FishExpr TStr] -> [FishExpr TStr]
 wrapParens exprs = [ExprLiteral "("] <> exprs <> [ExprLiteral ")"]
@@ -249,21 +253,21 @@ tokenizeArithText :: Text -> [Text]
 tokenizeArithText txt = go (T.unpack txt) []
   where
     go [] acc = reverse acc
-    go (c:cs) acc
+    go (c : cs) acc
       | isSpace c = go cs acc
       | c == '$' =
           let (name, rest) = span isIdentChar cs
               tok = if null name then "$" else '$' : name
-          in go rest (toText tok : acc)
+           in go rest (toText tok : acc)
       | isAlpha c || c == '_' =
           let (ident, rest) = span isIdentChar cs
-          in go rest (toText (c : ident) : acc)
+           in go rest (toText (c : ident) : acc)
       | isDigit c =
           let (digits, rest) = span isDigit cs
-          in go rest (toText (c : digits) : acc)
+           in go rest (toText (c : digits) : acc)
       | otherwise =
           case cs of
-            (d:ds)
+            (d : ds)
               | isTwoCharOp c d ->
                   go ds (toText [c, d] : acc)
               | otherwise ->
@@ -271,23 +275,24 @@ tokenizeArithText txt = go (T.unpack txt) []
             [] -> go cs (toText [c] : acc)
 
     isIdentChar ch = isAlphaNum ch || ch == '_'
-    isTwoCharOp a b = [a, b] `elem`
-      [ "++"
-      , "--"
-      , "+="
-      , "-="
-      , "*="
-      , "/="
-      , "%="
-      , "<<"
-      , ">>"
-      , "<="
-      , ">="
-      , "=="
-      , "!="
-      , "&&"
-      , "||"
-      ]
+    isTwoCharOp a b =
+      [a, b]
+        `elem` [ "++",
+                 "--",
+                 "+=",
+                 "-=",
+                 "*=",
+                 "/=",
+                 "%=",
+                 "<<",
+                 ">>",
+                 "<=",
+                 ">=",
+                 "==",
+                 "!=",
+                 "&&",
+                 "||"
+               ]
 
 --------------------------------------------------------------------------------
 -- Parameter expansion helpers
@@ -303,24 +308,25 @@ translateDollarBraced word =
     Just (op, rest) ->
       case op of
         ":-" -> translateDefaultExpansion word rest
-        "-"  -> translateDefaultExpansionUnset word rest
+        "-" -> translateDefaultExpansionUnset word rest
         ":=" -> translateAssignDefaultExpansion word rest
-        "="  -> translateAssignDefaultExpansionUnset word rest
+        "=" -> translateAssignDefaultExpansionUnset word rest
         ":?" -> translateErrorExpansion word rest
-        "?"  -> translateErrorExpansionUnset word rest
+        "?" -> translateErrorExpansionUnset word rest
         ":+" -> translateAltExpansion word rest
-        "+"  -> translateAltExpansionUnset word rest
+        "+" -> translateAltExpansionUnset word rest
         _ -> translateSimpleVar word
 
 translateSimpleVar :: Token -> FishExpr (TList TStr)
 translateSimpleVar word =
   case (paramNameFrom word, paramIndexFrom word) of
-    (Just name, _) | name == "#" ->
-      commandSubst (Stmt (Command "count" [ExprVal (ExprVariable (VarAll "argv"))]) NE.:| [])
+    (Just name, _)
+      | name == "#" ->
+          commandSubst (Stmt (Command "count" [ExprVal (ExprVariable (VarAll "argv"))]) NE.:| [])
     (Just name, Just idx) -> ExprVariable (VarIndex (specialVarName name) idx)
     (Just name, Nothing)
-      | T.all isDigit name
-      , Just n <- readMaybe (toString name) ->
+      | T.all isDigit name,
+        Just n <- readMaybe (toString name) ->
           ExprVariable (VarIndex "argv" (IndexList (ExprNumLiteral n NE.:| [])))
       | otherwise -> ExprVariable (VarAll (specialVarName name))
     _ -> ExprListLiteral []
@@ -329,49 +335,49 @@ translateDefaultExpansion :: Token -> [Token] -> FishExpr (TList TStr)
 translateDefaultExpansion word rest =
   let name = fromMaybe "" (paramNameFrom word)
       defaultExpr = translateTokensToListExpr rest
-  in translateDefaultExpansionWith varNonEmptyCond name defaultExpr
+   in translateDefaultExpansionWith varNonEmptyCond name defaultExpr
 
 translateDefaultExpansionUnset :: Token -> [Token] -> FishExpr (TList TStr)
 translateDefaultExpansionUnset word rest =
   let name = fromMaybe "" (paramNameFrom word)
       defaultExpr = translateTokensToListExpr rest
-  in translateDefaultExpansionWith varSetCond name defaultExpr
+   in translateDefaultExpansionWith varSetCond name defaultExpr
 
 translateAssignDefaultExpansion :: Token -> [Token] -> FishExpr (TList TStr)
 translateAssignDefaultExpansion word rest =
   let name = fromMaybe "" (paramNameFrom word)
       defaultExpr = translateTokensToListExpr rest
-  in translateAssignDefaultExpansionWith varNonEmptyCond name defaultExpr
+   in translateAssignDefaultExpansionWith varNonEmptyCond name defaultExpr
 
 translateAssignDefaultExpansionUnset :: Token -> [Token] -> FishExpr (TList TStr)
 translateAssignDefaultExpansionUnset word rest =
   let name = fromMaybe "" (paramNameFrom word)
       defaultExpr = translateTokensToListExpr rest
-  in translateAssignDefaultExpansionWith varSetCond name defaultExpr
+   in translateAssignDefaultExpansionWith varSetCond name defaultExpr
 
 translateErrorExpansion :: Token -> [Token] -> FishExpr (TList TStr)
 translateErrorExpansion word rest =
   let name = fromMaybe "" (paramNameFrom word)
       errExpr = translateTokensToListExpr rest
-  in translateErrorExpansionWith varNonEmptyCond name errExpr
+   in translateErrorExpansionWith varNonEmptyCond name errExpr
 
 translateErrorExpansionUnset :: Token -> [Token] -> FishExpr (TList TStr)
 translateErrorExpansionUnset word rest =
   let name = fromMaybe "" (paramNameFrom word)
       errExpr = translateTokensToListExpr rest
-  in translateErrorExpansionWith varSetCond name errExpr
+   in translateErrorExpansionWith varSetCond name errExpr
 
 translateAltExpansion :: Token -> [Token] -> FishExpr (TList TStr)
 translateAltExpansion word rest =
   let name = fromMaybe "" (paramNameFrom word)
       altExpr = translateTokensToListExpr rest
-  in translateAltExpansionWith varNonEmptyCond name altExpr
+   in translateAltExpansionWith varNonEmptyCond name altExpr
 
 translateAltExpansionUnset :: Token -> [Token] -> FishExpr (TList TStr)
 translateAltExpansionUnset word rest =
   let name = fromMaybe "" (paramNameFrom word)
       altExpr = translateTokensToListExpr rest
-  in translateAltExpansionWith varSetCond name altExpr
+   in translateAltExpansionWith varSetCond name altExpr
 
 splitParamOperator :: Token -> Maybe (Text, [Token])
 splitParamOperator word@(T_NormalWord _ parts) =
@@ -379,20 +385,20 @@ splitParamOperator word@(T_NormalWord _ parts) =
     (_, []) -> splitLiteralOperator word parts
     (_, T_ParamSubSpecialChar _ op : rest) ->
       let opTxt = toText op
-      in if opTxt `elem` paramOps then Just (opTxt, rest) else Nothing
+       in if opTxt `elem` paramOps then Just (opTxt, rest) else Nothing
     _ -> splitLiteralOperator word parts
   where
     isParamOp (T_ParamSubSpecialChar _ _) = True
     isParamOp _ = False
     paramOps =
-      [ ":-"
-      , "-"
-      , ":="
-      , "="
-      , ":?"
-      , "?"
-      , ":+"
-      , "+"
+      [ ":-",
+        "-",
+        ":=",
+        "=",
+        ":?",
+        "?",
+        ":+",
+        "+"
       ]
     splitLiteralOperator word' parts' = do
       name <- paramNameFrom word'
@@ -407,7 +413,7 @@ splitParamOperator word@(T_NormalWord _ parts) =
       pure (op, suffixTokens <> rest)
     findOp name literal =
       let matches op = T.isPrefixOf (name <> op) literal
-      in find matches paramOps
+       in find matches paramOps
 splitParamOperator _ = Nothing
 
 paramNameFrom :: Token -> Maybe Text
@@ -416,18 +422,19 @@ paramNameFrom word =
       nameTxt = toText (getBracedReference (toString rawTxt))
       fallback = T.takeWhile (/= '[') rawTxt
       finalName = if T.null nameTxt then fallback else nameTxt
-  in if T.null finalName then Nothing else Just finalName
+   in if T.null finalName then Nothing else Just finalName
 
 paramIndexFrom :: Token -> Maybe (FishIndex TStr (TList TStr))
 paramIndexFrom word =
   let rawFull = toText (concat (oversimplify word))
       rawMod = toText (getBracedModifier (toString rawFull))
-      idxRaw = if T.null rawMod
-        then extractBracket rawFull
-        else rawMod
-  in case T.stripPrefix "[" idxRaw >>= T.stripSuffix "]" of
-       Just idxTxt -> parseIndexSpec idxTxt
-       _ -> Nothing
+      idxRaw =
+        if T.null rawMod
+          then extractBracket rawFull
+          else rawMod
+   in case T.stripPrefix "[" idxRaw >>= T.stripSuffix "]" of
+        Just idxTxt -> parseIndexSpec idxTxt
+        _ -> Nothing
   where
     extractBracket t =
       case T.breakOn "[" t of
@@ -435,7 +442,7 @@ paramIndexFrom word =
         _ ->
           let after = T.drop 1 (T.dropWhile (/= '[') t)
               inner = T.takeWhile (/= ']') after
-          in "[" <> inner <> "]"
+           in "[" <> inner <> "]"
 
 specialVarName :: Text -> Text
 specialVarName = \case
@@ -449,36 +456,69 @@ specialVarName = \case
 translateTokensToListExpr :: [Token] -> FishExpr (TList TStr)
 translateTokensToListExpr [] = ExprListLiteral []
 translateTokensToListExpr [t] = translateTokenToListExpr t
-translateTokensToListExpr (t:ts) =
+translateTokensToListExpr (t : ts) =
   foldl' ExprListConcat (translateTokenToListExpr t) (map translateTokenToListExpr ts)
 
 varNonEmptyCond :: Text -> FishJobList
 varNonEmptyCond name =
   let varExpr = ExprJoinList (ExprVariable (VarAll (specialVarName name)))
-      setq = FishJobPipeline False [] (Stmt (Command "set"
-        [ ExprVal (ExprLiteral "-q")
-        , ExprVal (ExprLiteral (specialVarName name))
-        ])) [] False
-      test = FishJobPipeline False [] (Stmt (Command "test"
-        [ ExprVal (ExprLiteral "-n")
-        , ExprVal varExpr
-        ])) [] False
-  in FishJobList (FishJobConjunction Nothing setq [JCAnd test] NE.:| [])
+      setq =
+        FishJobPipeline
+          False
+          []
+          ( Stmt
+              ( Command
+                  "set"
+                  [ ExprVal (ExprLiteral "-q"),
+                    ExprVal (ExprLiteral (specialVarName name))
+                  ]
+              )
+          )
+          []
+          False
+      test =
+        FishJobPipeline
+          False
+          []
+          ( Stmt
+              ( Command
+                  "test"
+                  [ ExprVal (ExprLiteral "-n"),
+                    ExprVal varExpr
+                  ]
+              )
+          )
+          []
+          False
+   in FishJobList (FishJobConjunction Nothing setq [JCAnd test] NE.:| [])
 
 varSetCond :: Text -> FishJobList
 varSetCond name =
-  let setq = FishJobPipeline False [] (Stmt (Command "set"
-        [ ExprVal (ExprLiteral "-q")
-        , ExprVal (ExprLiteral (specialVarName name))
-        ])) [] False
-  in FishJobList (FishJobConjunction Nothing setq [] NE.:| [])
+  let setq =
+        FishJobPipeline
+          False
+          []
+          ( Stmt
+              ( Command
+                  "set"
+                  [ ExprVal (ExprLiteral "-q"),
+                    ExprVal (ExprLiteral (specialVarName name))
+                  ]
+              )
+          )
+          []
+          False
+   in FishJobList (FishJobConjunction Nothing setq [] NE.:| [])
 
 emitList :: FishExpr (TList TStr) -> FishStatement
 emitList expr =
-  Stmt (Command "printf"
-    [ ExprVal (ExprLiteral "%s\n")
-    , ExprVal expr
-    ])
+  Stmt
+    ( Command
+        "printf"
+        [ ExprVal (ExprLiteral "%s\n"),
+          ExprVal expr
+        ]
+    )
 
 commandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
 commandSubst = ExprCommandSubst
@@ -487,9 +527,9 @@ translateArrayElements :: [Token] -> FishExpr (TList TStr)
 translateArrayElements elems =
   case elems of
     [] -> ExprListLiteral []
-    _  ->
+    _ ->
       case map elementToListExpr elems of
-        (x:xs) -> foldl' ExprListConcat x xs
+        (x : xs) -> foldl' ExprListConcat x xs
         [] -> ExprListLiteral []
   where
     elementToListExpr t = case t of
@@ -537,23 +577,35 @@ procSubListExpr dir body =
 procSubOutList :: NonEmpty FishStatement -> FishExpr (TList TStr)
 procSubOutList body =
   let fifoVar = "__monk_psub_fifo"
-      mktempStmt = Stmt (Set [SetLocal] fifoVar
-        (ExprCommandSubst (Stmt (Command "mktemp"
-          [ ExprVal (ExprLiteral "-t")
-          , ExprVal (ExprLiteral "monk_psub")
-          ]) NE.:| [])))
+      mktempStmt =
+        Stmt
+          ( Set
+              [SetLocal]
+              fifoVar
+              ( ExprCommandSubst
+                  ( Stmt
+                      ( Command
+                          "mktemp"
+                          [ ExprVal (ExprLiteral "-t"),
+                            ExprVal (ExprLiteral "monk_psub")
+                          ]
+                      )
+                      NE.:| []
+                  )
+              )
+          )
       rmStmt = Stmt (Command "rm" [ExprVal (ExprVariable (VarAll fifoVar))])
       mkfifoStmt = Stmt (Command "mkfifo" [ExprVal (ExprVariable (VarAll fifoVar))])
       catStmt = Stmt (Command "cat" [ExprVal (ExprVariable (VarAll fifoVar))])
       rhsStmt = case NE.toList body of
         [s] -> s
-        xs  -> Stmt (Begin (NE.fromList xs) [])
+        xs -> Stmt (Begin (NE.fromList xs) [])
       pipe = FishJobPipeline False [] catStmt [PipeTo [] rhsStmt] False
       pipeStmt = Stmt (Pipeline pipe)
       bgBody = pipeStmt NE.:| [rmStmt]
       bgStmt = Stmt (Background (Begin bgBody []))
       echoStmt = Stmt (Command "echo" [ExprVal (ExprVariable (VarAll fifoVar))])
-  in ExprCommandSubst (mktempStmt NE.:| [rmStmt, mkfifoStmt, bgStmt, echoStmt])
+   in ExprCommandSubst (mktempStmt NE.:| [rmStmt, mkfifoStmt, bgStmt, echoStmt])
 
 --------------------------------------------------------------------------------
 -- Parameter expansion helpers
@@ -563,7 +615,7 @@ translateDoubleQuotedExpr :: [Token] -> FishExpr TStr
 translateDoubleQuotedExpr parts =
   case map translateTokenToExpr parts of
     [] -> ExprLiteral ""
-    (x:xs) -> foldl' ExprStringConcat x xs
+    (x : xs) -> foldl' ExprStringConcat x xs
 
 translateWordPartsToExpr :: [Token] -> FishExpr TStr
 translateWordPartsToExpr = translateDoubleQuotedExpr
@@ -594,11 +646,11 @@ translateSubstToken = \case
   T_AndIf _ l r ->
     let lp = substPipelineOf (translateSubstStatusCmd l)
         rp = substPipelineOf (translateSubstStatusCmd r)
-    in Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+     in Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
   T_OrIf _ l r ->
     let lp = substPipelineOf (translateSubstStatusCmd l)
         rp = substPipelineOf (translateSubstStatusCmd r)
-    in Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+     in Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
   T_Backgrounded _ tok ->
     Stmt (Background (translateSubstStatusCmd tok))
   T_BraceGroup _ tokens ->
@@ -625,28 +677,28 @@ translateSubstSimpleCommand assignments cmdToks =
   let envFlags = [SetLocal, SetExport]
       envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
       cmd = translateSubstCommandTokens cmdToks
-  in case (envAssigns, cmd) of
-      ([], Just fishCmd) -> Stmt fishCmd
-      ([], Nothing) -> Comment "Skipped empty command in substitution"
-      (_, Just fishCmd) ->
-        case NE.nonEmpty (envAssigns ++ [Stmt fishCmd]) of
-          Just body -> Stmt (Begin body [])
-          Nothing -> Comment "Skipped empty command in substitution"
-      (_, Nothing) ->
-        case NE.nonEmpty envAssigns of
-          Just body -> Stmt (Begin body [])
-          Nothing -> Comment "Skipped empty command in substitution"
+   in case (envAssigns, cmd) of
+        ([], Just fishCmd) -> Stmt fishCmd
+        ([], Nothing) -> Comment "Skipped empty command in substitution"
+        (_, Just fishCmd) ->
+          case NE.nonEmpty (envAssigns ++ [Stmt fishCmd]) of
+            Just body -> Stmt (Begin body [])
+            Nothing -> Comment "Skipped empty command in substitution"
+        (_, Nothing) ->
+          case NE.nonEmpty envAssigns of
+            Just body -> Stmt (Begin body [])
+            Nothing -> Comment "Skipped empty command in substitution"
 
 translateSubstCommandTokens :: [Token] -> Maybe (FishCommand TStatus)
 translateSubstCommandTokens cmdTokens =
   case cmdTokens of
     [] -> Nothing
-    (c:args) ->
+    (c : args) ->
       let name = tokenToLiteralText c
           argExprs = map translateTokenToExprOrRedirect args
-      in if T.null name
-           then Nothing
-           else Just (Command name argExprs)
+       in if T.null name
+            then Nothing
+            else Just (Command name argExprs)
 
 translateSubstStatusCmd :: Token -> FishCommand TStatus
 translateSubstStatusCmd tok =
@@ -662,32 +714,32 @@ translateSubstStatusCmd tok =
     T_AndIf _ l r ->
       let lp = substPipelineOf (translateSubstStatusCmd l)
           rp = substPipelineOf (translateSubstStatusCmd r)
-      in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+       in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
     T_OrIf _ l r ->
       let lp = substPipelineOf (translateSubstStatusCmd l)
           rp = substPipelineOf (translateSubstStatusCmd r)
-      in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+       in JobConj (FishJobConjunction Nothing lp [JCOr rp])
     _ -> Command "true" []
 
 translateSubstCommandTokensToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translateSubstCommandTokensToStatus assignments cmdTokens =
   let baseCmd = fromMaybe (Command "true" []) (translateSubstCommandTokens cmdTokens)
-  in if null assignments
-       then baseCmd
-       else
-         let envFlags = [SetLocal, SetExport]
-             envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
-         in case NE.nonEmpty (envAssigns ++ [Stmt baseCmd]) of
-              Just body -> Begin body []
-              Nothing -> baseCmd
+   in if null assignments
+        then baseCmd
+        else
+          let envFlags = [SetLocal, SetExport]
+              envAssigns = concatMap (translateAssignmentWithFlags envFlags) assignments
+           in case NE.nonEmpty (envAssigns ++ [Stmt baseCmd]) of
+                Just body -> Begin body []
+                Nothing -> baseCmd
 
 translateSubstPipeline :: [Token] -> [Token] -> FishCommand TStatus
 translateSubstPipeline bang cmds =
   case mapMaybe translateSubstTokenToMaybeStatusCmd cmds of
     [] -> Command "true" []
-    (c:cs) ->
-      let pipe = Pipeline (substJobPipelineFromList (c:cs))
-      in if null bang then pipe else Not pipe
+    (c : cs) ->
+      let pipe = Pipeline (substJobPipelineFromList (c : cs))
+       in if null bang then pipe else Not pipe
 
 translateSubstTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
 translateSubstTokenToMaybeStatusCmd token =
@@ -700,27 +752,27 @@ translateSubstTokenToMaybeStatusCmd token =
     T_AndIf _ l r ->
       let lp = substPipelineOf (translateSubstStatusCmd l)
           rp = substPipelineOf (translateSubstStatusCmd r)
-      in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
     T_OrIf _ l r ->
       let lp = substPipelineOf (translateSubstStatusCmd l)
           rp = substPipelineOf (translateSubstStatusCmd r)
-      in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
     _ -> Nothing
 
 substJobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
 substJobPipelineFromList [] = substPipelineOf (Command "true" [])
-substJobPipelineFromList (c:cs) =
+substJobPipelineFromList (c : cs) =
   FishJobPipeline
-    { jpTime = False
-    , jpVariables = []
-    , jpStatement = Stmt c
-    , jpCont = map (\cmd -> PipeTo { jpcVariables = [], jpcStatement = Stmt cmd }) cs
-    , jpBackgrounded = False
+    { jpTime = False,
+      jpVariables = [],
+      jpStatement = Stmt c,
+      jpCont = map (\cmd -> PipeTo {jpcVariables = [], jpcStatement = Stmt cmd}) cs,
+      jpBackgrounded = False
     }
 
 substPipelineOf :: FishCommand TStatus -> FishJobPipeline
 substPipelineOf cmd =
-  FishJobPipeline { jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False }
+  FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
 
 translateSubstConditionToken :: Token -> FishCommand TStatus
 translateSubstConditionToken = \case
@@ -728,11 +780,11 @@ translateSubstConditionToken = \case
   TC_And _ _ _ l r ->
     let lp = substPipelineOf (translateSubstConditionToken l)
         rp = substPipelineOf (translateSubstConditionToken r)
-    in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+     in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
   TC_Or _ _ _ l r ->
     let lp = substPipelineOf (translateSubstConditionToken l)
         rp = substPipelineOf (translateSubstConditionToken r)
-    in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+     in JobConj (FishJobConjunction Nothing lp [JCOr rp])
   TC_Unary _ _ "!" inner ->
     Not (translateSubstConditionToken inner)
   TC_Unary _ _ op inner ->
@@ -753,19 +805,20 @@ translateSubstBinaryCondition op lhs rhs
   | op == "!=" = Not (stringMatch "-q")
   | otherwise =
       let testArgs =
-            [ ExprVal (translateTokenToExpr lhs)
-            , ExprVal (ExprLiteral op)
-            , ExprVal (translateTokenToExpr rhs)
+            [ ExprVal (translateTokenToExpr lhs),
+              ExprVal (ExprLiteral op),
+              ExprVal (translateTokenToExpr rhs)
             ]
-      in Command "test" testArgs
+       in Command "test" testArgs
   where
     stringMatch flag =
-      Command "string"
-        [ ExprVal (ExprLiteral "match")
-        , ExprVal (ExprLiteral flag)
-        , ExprVal (ExprLiteral "--")
-        , ExprVal (translateTokenToExpr rhs)
-        , ExprVal (translateTokenToExpr lhs)
+      Command
+        "string"
+        [ ExprVal (ExprLiteral "match"),
+          ExprVal (ExprLiteral flag),
+          ExprVal (ExprLiteral "--"),
+          ExprVal (translateTokenToExpr rhs),
+          ExprVal (translateTokenToExpr lhs)
         ]
 
 translateDefaultExpansionWith :: (Text -> FishJobList) -> Text -> FishExpr (TList TStr) -> FishExpr (TList TStr)
@@ -773,7 +826,7 @@ translateDefaultExpansionWith condFn name defaultExpr =
   let cond = condFn name
       thenStmt = emitList (ExprVariable (VarAll (specialVarName name)))
       elseStmt = emitList defaultExpr
-  in commandSubst (Stmt (If cond (thenStmt NE.:| []) [elseStmt] []) :| [])
+   in commandSubst (Stmt (If cond (thenStmt NE.:| []) [elseStmt] []) :| [])
 
 translateAssignDefaultExpansionWith :: (Text -> FishJobList) -> Text -> FishExpr (TList TStr) -> FishExpr (TList TStr)
 translateAssignDefaultExpansionWith condFn name defaultExpr =
@@ -781,25 +834,29 @@ translateAssignDefaultExpansionWith condFn name defaultExpr =
       setStmt = Stmt (Set [SetLocal] (specialVarName name) defaultExpr)
       thenStmt = emitList (ExprVariable (VarAll (specialVarName name)))
       elseStmts = [setStmt, emitList (ExprVariable (VarAll (specialVarName name)))]
-  in commandSubst (Stmt (If cond (thenStmt NE.:| []) elseStmts []) :| [])
+   in commandSubst (Stmt (If cond (thenStmt NE.:| []) elseStmts []) :| [])
 
 translateErrorExpansionWith :: (Text -> FishJobList) -> Text -> FishExpr (TList TStr) -> FishExpr (TList TStr)
 translateErrorExpansionWith condFn name errExpr =
   let cond = condFn name
       thenStmt = emitList (ExprVariable (VarAll (specialVarName name)))
-      errStmt = Stmt (Command "printf"
-        [ ExprVal (ExprLiteral "%s\n")
-        , ExprVal (ExprJoinList errExpr)
-        , RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
-        ])
+      errStmt =
+        Stmt
+          ( Command
+              "printf"
+              [ ExprVal (ExprLiteral "%s\n"),
+                ExprVal (ExprJoinList errExpr),
+                RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
+              ]
+          )
       elseStmt = StmtList [errStmt, Stmt (Exit (Just (ExprNumLiteral 1)))]
-  in commandSubst (Stmt (If cond (thenStmt NE.:| []) [elseStmt] []) :| [])
+   in commandSubst (Stmt (If cond (thenStmt NE.:| []) [elseStmt] []) :| [])
 
 translateAltExpansionWith :: (Text -> FishJobList) -> Text -> FishExpr (TList TStr) -> FishExpr (TList TStr)
 translateAltExpansionWith condFn name altExpr =
   let cond = condFn name
       thenStmt = emitList altExpr
-  in commandSubst (Stmt (If cond (thenStmt NE.:| []) [] []) :| [])
+   in commandSubst (Stmt (If cond (thenStmt NE.:| []) [] []) :| [])
 
 --------------------------------------------------------------------------------
 -- Extended parameter expansion (substring, patterns, case)
@@ -831,6 +888,7 @@ translateModifierExpansion word = do
                   Nothing -> Nothing
 
 data CaseMod = CaseUpper | CaseLower
+
 data PatternAnchor = AnchorStart | AnchorEnd | AnchorNone
 
 isLengthExpansion :: Text -> Text -> Bool
@@ -860,22 +918,23 @@ parseSubstringModifier modifier = do
       (offsetTxt, remainder) = T.breakOn ":" rest
   if T.null offsetTxt
     then Nothing
-    else if T.null remainder
-      then Just (offsetTxt, Nothing)
-      else Just (offsetTxt, Just (T.drop 1 remainder))
+    else
+      if T.null remainder
+        then Just (offsetTxt, Nothing)
+        else Just (offsetTxt, Just (T.drop 1 remainder))
 
 translateSubstringExpansion :: Text -> Text -> Maybe Text -> FishExpr (TList TStr)
 translateSubstringExpansion name offsetTxt lenTxt =
   let offsetExpr = parseArithExprAdjusted offsetTxt
       lenExpr = lenTxt >>= parseArithExpr
       args =
-        [ ExprVal (ExprLiteral "sub")
-        , ExprVal (ExprLiteral "--start")
-        , ExprVal offsetExpr
+        [ ExprVal (ExprLiteral "sub"),
+          ExprVal (ExprLiteral "--start"),
+          ExprVal offsetExpr
         ]
           <> maybe [] (\lenVal -> [ExprVal (ExprLiteral "--length"), ExprVal lenVal]) lenExpr
           <> [ExprVal (ExprLiteral "--"), ExprVal (ExprVariable (VarAll name))]
-  in commandSubst (Stmt (Command "string" args) NE.:| [])
+   in commandSubst (Stmt (Command "string" args) NE.:| [])
 
 parsePatternRemoval :: Text -> Maybe (Bool, Bool, Text)
 parsePatternRemoval modifier
@@ -890,14 +949,14 @@ translatePatternRemoval name isPrefix greedy pat =
   let regex = globToRegex greedy pat
       anchored = if isPrefix then "^" <> regex else regex <> "$"
       args =
-        [ ExprVal (ExprLiteral "replace")
-        , ExprVal (ExprLiteral "-r")
-        , ExprVal (ExprLiteral "--")
-        , ExprVal (ExprLiteral anchored)
-        , ExprVal (ExprLiteral "")
-        , ExprVal (ExprVariable (VarAll name))
+        [ ExprVal (ExprLiteral "replace"),
+          ExprVal (ExprLiteral "-r"),
+          ExprVal (ExprLiteral "--"),
+          ExprVal (ExprLiteral anchored),
+          ExprVal (ExprLiteral ""),
+          ExprVal (ExprVariable (VarAll name))
         ]
-  in commandSubst (Stmt (Command "string" args) NE.:| [])
+   in commandSubst (Stmt (Command "string" args) NE.:| [])
 
 parsePatternReplacement :: Text -> Maybe (Bool, Text, Text, PatternAnchor)
 parsePatternReplacement modifier = do
@@ -919,17 +978,18 @@ translatePatternReplacement name allMatches pat repl anchor =
         AnchorStart -> "^" <> regexBase
         AnchorEnd -> regexBase <> "$"
         AnchorNone -> regexBase
-      flags = ExprVal (ExprLiteral "replace")
-        : ExprVal (ExprLiteral "-r")
-        : ([ExprVal (ExprLiteral "-a") | allMatches])
+      flags =
+        ExprVal (ExprLiteral "replace")
+          : ExprVal (ExprLiteral "-r")
+          : ([ExprVal (ExprLiteral "-a") | allMatches])
       args =
         flags
-          <> [ ExprVal (ExprLiteral "--")
-             , ExprVal (ExprLiteral anchored)
-             , ExprVal (ExprLiteral repl)
-             , ExprVal (ExprVariable (VarAll name))
+          <> [ ExprVal (ExprLiteral "--"),
+               ExprVal (ExprLiteral anchored),
+               ExprVal (ExprLiteral repl),
+               ExprVal (ExprVariable (VarAll name))
              ]
-  in commandSubst (Stmt (Command "string" args) NE.:| [])
+   in commandSubst (Stmt (Command "string" args) NE.:| [])
 
 parseCaseModifier :: Text -> Maybe CaseMod
 parseCaseModifier = \case
@@ -942,7 +1002,7 @@ parseCaseModifier = \case
 translateCaseModification :: Text -> Bool -> FishExpr (TList TStr)
 translateCaseModification name upper =
   let op = if upper then StrUpper else StrLower
-  in ExprListLiteral [ExprStringOp op (varAsString name)]
+   in ExprListLiteral [ExprStringOp op (varAsString name)]
 
 stripIndexPrefix :: Text -> Text
 stripIndexPrefix modifier =
@@ -967,7 +1027,7 @@ globToRegex greedy = go False
         Just (c, rest)
           | inClass ->
               let next = if c == ']' then go False rest else go True rest
-              in T.singleton c <> next
+               in T.singleton c <> next
           | c == '[' -> T.singleton c <> go True rest
           | c == '*' -> star <> go False rest
           | c == '?' -> "." <> go False rest
@@ -986,16 +1046,16 @@ parseArithExpr = parseArithExprWith False
 parseArithExprWith :: Bool -> Text -> Maybe (FishExpr TInt)
 parseArithExprWith adjust txt =
   let trimmed = T.strip txt
-  in if T.null trimmed
-      then Nothing
-      else case parseInt trimmed of
-        Just n ->
-          let adjusted = if adjust then adjustIndex n else n
-          in Just (ExprNumLiteral adjusted)
-        Nothing -> do
-          args <- arithArgsFromText trimmed
-          let base = ExprMath args
-          pure (if adjust then adjustIndexExpr base else base)
+   in if T.null trimmed
+        then Nothing
+        else case parseInt trimmed of
+          Just n ->
+            let adjusted = if adjust then adjustIndex n else n
+             in Just (ExprNumLiteral adjusted)
+          Nothing -> do
+            args <- arithArgsFromText trimmed
+            let base = ExprMath args
+            pure (if adjust then adjustIndexExpr base else base)
 
 adjustIndexExpr :: FishExpr TInt -> FishExpr TInt
 adjustIndexExpr expr =
@@ -1010,13 +1070,15 @@ appendMathArgs args = args <> (ExprLiteral "+" NE.:| [ExprLiteral "1"])
 parseIndexSpec :: Text -> Maybe (FishIndex TStr (TList TStr))
 parseIndexSpec rawTxt =
   let txt = T.strip rawTxt
-  in if T.null txt || txt == "@" || txt == "*"
-       then Nothing
-       else if T.isInfixOf ".." txt
-         then parseIndexRange txt
-         else if T.isInfixOf "," txt
-           then parseIndexList txt
-           else parseIndexSingle txt
+   in if T.null txt || txt == "@" || txt == "*"
+        then Nothing
+        else
+          if T.isInfixOf ".." txt
+            then parseIndexRange txt
+            else
+              if T.isInfixOf "," txt
+                then parseIndexList txt
+                else parseIndexSingle txt
   where
     parseIndexSingle t = do
       n <- parseIndexExpr t
@@ -1032,9 +1094,9 @@ parseIndexSpec rawTxt =
         [startTxt, endTxt] ->
           let startIx = parseIndexPart startTxt
               endIx = parseIndexPart endTxt
-          in if isNothing startIx && isNothing endIx
-              then Nothing
-              else Just (IndexRange startIx endIx)
+           in if isNothing startIx && isNothing endIx
+                then Nothing
+                else Just (IndexRange startIx endIx)
         _ -> Nothing
 
     parseIndexPart t =
@@ -1072,16 +1134,16 @@ indexTokenText tok =
       Just (adjustIndexText (toText s))
     _ ->
       let txt = tokenToLiteralText tok
-      in if T.null txt then Nothing else Just (adjustIndexText txt)
+       in if T.null txt then Nothing else Just (adjustIndexText txt)
 
 indexTextFromArithToken :: Token -> Text
 indexTextFromArithToken tok =
   let args = arithArgsFromToken tok
-  in case NE.toList args of
-    [ExprLiteral txt]
-      | Just n <- parseInt txt -> show (adjustIndex n)
-    _ ->
-      mathExprText (appendMathArgs args)
+   in case NE.toList args of
+        [ExprLiteral txt]
+          | Just n <- parseInt txt -> show (adjustIndex n)
+        _ ->
+          mathExprText (appendMathArgs args)
 
 indexTextFromRaw :: Text -> Text
 indexTextFromRaw raw =
@@ -1117,18 +1179,18 @@ parseGlobPattern txt = GlobPattern (finishLiteral (go txt) [])
         Just ('?', rest) -> GlobQuestion : go rest
         Just ('[', rest) ->
           let (cls, r) = T.breakOn "]" rest
-          in case T.uncons r of
-              Just (_, r') -> GlobCharClass cls : go r'
-              Nothing -> GlobLiteral ("[" <> cls) : go r
+           in case T.uncons r of
+                Just (_, r') -> GlobCharClass cls : go r'
+                Nothing -> GlobLiteral ("[" <> cls) : go r
         Just ('{', rest) ->
           let (inner, r) = T.breakOn "}" rest
               alts = filter (not . T.null) (T.splitOn "," inner)
-          in case (alts, T.uncons r) of
-              (a:as, Just (_, r')) -> GlobBraces (a NE.:| as) : go r'
-              _ -> GlobLiteral ("{" <> inner) : go r
+           in case (alts, T.uncons r) of
+                (a : as, Just (_, r')) -> GlobBraces (a NE.:| as) : go r'
+                _ -> GlobLiteral ("{" <> inner) : go r
         Just (c, rest) ->
           let (lit, r) = spanLiteral rest (T.singleton c)
-          in GlobLiteral lit : go r
+           in GlobLiteral lit : go r
 
     spanLiteral t acc =
       case T.uncons t of
@@ -1141,7 +1203,7 @@ parseGlobPattern txt = GlobPattern (finishLiteral (go txt) [])
       case parts of
         [] -> reverse acc
         (GlobLiteral t1 : GlobLiteral t2 : xs) -> finishLiteral (GlobLiteral (t1 <> t2) : xs) acc
-        (x:xs) -> finishLiteral xs (x:acc)
+        (x : xs) -> finishLiteral xs (x : acc)
 
 renderExtglobForFish :: String -> [Token] -> Maybe Text
 renderExtglobForFish op parts =
@@ -1160,16 +1222,16 @@ extglobAlternatives parts =
         if length splitAlts == 1 && length parts > 1
           then map tokenToLiteralText parts
           else map (T.concat . map tokenToLiteralText) splitAlts
-  in filter (not . T.null) alts
+   in filter (not . T.null) alts
 
 splitExtglobParts :: [Token] -> [[Token]]
 splitExtglobParts toks = go toks [] []
   where
     go [] current acc =
       reverse (reverse current : acc)
-    go (t:ts) current acc
+    go (t : ts) current acc
       | isSeparator t = go ts [] (reverse current : acc)
-      | otherwise = go ts (t:current) acc
+      | otherwise = go ts (t : current) acc
 
     isSeparator tok =
       case tok of
@@ -1190,7 +1252,6 @@ renderMathArg = \case
   ExprLiteral txt -> txt
   ExprVariable (VarScalar name) -> "$" <> name
   _ -> "<expr>"
-
 
 adjustIndexText :: Text -> Text
 adjustIndexText txt =

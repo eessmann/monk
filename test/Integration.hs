@@ -1,23 +1,24 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Integration
-  ( integrationTests
-  ) where
+  ( integrationTests,
+  )
+where
 
+import Data.Char (isAlpha, toLower)
+import Data.List (findIndices)
+import Data.List.NonEmpty qualified as NE
+import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Monk
+import System.Directory (findExecutable)
+import System.Environment qualified as Env
+import System.Exit (ExitCode)
+import System.Process (CreateProcess (env), proc, readCreateProcessWithExitCode)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
-import qualified Data.Text as T
-import qualified Data.Text.IO as TIO
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
-import Data.Char (isAlpha, toLower)
-import qualified Data.List.NonEmpty as NE
-import Data.List (findIndices)
-import System.Directory (findExecutable)
-import qualified System.Environment as Env
-import System.Exit (ExitCode)
-import System.Process (CreateProcess (env), readCreateProcessWithExitCode, proc)
 
 integrationTests :: TestTree
 integrationTests =
@@ -25,16 +26,16 @@ integrationTests =
 
 integrationFixtures :: [IntegrationFixture]
 integrationFixtures =
-  [ IntegrationFixture "pwd-cd" "test/fixtures/integration/pwd-cd.bash"
-  , IntegrationFixture "stdout-stderr-exit" "test/fixtures/integration/stdout-stderr-exit.bash"
-  , IntegrationFixture "cd-tmp" "test/fixtures/integration/cd-tmp.bash"
-  , IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash"
-  , IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash"
+  [ IntegrationFixture "pwd-cd" "test/fixtures/integration/pwd-cd.bash",
+    IntegrationFixture "stdout-stderr-exit" "test/fixtures/integration/stdout-stderr-exit.bash",
+    IntegrationFixture "cd-tmp" "test/fixtures/integration/cd-tmp.bash",
+    IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
+    IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash"
   ]
 
 data IntegrationFixture = IntegrationFixture
-  { ifName :: String
-  , ifPath :: FilePath
+  { ifName :: String,
+    ifPath :: FilePath
   }
 
 data Shell
@@ -43,21 +44,21 @@ data Shell
   deriving stock (Eq, Show)
 
 data RunResult = RunResult
-  { rrExit :: ExitCode
-  , rrStdout :: Text
-  , rrStderr :: Text
-  , rrEnv :: Map.Map Text Text
+  { rrExit :: ExitCode,
+    rrStdout :: Text,
+    rrStderr :: Text,
+    rrEnv :: Map.Map Text Text
   }
   deriving stock (Eq, Show)
 
 data EnvDelta = EnvDelta
-  { envAddedOrChanged :: Map.Map Text Text
-  , envRemoved :: Set.Set Text
+  { envAddedOrChanged :: Map.Map Text Text,
+    envRemoved :: Set.Set Text
   }
   deriving stock (Eq, Show)
 
 integrationTest :: IntegrationFixture -> TestTree
-integrationTest IntegrationFixture { ifName, ifPath } = H.testCase ifName $ do
+integrationTest IntegrationFixture {ifName, ifPath} = H.testCase ifName $ do
   runnable <- shouldRunIntegration
   case runnable of
     Left _reason -> pure ()
@@ -96,7 +97,7 @@ shouldRunIntegration = do
       Nothing -> False
       Just raw ->
         let val = map toLower raw
-        in val `elem` ["1", "true", "yes", "on"]
+         in val `elem` ["1", "true", "yes", "on"]
 
 prepareEnv :: IO [(String, String)]
 prepareEnv = do
@@ -109,15 +110,15 @@ runShell :: Shell -> [(String, String)] -> Text -> IO RunResult
 runShell shell env0 script = do
   let wrapped = wrapScript shell script
       (cmd, args) = shellCommand shell wrapped
-      process = (proc cmd args) { env = Just env0 }
+      process = (proc cmd args) {env = Just env0}
   (exitCode, out, err) <- readCreateProcessWithExitCode process ""
   let (stdoutPart, envPart) = splitEnv marker (T.pack out)
   pure
     RunResult
-      { rrExit = exitCode
-      , rrStdout = stdoutPart
-      , rrStderr = T.pack err
-      , rrEnv = parseEnv envPart
+      { rrExit = exitCode,
+        rrStdout = stdoutPart,
+        rrStderr = T.pack err,
+        rrEnv = parseEnv envPart
       }
 
 shellCommand :: Shell -> Text -> (FilePath, [String])
@@ -138,18 +139,18 @@ wrapScript shell script =
           statusLine = "monk_status=$?"
           footer = [statusLine, markerLine, "env", "exit $monk_status"]
           prefix = if scriptMayExit script then ["(" <> body <> ")"] else [body]
-      in T.intercalate "\n" (prefix <> footer)
+       in T.intercalate "\n" (prefix <> footer)
     ShellFish ->
       let body = if T.null (T.strip script) then "true" else script
           markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
           statusLine = "set -l monk_status $status"
           footer = [statusLine, markerLine, "env", "exit $monk_status"]
-      in if scriptMayExit script
-           then
-             let escaped = escapeSingleQuotes body
-                 inner = "fish --no-config -c '" <> escaped <> "'"
-             in T.intercalate "\n" ([inner] <> footer)
-           else T.intercalate "\n" ([body] <> footer)
+       in if scriptMayExit script
+            then
+              let escaped = escapeSingleQuotes body
+                  inner = "fish --no-config -c '" <> escaped <> "'"
+               in T.intercalate "\n" ([inner] <> footer)
+            else T.intercalate "\n" ([body] <> footer)
 
 scriptMayExit :: Text -> Bool
 scriptMayExit script =
@@ -164,13 +165,13 @@ splitEnv :: Text -> Text -> (Text, Text)
 splitEnv markerText output =
   let ls = T.splitOn "\n" output
       idxs = findIndices (== markerText) ls
-  in case NE.nonEmpty idxs of
-      Nothing -> (output, "")
-      Just neIdxs ->
-        let idx = NE.last neIdxs
-            outLines = take idx ls
-            envLines = drop (idx + 1) ls
-        in (T.intercalate "\n" outLines, T.intercalate "\n" envLines)
+   in case NE.nonEmpty idxs of
+        Nothing -> (output, "")
+        Just neIdxs ->
+          let idx = NE.last neIdxs
+              outLines = take idx ls
+              envLines = drop (idx + 1) ls
+           in (T.intercalate "\n" outLines, T.intercalate "\n" envLines)
 
 parseEnv :: Text -> Map.Map Text Text
 parseEnv = Map.fromList . mapMaybe parseLine . filter (not . T.null) . T.lines
@@ -188,8 +189,8 @@ diffEnv baseEnv newEnv =
         Map.differenceWith
           (\newVal oldVal -> if newVal == oldVal then Nothing else Just newVal)
           newEnv
-          baseEnv
-    , envRemoved = Map.keysSet (Map.difference baseEnv newEnv)
+          baseEnv,
+      envRemoved = Map.keysSet (Map.difference baseEnv newEnv)
     }
 
 translateScriptText :: FilePath -> Text -> IO (Either String Text)

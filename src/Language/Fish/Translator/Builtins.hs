@@ -1,26 +1,27 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Builtins
-  ( translateLocalCommand
-  , translateExportCommand
-  , translateDeclareCommand
-  , translateReadonlyCommand
-  , translateShiftCommand
-  , translateUnsetCommand
-  , translateTrapCommand
-  , translateScopedAssignment
-  ) where
+  ( translateLocalCommand,
+    translateExportCommand,
+    translateDeclareCommand,
+    translateReadonlyCommand,
+    translateShiftCommand,
+    translateUnsetCommand,
+    translateTrapCommand,
+    translateScopedAssignment,
+  )
+where
 
 import Control.Monad (foldM)
-import qualified Data.Set as Set
-import qualified Data.Text as T
+import Data.Set qualified as Set
+import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Monad
-  ( TranslateM
-  , TranslationContext(..)
-  , addLocalVars
-  , addWarning
-  , context
+  ( TranslateM,
+    TranslationContext (..),
+    addLocalVars,
+    addWarning,
+    context,
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
@@ -51,10 +52,11 @@ translateExportCommand args = do
       else wrapStmtList stmts
 
 data DeclareFlags = DeclareFlags
-  { declareGlobal :: Bool
-  , declareExport :: Bool
-  , declareReadonly :: Bool
-  } deriving stock (Show, Eq)
+  { declareGlobal :: Bool,
+    declareExport :: Bool,
+    declareReadonly :: Bool
+  }
+  deriving stock (Show, Eq)
 
 defaultDeclareFlags :: DeclareFlags
 defaultDeclareFlags = DeclareFlags False False False
@@ -65,7 +67,7 @@ translateDeclareCommand =
 
 translateReadonlyCommand :: [Token] -> TranslateM FishStatement
 translateReadonlyCommand =
-  translateDeclareCommandWith (defaultDeclareFlags { declareReadonly = True })
+  translateDeclareCommandWith (defaultDeclareFlags {declareReadonly = True})
 
 translateDeclareCommandWith :: DeclareFlags -> [Token] -> TranslateM FishStatement
 translateDeclareCommandWith baseFlags args = do
@@ -93,29 +95,30 @@ declareScopeFlags inFunc flags =
           then SetGlobal
           else SetLocal
       base = [scope]
-  in if declareExport flags
-      then base <> [SetExport]
-      else base
+   in if declareExport flags
+        then base <> [SetExport]
+        else base
 
 parseDeclareFlags :: DeclareFlags -> [Token] -> TranslateM (DeclareFlags, [Token])
 parseDeclareFlags = go
   where
     go acc [] = pure (acc, [])
-    go acc (t:ts) =
+    go acc (t : ts) =
       let txt = tokenToLiteralText t
-      in if txt == "--"
-           then pure (acc, ts)
-           else if T.isPrefixOf "-" txt && T.length txt > 1
-             then do
-               acc' <- foldM applyDeclareFlag acc (T.unpack (T.drop 1 txt))
-               go acc' ts
-             else pure (acc, t:ts)
+       in if txt == "--"
+            then pure (acc, ts)
+            else
+              if T.isPrefixOf "-" txt && T.length txt > 1
+                then do
+                  acc' <- foldM applyDeclareFlag acc (T.unpack (T.drop 1 txt))
+                  go acc' ts
+                else pure (acc, t : ts)
 
     applyDeclareFlag flags c =
       case c of
-        'g' -> pure flags { declareGlobal = True }
-        'x' -> pure flags { declareExport = True }
-        'r' -> pure flags { declareReadonly = True }
+        'g' -> pure flags {declareGlobal = True}
+        'x' -> pure flags {declareExport = True}
+        'r' -> pure flags {declareReadonly = True}
         'a' -> pure flags
         'A' -> addWarnFlag flags "declare -A (associative arrays)"
         'i' -> addWarnFlag flags "declare -i (integer attributes)"
@@ -131,13 +134,13 @@ parseDeclareArg flags tok =
     T_Assignment _ _ var _ _ ->
       let name = toText var
           stmts = translateAssignmentWithFlags flags tok
-      in pure (Just name, stmts)
+       in pure (Just name, stmts)
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
         Just (name, valueTxt) ->
           let expr = ExprListLiteral [ExprLiteral valueTxt]
-          in pure (Just name, [Stmt (Set flags name expr)])
+           in pure (Just name, [Stmt (Set flags name expr)])
         Nothing ->
           if isValidVarName txt
             then pure (Just txt, [Stmt (Set flags txt (ExprListLiteral []))])
@@ -167,7 +170,7 @@ shiftByCount n =
   let start = ExprNumLiteral (n + 1)
       range = IndexRange (Just start) (Just (ExprNumLiteral (-1)))
       expr = ExprVariable (VarIndex "argv" range)
-  in Stmt (Set [] "argv" expr)
+   in Stmt (Set [] "argv" expr)
 
 parseShiftCount :: Token -> Maybe Int
 parseShiftCount tok =
@@ -189,25 +192,26 @@ translateUnsetCommand args = do
       _ -> wrapStmtList stmts
   where
     go _ acc [] = pure (reverse acc)
-    go mode acc (tok:rest) =
+    go mode acc (tok : rest) =
       let txt = tokenToLiteralText tok
-      in if T.isPrefixOf "-" txt
-           then case txt of
-             "-f" -> go UnsetFunc acc rest
-             "-v" -> go UnsetVar acc rest
-             "--" -> go mode acc rest
-             _ -> do
-               addWarning ("Unsupported unset flag: " <> txt)
-               go mode acc rest
-           else if T.null txt
-             then do
-               addWarning "Unsupported unset argument: empty name"
-               go mode acc rest
-             else do
-               let stmt = case mode of
-                     UnsetFunc -> Stmt (Command "functions" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
-                     UnsetVar -> Stmt (Command "set" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
-               go mode (stmt : acc) rest
+       in if T.isPrefixOf "-" txt
+            then case txt of
+              "-f" -> go UnsetFunc acc rest
+              "-v" -> go UnsetVar acc rest
+              "--" -> go mode acc rest
+              _ -> do
+                addWarning ("Unsupported unset flag: " <> txt)
+                go mode acc rest
+            else
+              if T.null txt
+                then do
+                  addWarning "Unsupported unset argument: empty name"
+                  go mode acc rest
+                else do
+                  let stmt = case mode of
+                        UnsetFunc -> Stmt (Command "functions" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
+                        UnsetVar -> Stmt (Command "set" [ExprVal (ExprLiteral "-e"), ExprVal (ExprLiteral txt)])
+                  go mode (stmt : acc) rest
 
 translateTrapCommand :: [Token] -> TranslateM FishStatement
 translateTrapCommand args =
@@ -215,7 +219,7 @@ translateTrapCommand args =
     [] -> do
       addWarning "trap with no arguments is not supported"
       pure (Stmt (Command "trap" []))
-    (cmdTok:signalToks) -> do
+    (cmdTok : signalToks) -> do
       let cmdExpr = translateTokenToExpr cmdTok
           rawSignals = map tokenToLiteralText signalToks
       if any isTrapOption rawSignals
@@ -234,19 +238,20 @@ translateTrapCommand args =
       | isExitSignal sig =
           Command "trap" [ExprVal (ExprLiteral "--on-exit"), ExprVal cmd]
       | otherwise =
-          Command "trap"
-            [ ExprVal (ExprLiteral "--on-signal")
-            , ExprVal (ExprLiteral (normalizeSignal sig))
-            , ExprVal cmd
+          Command
+            "trap"
+            [ ExprVal (ExprLiteral "--on-signal"),
+              ExprVal (ExprLiteral (normalizeSignal sig)),
+              ExprVal cmd
             ]
 
     isExitSignal sig =
       let upper = T.toUpper sig
-      in upper == "EXIT" || upper == "0"
+       in upper == "EXIT" || upper == "0"
 
     normalizeSignal sig =
       let upper = T.toUpper sig
-      in fromMaybe upper (T.stripPrefix "SIG" upper)
+       in fromMaybe upper (T.stripPrefix "SIG" upper)
 
 translateScopedAssignment :: Set.Set Text -> Token -> [FishStatement]
 translateScopedAssignment locals tok =
@@ -268,13 +273,13 @@ parseLocalArg tok =
     T_Assignment _ _ var _ _ ->
       let name = toText var
           stmts = translateAssignmentWithFlags [SetLocal] tok
-      in pure (Just (name, stmts))
+       in pure (Just (name, stmts))
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
         Just (name, valueTxt) ->
           let expr = ExprListLiteral [ExprLiteral valueTxt]
-          in pure (Just (name, [Stmt (Set [SetLocal] name expr)]))
+           in pure (Just (name, [Stmt (Set [SetLocal] name expr)]))
         Nothing ->
           if isValidVarName txt
             then pure (Just (txt, [Stmt (Set [SetLocal] txt (ExprListLiteral []))]))
@@ -288,13 +293,13 @@ parseExportArg locals tok =
     T_Assignment _ _ var _ _ ->
       let name = toText var
           flags = exportFlags locals name
-      in pure (translateAssignmentWithFlags flags tok)
+       in pure (translateAssignmentWithFlags flags tok)
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
         Just (name, valueTxt) ->
           let expr = ExprListLiteral [ExprLiteral valueTxt]
-          in pure [Stmt (Set (exportFlags locals name) name expr)]
+           in pure [Stmt (Set (exportFlags locals name) name expr)]
         Nothing ->
           if isValidVarName txt
             then pure [Stmt (Set (exportFlags locals txt) txt (ExprVariable (VarAll txt)))]
@@ -319,4 +324,4 @@ parseAssignmentLiteral txt = do
 
 wrapStmtList :: [FishStatement] -> FishStatement
 wrapStmtList [stmt] = stmt
-wrapStmtList stmts  = StmtList stmts
+wrapStmtList stmts = StmtList stmts

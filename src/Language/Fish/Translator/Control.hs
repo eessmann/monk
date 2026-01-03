@@ -3,23 +3,24 @@
 {-# LANGUAGE TypeApplications #-}
 
 module Language.Fish.Translator.Control
-  ( translateIfExpression
-  , translateFunction
-  , translateCaseExpression
-  , translateSelectExpression
-  , translateCondTokens
-  , negateJobList
-  , toNonEmptyStmtList
-  ) where
+  ( translateIfExpression,
+    translateFunction,
+    translateCaseExpression,
+    translateSelectExpression,
+    translateCondTokens,
+    negateJobList,
+    toNonEmptyStmtList,
+  )
+where
 
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
+import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Language.Fish.AST
-import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Commands (translateTokensToStatusCmd)
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)
+import Language.Fish.Translator.Variables
 import ShellCheck.AST
-import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Type.Reflection (typeRep)
 
 --------------------------------------------------------------------------------
@@ -47,7 +48,7 @@ translateIfExpression translateStmt conditionBranches elseBranch = do
     translateIf' [] elseStmts =
       pure $ case toNonEmptyStmtList elseStmts of
         Just neElse -> Begin neElse []
-        Nothing     -> Begin (Stmt (Command "true" []) NE.:| []) []
+        Nothing -> Begin (Stmt (Command "true" []) NE.:| []) []
     translateIf' ((condTokens, thenTokens) : rest) elseStmts =
       let condition = translateCondTokens condTokens
        in do
@@ -56,18 +57,18 @@ translateIfExpression translateStmt conditionBranches elseBranch = do
             let elseBlock = [Stmt nestedElse]
             pure $ case toNonEmptyStmtList thenBlock of
               Just neThen -> If condition neThen elseBlock []
-              Nothing     -> If condition (Comment "Empty 'then' block" NE.:| []) elseBlock []
+              Nothing -> If condition (Comment "Empty 'then' block" NE.:| []) elseBlock []
 
 translateFunction :: (Token -> TranslateM FishStatement) -> String -> Token -> TranslateM FishStatement
 translateFunction translateStmt funcName bodyToken = withFunctionScope $ do
   bodyStmts <- case bodyToken of
     T_BraceGroup _ stmts -> mapM translateStmt stmts
     T_Subshell _ stmts -> mapM translateStmt stmts
-    _ -> (:[]) <$> translateStmt bodyToken
+    _ -> (: []) <$> translateStmt bodyToken
   let funcNameT = toText funcName
   pure $ case toNonEmptyStmtList bodyStmts of
     Just neBody ->
-      Stmt (Function FishFunction { funcName = funcNameT, funcFlags = [], funcParams = [], funcBody = neBody })
+      Stmt (Function FishFunction {funcName = funcNameT, funcFlags = [], funcParams = [], funcBody = neBody})
     Nothing -> Comment ("Skipped function with empty body: " <> funcNameT)
 
 translateCaseExpression :: (Token -> TranslateM FishStatement) -> Token -> [(CaseType, [Token], [Token])] -> TranslateM FishStatement
@@ -77,7 +78,7 @@ translateCaseExpression translateStmt switchExpr cases = do
       filtered = catMaybes caseItems
   pure $ case NE.nonEmpty filtered of
     Just neCases -> Stmt (Switch switchArg neCases [])
-    Nothing      -> Comment "Skipped case expression with no valid cases"
+    Nothing -> Comment "Skipped case expression with no valid cases"
 
 translateCaseItem :: (Token -> TranslateM FishStatement) -> (CaseType, [Token], [Token]) -> TranslateM (Maybe CaseItem)
 translateCaseItem translateStmt (_, patterns, body) = do
@@ -101,9 +102,10 @@ translateSelectExpression translateStmt var items body = do
       setItems = Stmt (Set [SetLocal] itemsVar itemsExpr)
       menuBody =
         Stmt
-          ( Command "echo"
-              [ ExprVal (ExprStringConcat (ExprVariable (VarScalar idxVar)) (ExprLiteral ")"))
-              , ExprVal (ExprVariable (VarIndex itemsVar (IndexSingle (selectIndexExpr idxVar))))
+          ( Command
+              "echo"
+              [ ExprVal (ExprStringConcat (ExprVariable (VarScalar idxVar)) (ExprLiteral ")")),
+                ExprVal (ExprVariable (VarIndex itemsVar (IndexSingle (selectIndexExpr idxVar))))
               ]
           )
       menuLoop =
@@ -112,7 +114,9 @@ translateSelectExpression translateStmt var items body = do
       setReply = Stmt (Set [SetLocal] "REPLY" (ExprListLiteral [ExprVariable (VarScalar choiceVar)]))
       setVar =
         Stmt
-          ( Set [SetLocal] (T.pack var)
+          ( Set
+              [SetLocal]
+              (T.pack var)
               (ExprListLiteral [ExprVariable (VarIndex itemsVar (IndexSingle (selectIndexExpr choiceVar)))])
           )
       loopBody = menuLoop : readChoice : setReply : setVar : bodyStmts
@@ -121,9 +125,9 @@ translateSelectExpression translateStmt var items body = do
       let cond = FishJobList (FishJobConjunction Nothing (FishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] NE.:| [])
           whileStmt = Stmt (While cond neBody [])
           initBlock = [setItems, whileStmt]
-      in pure $ case toNonEmptyStmtList initBlock of
-        Just neInit -> Stmt (Begin neInit [])
-        Nothing -> Comment "Skipped select loop"
+       in pure $ case toNonEmptyStmtList initBlock of
+            Just neInit -> Stmt (Begin neInit [])
+            Nothing -> Comment "Skipped select loop"
     Nothing -> pure (Comment "Skipped empty select loop body")
 
 selectItemsExpr :: [Token] -> FishExpr (TList TStr)
@@ -131,13 +135,13 @@ selectItemsExpr [] = ExprVariable (VarAll "argv")
 selectItemsExpr tokens =
   case map translateTokenToListExpr tokens of
     [] -> ExprListLiteral []
-    (x:xs) -> foldl' ExprListConcat x xs
+    (x : xs) -> foldl' ExprListConcat x xs
 
 selectIndexListExpr :: Text -> FishExpr (TList TStr)
 selectIndexListExpr itemsVar =
   let countExpr =
         ExprCommandSubst (Stmt (Command "count" [ExprVal (ExprVariable (VarAll itemsVar))]) NE.:| [])
-  in ExprCommandSubst (Stmt (Command "seq" [ExprVal (ExprLiteral "1"), ExprVal countExpr]) NE.:| [])
+   in ExprCommandSubst (Stmt (Command "seq" [ExprVal (ExprLiteral "1"), ExprVal countExpr]) NE.:| [])
 
 selectIndexExpr :: Text -> FishExpr TInt
 selectIndexExpr varName =
@@ -154,8 +158,8 @@ negateJobList :: FishJobList -> FishJobList
 negateJobList (FishJobList (jc NE.:| rest)) =
   FishJobList (negateConj jc NE.:| rest)
   where
-    negateConj conj = conj { jcJob = negatePipeline (jcJob conj) }
-    negatePipeline jp = jp { jpStatement = negateStmt (jpStatement jp) }
+    negateConj conj = conj {jcJob = negatePipeline (jcJob conj)}
+    negatePipeline jp = jp {jpStatement = negateStmt (jpStatement jp)}
     negateStmt (Stmt (cmd :: FishCommand a)) =
       case testEquality (typeRep @a) (typeRep @TStatus) of
         Just Refl -> Stmt (Not cmd)
@@ -171,4 +175,4 @@ jobListFromStatus cmd =
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
-  FishJobPipeline { jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False }
+  FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}

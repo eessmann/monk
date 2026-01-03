@@ -1,9 +1,9 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GADTs #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeApplications #-}
 
 module Language.Fish.AST
   ( -- * Core types
@@ -14,6 +14,7 @@ module Language.Fish.AST
     FishExpr (..),
     FishVarRef (..),
     FishIndex (..),
+
     -- * Special variables and helpers
     SpecialVarRef (..),
     GlobPattern (..),
@@ -21,6 +22,7 @@ module Language.Fish.AST
     StringOp (..),
     ReadFlag (..),
     SetFlag (..),
+
     -- * Job model
     VariableAssignment (..),
     FishJobPipeline (..),
@@ -65,7 +67,7 @@ module Language.Fish.AST
     eqFishExprSameType,
 
     -- * Example
-    exampleAST
+    exampleAST,
   )
 where
 
@@ -73,7 +75,9 @@ import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Type.Reflection (typeRep)
 
 --------------------------------------------------------------------------------
+
 -- | Phantom-typed tags for expressions and commands.
+
 --------------------------------------------------------------------------------
 
 data FishType
@@ -86,12 +90,14 @@ data FishType
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Top-level statements in a fish script.
+
 --------------------------------------------------------------------------------
 
 data FishStatement where
   -- | A single command or block.
-  Stmt :: Typeable a => FishCommand a -> FishStatement
+  Stmt :: (Typeable a) => FishCommand a -> FishStatement
   -- | A list of statements (used for scripts and block bodies).
   StmtList :: [FishStatement] -> FishStatement
   -- | A line comment (without the leading '#').
@@ -112,7 +118,9 @@ instance Eq FishStatement where
   _ == _ = False
 
 --------------------------------------------------------------------------------
+
 -- | Fish commands and block forms.
+
 --------------------------------------------------------------------------------
 
 data FishCommand (t :: FishType) where
@@ -150,12 +158,10 @@ data FishCommand (t :: FishType) where
   Exit :: Maybe (FishExpr TInt) -> FishCommand TStatus
   Source :: FishExpr TStr -> FishCommand TStatus
   Eval :: FishExpr TStr -> FishCommand TStatus
-
   -- | IO commands.
   Read :: [ReadFlag] -> [Text] -> FishCommand TStatus
   Echo :: NonEmpty (FishExpr TStr) -> FishCommand TUnit
   Printf :: FishExpr TStr -> [FishExpr TStr] -> FishCommand TUnit
-
   -- | Combining commands and job control.
   Pipeline :: FishJobPipeline -> FishCommand TStatus
   JobConj :: FishJobConjunction -> FishCommand TStatus
@@ -168,7 +174,6 @@ data FishCommand (t :: FishType) where
   Background :: (Typeable a) => FishCommand a -> FishCommand TStatus
   Wait :: Maybe (FishExpr TInt) -> FishCommand TStatus
   Exec :: FishExpr TStr -> [ExprOrRedirect] -> FishCommand TStatus
-
   -- | Command decoration (`builtin`, `command`, `exec`).
   Decorated ::
     (Typeable a) =>
@@ -217,11 +222,13 @@ eqFishCommandSameType (Wait a1) (Wait a2) = case (a1, a2) of
   _ -> False
 eqFishCommandSameType (Exec c1 a1) (Exec c2 a2) = eqFishExpr c1 c2 && a1 == a2
 eqFishCommandSameType (Decorated d1 c1) (Decorated d2 c2) = d1 == d2 && eqFishCommandSameType c1 c2
--- | Fallback for constructors not matching or different types.
+-- \| Fallback for constructors not matching or different types.
 eqFishCommandSameType _ _ = False
 
 --------------------------------------------------------------------------------
+
 -- | Expressions and command arguments.
+
 --------------------------------------------------------------------------------
 
 -- | A command argument or redirection.
@@ -241,30 +248,23 @@ data FishExpr (t :: FishType) where
   -- | Literals.
   ExprLiteral :: Text -> FishExpr TStr
   ExprNumLiteral :: Int -> FishExpr TInt
-
   -- | Variables.
   ExprVariable :: FishVarRef t -> FishExpr t
   -- | Special variables.
   ExprSpecialVar :: SpecialVarRef t -> FishExpr t
-
   -- | String operations.
   ExprStringConcat :: FishExpr TStr -> FishExpr TStr -> FishExpr TStr
   ExprStringOp :: StringOp -> FishExpr TStr -> FishExpr TStr
   ExprJoinList :: FishExpr (TList TStr) -> FishExpr TStr
-
   -- | Arithmetic operations.
   ExprMath :: NonEmpty (FishExpr TStr) -> FishExpr TInt
-
   -- | Command substitution (fish produces a list of strings).
   ExprCommandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
-
   -- | List operations.
   ExprListLiteral :: [FishExpr TStr] -> FishExpr (TList TStr)
   ExprListConcat :: (Typeable a) => FishExpr (TList a) -> FishExpr (TList a) -> FishExpr (TList a)
-
   -- | Glob patterns.
   ExprGlob :: GlobPattern -> FishExpr (TList TStr)
-
   -- | Process substitution (psub).
   ExprProcessSubst :: NonEmpty FishStatement -> FishExpr TStr
 
@@ -296,7 +296,9 @@ eqFishExpr :: forall a b. (Typeable a, Typeable b) => FishExpr a -> FishExpr b -
 eqFishExpr = eqGADT eqFishExprSameType
 
 --------------------------------------------------------------------------------
+
 -- | Variables and indexing.
+
 --------------------------------------------------------------------------------
 
 -- | Variable references.
@@ -328,7 +330,9 @@ instance Eq (FishIndex a b) where
   _ == _ = False
 
 --------------------------------------------------------------------------------
+
 -- | Function definitions and flags.
+
 --------------------------------------------------------------------------------
 
 -- | Function flags accepted by `function`.
@@ -354,7 +358,9 @@ data FishFunction = FishFunction
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Flags accepted by `set`.
+
 --------------------------------------------------------------------------------
 
 data SetFlag
@@ -371,7 +377,9 @@ data SetFlag
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Job model (pipelines and conjunctions).
+
 --------------------------------------------------------------------------------
 
 -- | Variable assignment attached to a job or continuation.
@@ -383,18 +391,18 @@ data VariableAssignment = VariableAssignment
 
 -- | Pipeline continuation: `|` followed by variables and a statement.
 data JobPipeCont = PipeTo
-  { jpcVariables :: [VariableAssignment]
-  , jpcStatement :: FishStatement
+  { jpcVariables :: [VariableAssignment],
+    jpcStatement :: FishStatement
   }
   deriving stock (Show, Eq)
 
 -- | Pipeline with optional `time`, leading variables, and backgrounding.
 data FishJobPipeline = FishJobPipeline
-  { jpTime :: Bool
-  , jpVariables :: [VariableAssignment]
-  , jpStatement :: FishStatement
-  , jpCont :: [JobPipeCont]
-  , jpBackgrounded :: Bool
+  { jpTime :: Bool,
+    jpVariables :: [VariableAssignment],
+    jpStatement :: FishStatement,
+    jpCont :: [JobPipeCont],
+    jpBackgrounded :: Bool
   }
   deriving stock (Show, Eq)
 
@@ -423,7 +431,9 @@ newtype FishJobList = FishJobList (NonEmpty FishJobConjunction)
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Case items and redirections.
+
 --------------------------------------------------------------------------------
 
 -- | A switch case item with one or more patterns and a body.
@@ -435,9 +445,9 @@ data CaseItem = CaseItem
 
 -- | Detailed redirection model.
 data Redirect = Redirect
-  { redirSource :: RedirectSource
-  , redirOp :: RedirectOp
-  , redirTarget :: RedirectTarget
+  { redirSource :: RedirectSource,
+    redirOp :: RedirectOp,
+    redirTarget :: RedirectTarget
   }
   deriving stock (Show, Eq)
 
@@ -474,7 +484,9 @@ data Decoration
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Source tracking.
+
 --------------------------------------------------------------------------------
 
 -- | A source position in an input file (1-based line/column).
@@ -493,7 +505,9 @@ data SourceRange = SourceRange
   deriving stock (Show, Eq, Ord)
 
 --------------------------------------------------------------------------------
+
 -- | Equality helper for GADTs.
+
 --------------------------------------------------------------------------------
 
 eqGADT ::
@@ -509,26 +523,39 @@ eqGADT eqSameType left right =
     Nothing -> False
 
 --------------------------------------------------------------------------------
+
 -- | Type synonyms for convenience.
+
 --------------------------------------------------------------------------------
 
 type CmdStr = FishCommand TStr
+
 type CmdInt = FishCommand TInt
+
 type CmdBool = FishCommand TBool
+
 type CmdList a = FishCommand (TList a)
+
 type CmdStatus = FishCommand TStatus
+
 type CmdUnit = FishCommand TUnit
 
 type ExprStr = FishExpr TStr
+
 type ExprInt = FishExpr TInt
+
 type ExprBool = FishExpr TBool
+
 type ExprList a = FishExpr (TList a)
+
 type ExprStatus = FishExpr TStatus
 
 type ExprUnit = FishExpr TUnit
 
 --------------------------------------------------------------------------------
+
 -- | Special variables, glob patterns, string ops, and read flags.
+
 --------------------------------------------------------------------------------
 
 -- | Typed special variables available in fish.
@@ -595,97 +622,98 @@ data ReadFlag
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
+
 -- | Example AST.
+
 --------------------------------------------------------------------------------
 
 exampleAST :: [FishStatement]
 exampleAST =
-  [ Comment "Example test script"
-
-  , Stmt (Command "echo" [ExprVal (ExprLiteral "Hello Fish!")])
-
-  , Stmt
+  [ Comment "Example test script",
+    Stmt (Command "echo" [ExprVal (ExprLiteral "Hello Fish!")]),
+    Stmt
       ( If
           (FishJobList (FishJobConjunction Nothing (FishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] :| []))
           (Stmt (Command "echo" [ExprVal (ExprLiteral "In the if!")]) :| [])
           [Stmt (Command "echo" [ExprVal (ExprLiteral "In the else!")])]
           []
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( Function
           FishFunction
-            { funcName = "greet"
-            , funcFlags = []
-            , funcParams = ["name"]
-            , funcBody =
+            { funcName = "greet",
+              funcFlags = [],
+              funcParams = ["name"],
+              funcBody =
                 Stmt
-                  ( Command "echo"
-                      [ ExprVal (ExprLiteral "Hello,")
-                      , ExprVal (ExprVariable (VarIndex "name" (IndexSingle (ExprNumLiteral 1))))
+                  ( Command
+                      "echo"
+                      [ ExprVal (ExprLiteral "Hello,"),
+                        ExprVal (ExprVariable (VarIndex "name" (IndexSingle (ExprNumLiteral 1))))
                       ]
-                  ) :| []
+                  )
+                  :| []
             }
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( For
           "x"
           (ExprListLiteral [ExprLiteral "1", ExprLiteral "2", ExprLiteral "3"])
           ( Stmt
-              ( Command "echo"
-                  [ ExprVal (ExprLiteral "Number:")
-                  , ExprVal (ExprVariable (VarAll "x"))
+              ( Command
+                  "echo"
+                  [ ExprVal (ExprLiteral "Number:"),
+                    ExprVal (ExprVariable (VarAll "x"))
                   ]
-              ) :| []
+              )
+              :| []
           )
           []
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( For
           "x"
-          (ExprListConcat
-            (ExprVariable (VarAll "var1"))
-            (ExprListConcat (ExprVariable (VarAll "var2")) (ExprVariable (VarAll "var3"))))
+          ( ExprListConcat
+              (ExprVariable (VarAll "var1"))
+              (ExprListConcat (ExprVariable (VarAll "var2")) (ExprVariable (VarAll "var3")))
+          )
           ( Stmt
-              ( Command "echo"
-                  [ ExprVal (ExprLiteral "Variable:")
-                  , ExprVal (ExprVariable (VarAll "x"))
+              ( Command
+                  "echo"
+                  [ ExprVal (ExprLiteral "Variable:"),
+                    ExprVal (ExprVariable (VarAll "x"))
                   ]
-              ) :| []
+              )
+              :| []
           )
           []
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( Pipeline
           FishJobPipeline
-            { jpTime = False
-            , jpVariables = []
-            , jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "something")])
-            , jpCont = [PipeTo { jpcVariables = [], jpcStatement = Stmt (Command "wc" [ExprVal (ExprLiteral "-l")]) }]
-            , jpBackgrounded = False
+            { jpTime = False,
+              jpVariables = [],
+              jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "something")]),
+              jpCont = [PipeTo {jpcVariables = [], jpcStatement = Stmt (Command "wc" [ExprVal (ExprLiteral "-l")])}],
+              jpBackgrounded = False
             }
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( Switch
           (ExprJoinList (ExprVariable (VarAll "myvar")))
           ( CaseItem
-              { casePatterns = ExprLiteral "foo" :| []
-              , caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was foo")]) :| []
+              { casePatterns = ExprLiteral "foo" :| [],
+                caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was foo")]) :| []
               }
-          :| [ CaseItem
-                { casePatterns = ExprLiteral "bar" :| [ExprLiteral "baz"]
-                , caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was bar or baz")]) :| []
-                }
-             ]
+              :| [ CaseItem
+                     { casePatterns = ExprLiteral "bar" :| [ExprLiteral "baz"],
+                       caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was bar or baz")]) :| []
+                     }
+                 ]
           )
           []
-      )
-
-  , Stmt
+      ),
+    Stmt
       ( Begin
           (Stmt (Command "echo" [ExprVal (ExprLiteral "brace body")]) :| [])
           [RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))]

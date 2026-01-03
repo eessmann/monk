@@ -1,9 +1,10 @@
 module Language.Fish.Translator.Names
-  ( isValidVarName
-  ) where
+  ( isValidVarName,
+  )
+where
 
 import Data.Char (isAlpha, isAlphaNum)
-import qualified Data.Text as T
+import Data.Text qualified as T
 
 isValidVarName :: Text -> Bool
 isValidVarName name =

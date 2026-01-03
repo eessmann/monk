@@ -1,14 +1,15 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module TestSupport
-  ( trueCond
-  , translateScript
-  , translateScriptMaybe
-  ) where
+  ( trueCond,
+    translateScript,
+    translateScriptMaybe,
+  )
+where
 
+import Data.List.NonEmpty qualified as NE
 import Monk
 import Test.Tasty.HUnit as H
-import qualified Data.List.NonEmpty as NE
 
 trueCond :: FishJobList
 trueCond =

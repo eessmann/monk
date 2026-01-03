@@ -2,15 +2,16 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.ForArithmetic
-  ( translateForArithmetic
-  ) where
+  ( translateForArithmetic,
+  )
+where
 
 import Data.List (lookup)
-import qualified Data.List.NonEmpty as NE
-import qualified Data.Text as T
+import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 import Language.Fish.AST
-import qualified Language.Fish.Translator.Control as Control
-import qualified Language.Fish.Translator.IO as FIO
+import Language.Fish.Translator.Control qualified as Control
+import Language.Fish.Translator.IO qualified as FIO
 import Language.Fish.Translator.Monad (TranslateM, addWarning)
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
@@ -36,8 +37,10 @@ translateForArithmetic translateStmt initTok condTok incTok body = do
     Nothing -> do
       addWarning "Unsupported arithmetic increment; emitting comment"
       pure (Comment "Unsupported arithmetic increment")
-  let loopBody = fromMaybe (Comment "Empty arithmetic loop body" NE.:| [])
-        (Control.toNonEmptyStmtList (bodyStmts <> [incStmt]))
+  let loopBody =
+        fromMaybe
+          (Comment "Empty arithmetic loop body" NE.:| [])
+          (Control.toNonEmptyStmtList (bodyStmts <> [incStmt]))
       condJob = FishJobList (FishJobConjunction Nothing (FIO.pipelineOf condCmd) [] NE.:| [])
       whileStmt = Stmt (While condJob loopBody [])
       initBlock = [initStmt, whileStmt]
@@ -55,7 +58,7 @@ parseForInitToken = \case
     var <- arithVarName lhs
     let expr = mathSubstFromArgs (arithArgsFromToken rhs)
     pure (Stmt (Set [SetGlobal] var expr))
-  TA_Sequence _ (t:_) -> parseForInitToken t
+  TA_Sequence _ (t : _) -> parseForInitToken t
   TA_Parenthesis _ t -> parseForInitToken t
   _ -> Nothing
 
@@ -78,16 +81,16 @@ parseForCondToken tok =
         Just testOp ->
           let lhsExpr = arithValueExpr lhs
               rhsExpr = arithValueExpr rhs
-          in Just (Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr])
+           in Just (Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr])
         Nothing -> Just (arithNonZeroCond tok)
-    TA_Sequence _ (t:_) -> parseForCondToken t
+    TA_Sequence _ (t : _) -> parseForCondToken t
     TA_Parenthesis _ t -> parseForCondToken t
     _ -> Just (arithNonZeroCond tok)
 
 parseForCondText :: Token -> Maybe (FishCommand TStatus)
 parseForCondText tok =
   let txt = T.strip (tokenToLiteralText tok)
-  in parseBinaryCond txt <|> parseMathCond txt
+   in parseBinaryCond txt <|> parseMathCond txt
 
 parseBinaryCond :: Text -> Maybe (FishCommand TStatus)
 parseBinaryCond txt = do
@@ -99,12 +102,12 @@ parseBinaryCond txt = do
 
 testOpMap :: [(Text, Text)]
 testOpMap =
-  [ ("<=", "-le")
-  , (">=", "-ge")
-  , ("==", "-eq")
-  , ("!=", "-ne")
-  , ("<", "-lt")
-  , (">", "-gt")
+  [ ("<=", "-le"),
+    (">=", "-ge"),
+    ("==", "-eq"),
+    ("!=", "-ne"),
+    ("<", "-lt"),
+    (">", "-gt")
   ]
 
 parseMathCond :: Text -> Maybe (FishCommand TStatus)
@@ -116,7 +119,7 @@ parseMathCond txt = do
 arithNonZeroCond :: Token -> FishCommand TStatus
 arithNonZeroCond tok =
   let expr = ExprMath (arithArgsFromToken tok)
-  in Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")]
+   in Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")]
 
 arithVarName :: Token -> Maybe Text
 arithVarName = \case
@@ -137,7 +140,7 @@ parseIncToken = \case
   TA_Unary _ "--" inner -> incByVar inner "-" (ExprLiteral "1" NE.:| [])
   TA_Assignment _ "+=" lhs rhs -> incByVar lhs "+" (arithArgsFromToken rhs)
   TA_Assignment _ "-=" lhs rhs -> incByVar lhs "-" (arithArgsFromToken rhs)
-  TA_Sequence _ (t:_) -> parseIncToken t
+  TA_Sequence _ (t : _) -> parseIncToken t
   TA_Parenthesis _ t -> parseIncToken t
   _ -> Nothing
 
@@ -169,31 +172,31 @@ parseAssignmentText :: Text -> Maybe (Text, Text)
 parseAssignmentText txt =
   let (lhs, rest) = T.breakOn "=" txt
       rhs = T.drop 1 rest
-  in if T.isPrefixOf "=" rest && isValidVarName lhs && not (T.null rhs)
-      then Just (lhs, rhs)
-      else Nothing
+   in if T.isPrefixOf "=" rest && isValidVarName lhs && not (T.null rhs)
+        then Just (lhs, rhs)
+        else Nothing
 
 parseComparison :: Text -> Maybe (Text, Text, Text)
 parseComparison txt =
   let ops = ["<=", ">=", "==", "!=", "<", ">"]
       trimmed = T.strip txt
-  in firstJust (map (splitOnOp trimmed) ops)
+   in firstJust (map (splitOnOp trimmed) ops)
   where
     splitOnOp t op =
       case T.breakOn op t of
         (_, rhs) | T.null rhs -> Nothing
         (lhs, rhs) ->
           let rhs' = T.drop (T.length op) rhs
-          in if T.null (T.strip lhs) || T.null (T.strip rhs')
-              then Nothing
-              else Just (T.strip lhs, op, T.strip rhs')
+           in if T.null (T.strip lhs) || T.null (T.strip rhs')
+                then Nothing
+                else Just (T.strip lhs, op, T.strip rhs')
 
 valueExpr :: Text -> FishExpr TStr
 valueExpr txt =
   let trimmed = T.strip txt
-  in if isValidVarName trimmed
-       then ExprVariable (VarScalar trimmed)
-       else ExprLiteral trimmed
+   in if isValidVarName trimmed
+        then ExprVariable (VarScalar trimmed)
+        else ExprLiteral trimmed
 
 mathSubstFromText :: Text -> FishExpr (TList TStr)
 mathSubstFromText txt =
