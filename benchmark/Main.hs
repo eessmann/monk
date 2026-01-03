@@ -1,6 +1,10 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Main (main) where
 
 import Monk (projectName)
 
 main :: IO ()
-main = putStrLn ("Benchmarks for " ++ projectName)
+main = do
+    let banner = "Benchmarks for " <> projectName
+    putTextLn banner

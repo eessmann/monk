@@ -4,6 +4,8 @@
 -- Maintainer: Erich Essmann <essmanne@gmail.com>
 --
 -- See README for more info
+{-# LANGUAGE OverloadedStrings #-}
+
 module Monk
   ( translateRoot, -- ^ Convert a ShellCheck AST (Root) into a Fish AST.
     translateToken, -- ^ Convert a ShellCheck AST (Token) into a Fish AST.
