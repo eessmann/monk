@@ -73,8 +73,7 @@ data TranslateState = TranslateState
 type TranslateM = StateT TranslateState (Either TranslateError)
 
 runTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError (a, TranslateState)
-runTranslate cfg m =
-  runTranslateWithPositions cfg mempty m
+runTranslate cfg = runTranslateWithPositions cfg mempty
 
 runTranslateWithPositions ::
   TranslateConfig ->

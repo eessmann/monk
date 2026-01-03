@@ -127,7 +127,7 @@ wordIsGlob parts =
       T_Extglob {} -> True
       _ -> False
 
-    hasGlobChars t = T.any (`elem` ("*?[]{}" :: String)) t
+    hasGlobChars = T.any (`elem` ("*?[]{}" :: String))
 
 wordNeedsExtglobShim :: [Token] -> Bool
 wordNeedsExtglobShim =
@@ -186,7 +186,7 @@ translateAssignmentWithFlags baseFlags tok =
 --------------------------------------------------------------------------------
 
 translateArithmetic :: Token -> FishCommand TStatus
-translateArithmetic exprToken = mathCommandFromToken True exprToken
+translateArithmetic = mathCommandFromToken True
 
 mathCommandFromToken :: Bool -> Token -> FishCommand TStatus
 mathCommandFromToken suppressOutput exprToken =
@@ -403,9 +403,7 @@ splitParamOperator word@(T_NormalWord _ parts) =
       let prefix = name <> op
           suffix = T.drop (T.length prefix) literal
           suffixTokens =
-            if T.null suffix
-              then []
-              else [T_Literal (Id 0) (toString suffix)]
+            ([T_Literal (Id 0) (toString suffix) | not (T.null suffix)])
       pure (op, suffixTokens <> rest)
     findOp name literal =
       let matches op = T.isPrefixOf (name <> op) literal
@@ -483,7 +481,7 @@ emitList expr =
     ])
 
 commandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
-commandSubst stmts = ExprCommandSubst stmts
+commandSubst = ExprCommandSubst
 
 translateArrayElements :: [Token] -> FishExpr (TList TStr)
 translateArrayElements elems =
@@ -923,7 +921,7 @@ translatePatternReplacement name allMatches pat repl anchor =
         AnchorNone -> regexBase
       flags = ExprVal (ExprLiteral "replace")
         : ExprVal (ExprLiteral "-r")
-        : (if allMatches then [ExprVal (ExprLiteral "-a")] else [])
+        : ([ExprVal (ExprLiteral "-a") | allMatches])
       args =
         flags
           <> [ ExprVal (ExprLiteral "--")

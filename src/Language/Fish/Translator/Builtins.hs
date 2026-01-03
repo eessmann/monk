@@ -29,7 +29,7 @@ import ShellCheck.AST
 translateLocalCommand :: [Token] -> TranslateM FishStatement
 translateLocalCommand args = do
   inFunc <- gets (inFunction . context)
-  when (not inFunc) $
+  unless inFunc $
     addWarning "local used outside a function; fish will treat it as local to the current scope"
   parsed <- mapM parseLocalArg args
   let names = map fst (catMaybes parsed)
@@ -98,7 +98,7 @@ declareScopeFlags inFunc flags =
       else base
 
 parseDeclareFlags :: DeclareFlags -> [Token] -> TranslateM (DeclareFlags, [Token])
-parseDeclareFlags base toks = go base toks
+parseDeclareFlags = go
   where
     go acc [] = pure (acc, [])
     go acc (t:ts) =
