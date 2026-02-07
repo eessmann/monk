@@ -30,7 +30,11 @@ integrationFixtures =
     IntegrationFixture "pushd-popd" "test/fixtures/integration/pushd-popd.bash",
     IntegrationFixture "time-prefix" "test/fixtures/integration/time-prefix.bash",
     IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
-    IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash"
+    IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash",
+    IntegrationFixture "realworld/hello-world" "test/fixtures/realworld/hello-world.bash",
+    IntegrationFixture "realworld/pyramid-right" "test/fixtures/realworld/pyramid-right.bash",
+    IntegrationFixture "realworld/pyramid-left" "test/fixtures/realworld/pyramid-left.bash",
+    IntegrationFixture "realworld/version-compare" "test/fixtures/realworld/version-compare.bash"
   ]
 
 data IntegrationFixture = IntegrationFixture

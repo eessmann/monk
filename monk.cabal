@@ -109,6 +109,7 @@ test-suite monk-test
   other-modules:       Gen
                      , TestSupport
                      , ShellSupport
+                     , RealWorld
                      , Golden
                      , Integration
                      , Unit.Inline

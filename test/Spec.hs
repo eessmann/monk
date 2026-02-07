@@ -5,6 +5,7 @@ import Integration
 import Property.OutputEquivalence
 import Property.Pretty
 import Property.Translation
+import RealWorld
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Unit.Polysemy
 import Unit.Pretty
@@ -26,5 +27,6 @@ tests =
       propertyTranslationTests,
       propertyOutputEquivalenceTests,
       goldenTests,
-      integrationTests
+      integrationTests,
+      realWorldTests
     ]
