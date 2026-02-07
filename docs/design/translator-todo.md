@@ -125,6 +125,7 @@
 - [x] Create corpus of bash scripts for testing
 - [x] Differential testing: run both bash and fish, compare outputs
 - [x] Property: translated script output ≈ original script output
+- [x] Add real-world fixtures from external repos with manual fish translations for small scripts
 - [x] Add semantic tests for `${var:=...}` / `${var:?err}` side effects and error propagation
 - [x] Add semantic tests for `((i++))`, `((i+=n))`, and `((expr))` status behavior (partial coverage)
 - [x] Add semantic tests for `case` pattern globs and fallthrough behavior
@@ -201,7 +202,7 @@
 
 ## Bake-off notes
 
-- 2026-02-07: ran Monk vs babelfish on corpus + benchmark + integration + golden fixtures. Babelfish failed on `medium` (unsupported UnaryArithm), `large` (unsupported ForClause), and `extglob-basic` (unsupported ExtGlob). Monk succeeded on all, with warnings for `set -e/-u/pipefail`, IFS splitting, and subshell best-effort in `time-prefix`.
+- 2026-02-07: ran Monk vs babelfish on corpus + benchmark + integration + golden + real-world fixtures. Babelfish failed on `medium` (unsupported UnaryArithm), `large` (unsupported ForClause), `extglob-basic` (unsupported ExtGlob), and the real-world pyramid fixtures (unsupported C-style for loop). Monk succeeded on all, with warnings for `set -e/-u/pipefail`, IFS splitting, and subshell best-effort in `time-prefix`.
 - Case patterns with expansions now build the full pattern via `printf` in a command substitution to avoid empty-string failures and glob expansion surprises.
 - Details recorded in `docs/babelfish-comparison.md`.
 - [x] Implement `T_HereString`: `<<<` → echo piping

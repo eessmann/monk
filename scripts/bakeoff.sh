@@ -44,6 +44,7 @@ files=(
   benchmark/fixtures/*.bash
   test/fixtures/integration/*.bash
   test/fixtures/golden/*.bash
+  test/fixtures/realworld/*.bash
 )
 
 normalize_err() {

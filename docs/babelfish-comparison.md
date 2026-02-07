@@ -25,6 +25,7 @@ Use a mix of synthetic and real-world inputs:
 - **Monk benchmarks**: `benchmark/fixtures/*.bash`
 - **Integration fixtures**: `test/fixtures/integration/*.bash`
 - **Golden fixtures**: `test/fixtures/golden/*.bash`
+- **Real-world fixtures**: `test/fixtures/realworld/*.bash`
 - **Your scripts**: add representative Bash scripts under `benchmark/fixtures/` or a separate folder.
 
 ### Baseline commands
@@ -111,23 +112,25 @@ The script normalizes runtime stderr by stripping the output directory and tool-
 
 Environment:
 
-- Monk: git caea589 (dirty working tree)
+- Monk: git 256f52c (dirty working tree)
 - Babelfish: 1.2.1 (stdin-only CLI)
 - Fish: 4.2.0
-- Report output: `/tmp/monk-babelfish-20260207172728`
+- Report output: `/tmp/monk-babelfish-20260207174100`
 
-Summary (corpus + benchmarks + integration + golden fixtures):
+Summary (corpus + benchmarks + integration + golden + real-world fixtures):
 
-- Total scripts: 19
-- Monk success: 19/19 (warnings on `large`, `medium`, `time-prefix`)
-- Babelfish success: 16/19 (fails on `large`, `medium`, `extglob-basic`)
-- Runtime diffs where both succeeded: 0/16
+- Total scripts: 23
+- Monk success: 23/23 (warnings on `large`, `medium`, `time-prefix`)
+- Babelfish success: 18/23 (fails on `large`, `medium`, `extglob-basic`, `pyramid-left`, `pyramid-right`)
+- Runtime diffs where both succeeded: 1/18
 
 Key deltas:
 
 - `benchmark/fixtures/medium.bash`: Monk succeeds with set -e/-u/pipefail warnings; babelfish exits 1 with `unsupported: &syntax.UnaryArithm` and an AST dump on stderr
 - `benchmark/fixtures/large.bash`: Monk succeeds with set -e/-u/pipefail and read IFS-splitting warnings; babelfish exits 1 with `unsupported: &syntax.ForClause` and an AST dump on stderr
 - `test/fixtures/golden/extglob-basic.bash`: Monk succeeds; babelfish exits 1 with `unsupported: &syntax.ExtGlob`
+- `test/fixtures/realworld/pyramid-left.bash` and `test/fixtures/realworld/pyramid-right.bash`: Monk succeeds; babelfish exits 1 (unsupported C-style for loop)
+- `test/fixtures/realworld/version-compare.bash`: outputs differ because babelfish does not honor `${1:-default}` style fallbacks
 
 Notes:
 
