@@ -105,29 +105,29 @@ It writes `report.tsv` and `meta.txt` in the output directory. If you want to pi
 BABELFISH_VERSION_OVERRIDE=1.2.1 scripts/bakeoff.sh /tmp/monk-babelfish
 ```
 
+The script normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
+
 ## Bake-off results (2026-02-07)
 
 Environment:
 
-- Monk: git 02f8e9d (dirty working tree)
+- Monk: git caea589 (dirty working tree)
 - Babelfish: 1.2.1 (stdin-only CLI)
 - Fish: 4.2.0
-- Report output: `/tmp/monk-babelfish-20260207170617`
+- Report output: `/tmp/monk-babelfish-20260207172728`
 
 Summary (corpus + benchmarks + integration + golden fixtures):
 
 - Total scripts: 19
 - Monk success: 19/19 (warnings on `large`, `medium`, `time-prefix`)
 - Babelfish success: 16/19 (fails on `large`, `medium`, `extglob-basic`)
-- Runtime diffs where both succeeded: 2/16
+- Runtime diffs where both succeeded: 0/16
 
 Key deltas:
 
 - `benchmark/fixtures/medium.bash`: Monk succeeds with set -e/-u/pipefail warnings; babelfish exits 1 with `unsupported: &syntax.UnaryArithm` and an AST dump on stderr
 - `benchmark/fixtures/large.bash`: Monk succeeds with set -e/-u/pipefail and read IFS-splitting warnings; babelfish exits 1 with `unsupported: &syntax.ForClause` and an AST dump on stderr
 - `test/fixtures/golden/extglob-basic.bash`: Monk succeeds; babelfish exits 1 with `unsupported: &syntax.ExtGlob`
-- `test/fixtures/golden/case-pattern-expansion-glob.bash`: babelfish prints `ok`; Monk exits 1 (see output diff)
-- `test/fixtures/golden/glob-basic.bash`: stderr diff only due to differing output file paths
 
 Notes:
 

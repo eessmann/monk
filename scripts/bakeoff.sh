@@ -46,6 +46,12 @@ files=(
   test/fixtures/golden/*.bash
 )
 
+normalize_err() {
+  sed -e "s|$out_dir|<out_dir>|g" \
+      -e "s|\\.monk\\.fish|.fish|g" \
+      -e "s|\\.babelfish\\.fish|.fish|g"
+}
+
 for f in "${files[@]}"; do
   base=$(basename "$f" .bash)
   monk_fish="$out_dir/$base.monk.fish"
@@ -85,7 +91,9 @@ for f in "${files[@]}"; do
   fi
 
   if [ -f "$out_dir/$base.monk.runerr" ] && [ -f "$out_dir/$base.babelfish.runerr" ]; then
-    if diff -u "$out_dir/$base.babelfish.runerr" "$out_dir/$base.monk.runerr" > "$out_dir/$base.err.diff"; then
+    normalize_err < "$out_dir/$base.babelfish.runerr" > "$out_dir/$base.babelfish.runerr.norm"
+    normalize_err < "$out_dir/$base.monk.runerr" > "$out_dir/$base.monk.runerr.norm"
+    if diff -u "$out_dir/$base.babelfish.runerr.norm" "$out_dir/$base.monk.runerr.norm" > "$out_dir/$base.err.diff"; then
       err_diff="none"
     else
       err_diff="diff"

@@ -202,7 +202,7 @@
 ## Bake-off notes
 
 - 2026-02-07: ran Monk vs babelfish on corpus + benchmark + integration + golden fixtures. Babelfish failed on `medium` (unsupported UnaryArithm), `large` (unsupported ForClause), and `extglob-basic` (unsupported ExtGlob). Monk succeeded on all, with warnings for `set -e/-u/pipefail`, IFS splitting, and subshell best-effort in `time-prefix`.
-- `case-pattern-expansion-glob.bash`: Monk output exits 1 when `$x` is empty due to `string join` requiring an argument; should special-case empty case expressions/pattern joins to avoid runtime errors.
+- Case patterns with expansions now build the full pattern via `printf` in a command substitution to avoid empty-string failures and glob expansion surprises.
 - Details recorded in `docs/babelfish-comparison.md`.
 - [x] Implement `T_HereString`: `<<<` → echo piping
 - [x] Handle `time` command prefix
