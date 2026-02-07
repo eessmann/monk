@@ -144,9 +144,18 @@ translateCasePatternPartsM parts = do
   let pre = concatMap fst translated
       exprs = map snd translated
   pure $
-    case exprs of
-      [] -> (pre, ExprLiteral "")
-      (x : xs) -> (pre, foldl' ExprStringConcat x xs)
+    case NE.nonEmpty exprs of
+      Nothing -> (pre, ExprLiteral "")
+      Just neExprs ->
+        case NE.toList neExprs of
+          [single] -> (pre, single)
+          xs -> (pre, patternConcatExpr xs)
+
+patternConcatExpr :: [FishExpr TStr] -> FishExpr TStr
+patternConcatExpr parts =
+  let fmt = T.replicate (length parts) "%s"
+      args = ExprVal (ExprLiteral fmt) : map ExprVal parts
+   in ExprJoinList (ExprCommandSubst (Stmt (Command "printf" args) NE.:| []))
 
 translateCasePatternPartM :: Token -> TranslateM ([FishStatement], FishExpr TStr)
 translateCasePatternPartM part

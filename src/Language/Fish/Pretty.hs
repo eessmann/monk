@@ -237,7 +237,16 @@ prettyFishExpr = \case
   ExprSpecialVar sv -> prettySpecialVar sv
   ExprStringConcat e1 e2 -> prettyFishExpr e1 <> prettyFishExpr e2 -- Concatenation is implicit
   ExprStringOp op e -> parens (prettyStringOp op <+> prettyFishExpr e)
-  ExprJoinList e -> parens ("string join" <+> escapeFishString " " <+> prettyFishExpr e)
+  ExprJoinList e ->
+    parens
+      ( "string join"
+          <+> escapeFishString " "
+          <+> prettyFishExpr e
+          <+> ";"
+          <+> "or"
+          <+> "printf"
+          <+> escapeFishString ""
+      )
   ExprMath args ->
     parens ("math" <+> hsep (map prettyFishExpr (NE.toList args)))
   ExprCommandSubst stmts ->

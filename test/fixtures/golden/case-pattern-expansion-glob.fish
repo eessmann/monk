@@ -1,4 +1,4 @@
-switch (string join ' ' $x)
-  case (string join ' ' $Y)*
+switch (string join ' ' $x ; or printf '')
+  case (string join ' ' (printf '%s%s' (string join ' ' $Y ; or printf '') '*') ; or printf '')
     echo 'ok'
 end
