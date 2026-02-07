@@ -7,6 +7,7 @@ module ShellSupport
     shouldRunIntegration,
     prepareEnv,
     runShell,
+    runShellWith,
     diffEnv,
   )
 where
@@ -68,11 +69,15 @@ prepareEnv = do
     setVars vars env0 = foldl' (\acc (k, v) -> (k, v) : filter ((/= k) . fst) acc) env0 vars
 
 runShell :: Shell -> [(String, String)] -> Text -> IO RunResult
-runShell shell env0 script = do
-  let wrapped = wrapScript shell script
-      (cmd, args) = shellCommand shell wrapped
-      process = (proc cmd args) {env = Just env0}
-  (exitCode, out, err) <- readCreateProcessWithExitCode process ""
+runShell shell env0 script = runShellWith shell env0 script [] ""
+
+runShellWith :: Shell -> [(String, String)] -> Text -> [Text] -> Text -> IO RunResult
+runShellWith shell env0 script args stdinInput = do
+  let scriptWithArgs = prefixArgs shell args script
+      wrapped = wrapScript shell scriptWithArgs
+      (cmd, cmdArgs) = shellCommand shell wrapped
+      process = (proc cmd cmdArgs) {env = Just env0}
+  (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
   let (stdoutPart, envPart) = splitEnv marker (T.pack out)
   pure
     RunResult
@@ -112,6 +117,22 @@ wrapScript shell script =
                   inner = "fish --no-config -c '" <> escaped <> "'"
                in T.intercalate "\n" ([inner] <> footer)
             else T.intercalate "\n" ([body] <> footer)
+
+prefixArgs :: Shell -> [Text] -> Text -> Text
+prefixArgs shell args script
+  | null args = script
+  | otherwise =
+      case shell of
+        ShellBash ->
+          let prefix = "set -- " <> T.intercalate " " (map quoteArg args)
+           in prefix <> "\n" <> script
+        ShellFish ->
+          let prefix = "set argv " <> T.intercalate " " (map quoteArg args)
+           in prefix <> "\n" <> script
+
+quoteArg :: Text -> Text
+quoteArg txt =
+  "'" <> T.replace "'" "'\\''" txt <> "'"
 
 scriptMayExit :: Text -> Bool
 scriptMayExit script =

@@ -6,12 +6,14 @@ module RealWorld
 where
 
 import Data.Text.IO qualified as TIO
+import FixtureSupport (loadFixtureArgs, loadFixtureStdin)
 import ShellSupport
   ( RunResult (..),
     Shell (..),
     diffEnv,
     prepareEnv,
     runShell,
+    runShellWith,
     shouldRunIntegration,
   )
 import Test.Tasty (TestTree, testGroup)
@@ -36,7 +38,11 @@ realWorldFixtures =
     RealWorldFixture
       "pyramid-left"
       "test/fixtures/realworld/pyramid-left.bash"
-      "test/fixtures/realworld/pyramid-left.fish"
+      "test/fixtures/realworld/pyramid-left.fish",
+    RealWorldFixture
+      "version-compare"
+      "test/fixtures/realworld/version-compare.bash"
+      "test/fixtures/realworld/version-compare.fish"
   ]
 
 realWorldTests :: TestTree
@@ -51,11 +57,13 @@ realWorldTest RealWorldFixture {rfName, rfBashPath, rfFishPath} = H.testCase rfN
     Right () -> do
       bashSrc <- TIO.readFile rfBashPath
       fishSrc <- TIO.readFile rfFishPath
+      args <- loadFixtureArgs rfBashPath
+      stdinInput <- loadFixtureStdin rfBashPath
       baseEnv <- prepareEnv
       baseBash <- runShell ShellBash baseEnv ""
       baseFish <- runShell ShellFish baseEnv ""
-      bashRes <- runShell ShellBash baseEnv bashSrc
-      fishRes <- runShell ShellFish baseEnv fishSrc
+      bashRes <- runShellWith ShellBash baseEnv bashSrc args stdinInput
+      fishRes <- runShellWith ShellFish baseEnv fishSrc args stdinInput
       let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
           fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
       rrExit bashRes @?= rrExit fishRes

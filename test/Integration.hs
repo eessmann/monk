@@ -6,6 +6,7 @@ module Integration
 where
 
 import Data.Text.IO qualified as TIO
+import FixtureSupport (loadFixtureArgs, loadFixtureStdin)
 import Monk
 import ShellSupport
   ( RunResult (..),
@@ -13,6 +14,7 @@ import ShellSupport
     diffEnv,
     prepareEnv,
     runShell,
+    runShellWith,
     shouldRunIntegration,
   )
 import Test.Tasty (TestTree, testGroup)
@@ -50,14 +52,16 @@ integrationTest IntegrationFixture {ifName, ifPath} = H.testCase ifName $ do
     Right () -> do
       bashSrc <- TIO.readFile ifPath
       translation <- translateScriptText ifPath bashSrc
+      args <- loadFixtureArgs ifPath
+      stdinInput <- loadFixtureStdin ifPath
       case translation of
         Left err -> H.assertFailure err
         Right fishSrc -> do
           baseEnv <- prepareEnv
           baseBash <- runShell ShellBash baseEnv ""
           baseFish <- runShell ShellFish baseEnv ""
-          bashRes <- runShell ShellBash baseEnv bashSrc
-          fishRes <- runShell ShellFish baseEnv fishSrc
+          bashRes <- runShellWith ShellBash baseEnv bashSrc args stdinInput
+          fishRes <- runShellWith ShellFish baseEnv fishSrc args stdinInput
           let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
               fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
           rrExit bashRes @?= rrExit fishRes

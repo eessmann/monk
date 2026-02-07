@@ -107,6 +107,7 @@ test-suite monk-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   other-modules:       Gen
+                     , FixtureSupport
                      , TestSupport
                      , ShellSupport
                      , RealWorld
@@ -122,6 +123,7 @@ test-suite monk-test
   build-depends:       monk
                      , containers
                      , directory
+                     , filepath
                      , process
                      , tasty ^>= 1.5
                      , tasty-hunit ^>= 0.10
