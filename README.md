@@ -26,6 +26,8 @@ But migrating existing Bash scripts by hand is time-consuming and error-prone. M
 - **Variables**: Environment variables, arrays, special variables (`$?`, `$!`, etc.)
 - **Redirections**: File descriptors, pipes, and complex redirections
 - **Sources**: Optional recursive translation of `source`/`.` files
+- **Arithmetic**: `((...))` status, assignments, postfix/prefix `++/--`, short-circuit and ternary lowering
+- **Read flags**: `-n`, `-t`, `-u`, `-a` mapped to Fish equivalents (with notes for lossy cases)
 
 ### 🛡️ Type-Safe Architecture
 - **GADT-based AST** ensures semantic correctness at compile time
@@ -38,6 +40,7 @@ But migrating existing Bash scripts by hand is time-consuming and error-prone. M
 - **Semantic analysis** detects Fish-incompatible patterns
 - **Warnings + strict mode** surface behavior changes and allow fail-fast translation
 - **Scope analysis** ensures variables are scoped correctly in Fish
+- **Inline notes** for lossy translations (subshell isolation, `read -r`, `set -e`, etc.)
 
 ## 🚀 Quick Start
 
@@ -80,6 +83,7 @@ CLI flags:
 - `--sources inline|separate`: inline sourced content or emit separate `.fish` files (default `separate`)
 
 Warnings and errors are written to stderr.
+Monk also emits a translation confidence score and warning summary.
 
 ### CLI Help (Excerpt)
 
@@ -155,7 +159,15 @@ cabal test --enable-coverage
 
 # Property-based testing
 cabal test --test-option="--quickcheck-tests=10000"
+
+# Run benchmarks (uses benchmark/fixtures)
+cabal bench
 ```
+
+## Docs
+
+- `docs/design/translator-todo.md`: translation semantics notes and open items
+- `docs/babelfish-comparison.md`: bake-off methodology and comparison notes
 
 ### Test Categories
 
@@ -166,18 +178,11 @@ cabal test --test-option="--quickcheck-tests=10000"
 
 ## 📊 Current Status
 
-Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings for constructs that need manual review and can fail fast in strict mode.
+Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We also hoist side-effecting expansions across arguments, redirections, and case patterns, and lower short-circuit arithmetic into conditional evaluation to preserve side effects. Recent additions include `read` flag mapping (`-n/-t/-u/-a`) with notes for `-r` and IFS splitting.
 
 ## 🤝 Comparison with Babelfish
 
-[Babelfish](https://github.com/bouk/babelfish) is a great Go-based translator that inspired parts of our test coverage and has a strong focus on practical conversions. Monk takes a different path:
-
-- **Approach**: Monk builds and type-checks a semantic Fish IR (GADT-based) before rendering code. Babelfish translates more directly from the Bash AST to Fish text.
-- **Diagnostics**: Monk prioritizes explicit warnings, strict mode, and source mapping to make risky translations visible. Babelfish tends to favor straightforward output.
-- **Capabilities**: Monk currently emphasizes correctness safeguards, recursive source handling, and type-level modeling. Babelfish has been around longer and may handle edge cases we still miss.
-- **Trade-offs**: Monk may be more conservative and sometimes verbose; Babelfish can be faster to adopt for lightweight scripts. We’re still closing gaps and learning from their real-world coverage.
-
-If you’re evaluating both, we recommend trying your scripts with each tool and comparing behavior in Fish.
+See `docs/babelfish-comparison.md` for a focused, reproducible bake-off methodology and a structured comparison.
 
 ### Non-trivial Translations (Behavior Notes)
 
@@ -189,14 +194,16 @@ If you’re evaluating both, we recommend trying your scripts with each tool and
 - **Globs/extglobs**: simple globs are native; unsupported extglob operators fall back to a bash `extglob` shim.
 - **`time` prefix**: `time cmd` is emitted as a Fish timed pipeline.
 - **`select` loops**: emulated with `read` and `seq`.
+- **Arithmetic short-circuit**: `a && b` and ternary arithmetic use temp vars and `if test` to preserve side effects.
+- **`read` parity**: `-n/-t/-u/-a` map to fish flags; `-r` and IFS splitting differences emit notes.
 
 ### Known Limitations
 
 | Limitation | Status | Notes |
 |---|---|---|
 | Word splitting | [ ] manual review | Fish does not perform implicit word splitting. |
-| `set -e` semantics | [ ] manual review | Fish error behavior differs from Bash. |
-| Non-literal `source` paths | [ ] manual review | Recursive translation only follows literal paths. |
+| `set -e` / `pipefail` semantics | [ ] manual review | Fish error behavior differs; Monk emits notes for `set -e/-u/pipefail`. |
+| Non-literal `source` paths | [ ] manual review | Recursive translation only follows literal paths (notes emitted). |
 | Coprocesses (`coproc`) | [ ] unsupported | Warnings in normal mode; failure in `--strict`. |
  
 Review warnings and test translated scripts in Fish.
@@ -204,13 +211,10 @@ Review warnings and test translated scripts in Fish.
 ## 🛣️ Roadmap
 
 ### Near Term
-- [ ] Output-equivalence property tests for representative scripts
-- [ ] Built-in parity checks and behavioral tests (`pushd`/`popd`, `time`)
-- [ ] Improved diagnostics for unsupported constructs and lossy translations
+- [ ] Deeper parity for `read` (`-d`, delimiter/IFS behaviors) and `set -e` semantics
 - [ ] Expanded documentation with real-world translation examples
 
 ### Longer Term
-- [ ] Confidence scoring for translations
 - [ ] Performance optimizations for large scripts
 - [ ] IDE/editor integrations
 

@@ -2,13 +2,37 @@
 
 ## 🔴 Critical (Blocking Issues)
 
--### Foundation
-- [x] Implement TranslateM monad with StateT for metadata tracking
+### Foundation
+- [x] Implement TranslateM monad with Polysemy for metadata tracking
   - [x] Define TranslateState with source locations, warnings, context
   - [x] Define TranslateError for unsupported constructs
   - [x] Add TranslateConfig for user options
 - [x] Add source location preservation from ShellCheck AST
 - [x] Implement error recovery and warning accumulation
+
+### Polysemy Conversion (Architecture)
+- [x] Add `polysemy` + `polysemy-plugin` to `monk.cabal`
+- [x] Rewrite `Language.Fish.Translator.Monad` around Polysemy effects
+- [x] Rework `runTranslate*` to interpret Reader/State/Error/Writer/Input
+- [x] Port all translator modules to Polysemy (`Variables`, `Commands`, `Control`, `IO`, `Redirections`, `Builtins`, `ForArithmetic`)
+- [x] Update top-level glue and tests to use the new runners
+- [x] Remove legacy `StateT` helpers and imports
+
+### Semantic Parity Gaps (must fix for correctness)
+- [x] Preserve side effects of `${var:=...}` / `${var=...}` in all contexts
+  - [x] Command arguments (hoisted out of command substitution)
+  - [x] Redirection targets and heredocs
+  - [x] Case switch expressions
+- [x] Preserve abort semantics of `${var:?err}` / `${var?err}` in all contexts
+  - [x] Command arguments (exit in outer scope)
+  - [x] Redirection targets and heredocs
+  - [x] Case switch expressions
+- [x] Implement `((expr))` status semantics (`expr != 0`)
+- [x] Extend arithmetic side effects beyond simple assignments/`++`/`--` (postfix and compound expressions)
+- [x] Fix `until` negation for compound conditions (negate whole condition list, not just first pipeline)
+- [x] Preserve `case` pattern semantics (no quoting; keep glob patterns)
+- [x] Preserve compound condition lists in `if/while/until` (multiple commands / `;` / `&&` / `||` outside `[[ ]]`)
+- [x] Subshell isolation: best-effort translation with warning; strict mode should fail on `(...)`
 
 ### Missing Core Constructs
 - [x] Handle `T_DollarBraced` parameter expansions
@@ -57,6 +81,7 @@
 - [x] Select loops (`T_SelectIn`) - emulated with read loop
 - [x] Trap handling - map to Fish trap syntax
 - [x] Proper exit code propagation
+- [x] Preserve `source file args...` in recursive inline mode (set `argv` around inlined body)
 
 ## 🟢 Medium Priority (Completeness)
 
@@ -70,7 +95,7 @@
 ### Advanced Features
 - [x] Extended globs (`T_Extglob`): `?(pat)`, `*(pat)`
 - [x] Glob patterns (`T_Glob`): Translate glob syntax differences
-- [ ] Command substitution variations
+- [x] Command substitution variations
   - [x] Backticks: `` `cmd` `` → `(cmd)`
   - [x] Nested substitutions
 
@@ -89,16 +114,28 @@
 - [ ] Optimize pipeline constructs
 
 ### User Experience  
-- [ ] Add `--strict` mode to fail on unsupported constructs
-- [ ] Generate comments explaining non-trivial translations
-- [ ] Provide confidence scores for translations
+- [x] Add `--strict` mode to fail on unsupported constructs
+- [x] Generate comments explaining non-trivial translations (subshell/read flags/set -e/arith short-circuit)
+- [x] Provide confidence scores for translations
 - [ ] Create migration guide for manual fixes
+- [x] Emit warnings for best-effort subshell translation (non-isolating)
 
 ### Testing Improvements
 - [x] Add golden tests with known good translations
 - [x] Create corpus of bash scripts for testing
 - [x] Differential testing: run both bash and fish, compare outputs
-- [ ] Property: translated script output ≈ original script output
+- [x] Property: translated script output ≈ original script output
+- [x] Add semantic tests for `${var:=...}` / `${var:?err}` side effects and error propagation
+- [x] Add semantic tests for `((i++))`, `((i+=n))`, and `((expr))` status behavior (partial coverage)
+- [x] Add semantic tests for `case` pattern globs and fallthrough behavior
+- [x] Add semantic tests for `source file args...` and `$argv` in sourced scripts
+- [x] Add semantic tests for `until` with compound conditions (`&&`/`||`)
+- [x] Add semantic tests for subshell isolation warnings / strict-mode failure
+- [x] Add semantic tests for side-effecting expansions in redirections/heredocs/case switches
+- [x] Add semantic tests for arithmetic short-circuit/ternary lowering
+- [x] Add golden fixture for mixed expansion+glob case patterns
+- [x] Add semantic tests for `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting
+- [x] Add Polysemy effect tests per `docs/design/polysemy_testing_strategy.md`
 
 ## 📋 Implementation Checklist
 
@@ -134,7 +171,7 @@
 
 ### Stage 5: Testing & Polish
 - [x] Add comprehensive test suite
-- [ ] Create benchmark scripts
+- [x] Create benchmark scripts
 - [ ] Write documentation
 - [ ] Handle edge cases
 
@@ -143,22 +180,30 @@
 - Unit: basic command translation (`echo`, `exit`), bracket test `[ ... ]`, pipelines, `if/then/else`, `for ... in`, function bodies, backgrounding.
 - Property: generated word lists in `echo` preserve arguments after translation (quoted rendering), pipeline continuation counts preserved.
 
-
 ## 🐛 Known Semantic Differences to Document
 
 1. **Array indexing**: Bash is 0-indexed, Fish is 1-indexed
 2. **Exit on error**: Bash `set -e` vs Fish default behavior  
-3. **Word splitting**: Fish doesn't split variables by default
+3. **Word splitting**: Fish doesn't split variables by default; we only emulate with `string split -- $IFS` when list semantics would fail
 4. **Glob expansion**: Different glob syntax and behavior
 5. **Function scope**: Fish functions have different scoping rules
 6. **Background jobs**: Different job control semantics
 7. **Process substitution**: `>(cmd)` uses FIFO workaround; cleanup via background block
 8. **Param expansions**: glob-to-regex conversion and `^`/`,` case mods are approximate
+9. **`read` semantics**: flag parity and IFS splitting differ from bash; warnings emitted for lossy cases
+10. **Arithmetic side effects**: short-circuit/ternary are emulated via temp vars; verify on edge cases
+11. **`set -e`/`pipefail`**: bash options have no fish equivalent; translation emits notes only
 
 ## ✅ Quick Wins (Can do immediately)
 
 - [x] Fix `translateExit` to handle non-numeric arguments
 - [x] Add `T_Glob` basic handling
+
+## Bake-off notes
+
+- 2026-02-07: ran Monk vs babelfish on corpus + benchmark + integration + golden fixtures. Babelfish failed on `medium` (unsupported UnaryArithm), `large` (unsupported ForClause), and `extglob-basic` (unsupported ExtGlob). Monk succeeded on all, with warnings for `set -e/-u/pipefail`, IFS splitting, and subshell best-effort in `time-prefix`.
+- `case-pattern-expansion-glob.bash`: Monk output exits 1 when `$x` is empty due to `string join` requiring an argument; should special-case empty case expressions/pattern joins to avoid runtime errors.
+- Details recorded in `docs/babelfish-comparison.md`.
 - [x] Implement `T_HereString`: `<<<` → echo piping
 - [x] Handle `time` command prefix
 - [x] Add `T_CoProcBody` with warning (not supported in Fish)
@@ -166,9 +211,15 @@
 
 ## ▶ Next Up (Recommended Order)
 
-1. **Output-equivalence property tests**
-   - Property: translated script output ≈ original script output.
-2. **Built-in parity checks**
-   - Validate `pushd`/`popd` and `time` semantics with real scripts.
-3. **User experience polish**
-   - Add confidence scores and improve translation notes.
+1. [ ] **Triage remaining semantic gaps**
+   - [ ] Validate short-circuit/ternary arithmetic semantics on edge cases
+   - [ ] `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting parity
+   - [ ] `set -e` / `errexit` semantics and pipeline failure behavior
+   - [ ] Non-literal `source`/`.` paths in recursive translation
+2. [ ] **Generate inline translation notes**
+   - [ ] Emit comments in Fish output for lossy translations and semantic gaps.
+3. [x] **Create benchmark scripts**
+   - [x] Add real-world translation inputs for perf and regression tracking.
+4. [ ] **Handle edge cases**
+   - [ ] Word splitting differences (`"$var"` vs `$var` list expansion), only when fish list semantics would fail.
+   - [ ] `printf` vs `echo` portability and escape handling.
