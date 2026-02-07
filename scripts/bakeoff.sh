@@ -59,8 +59,15 @@ for f in "${files[@]}"; do
   monk_err="$out_dir/$base.monk.err"
   bab_fish="$out_dir/$base.babelfish.fish"
   bab_err="$out_dir/$base.babelfish.err"
+  args_file="${f%.bash}.args"
+  stdin_file="${f%.bash}.stdin"
+  args=()
+  if [ -f "$args_file" ]; then
+    # shellcheck disable=SC2207
+    args=($(cat "$args_file"))
+  fi
 
-  cabal run monk -- "$f" > "$monk_fish" 2> "$monk_err"
+  cabal run -v0 monk -- "$f" > "$monk_fish" 2> "$monk_err"
   monk_rc=$?
 
   babelfish < "$f" > "$bab_fish" 2> "$bab_err"
@@ -72,11 +79,21 @@ for f in "${files[@]}"; do
   if [ -z "$monk_notes" ]; then monk_notes=0; fi
 
   if [ "$monk_rc" -eq 0 ]; then
-    fish "$monk_fish" > "$out_dir/$base.monk.out" 2>"$out_dir/$base.monk.runerr"; echo $? > "$out_dir/$base.monk.rc"
+    if [ -f "$stdin_file" ]; then
+      fish "$monk_fish" "${args[@]}" < "$stdin_file" > "$out_dir/$base.monk.out" 2>"$out_dir/$base.monk.runerr"
+    else
+      fish "$monk_fish" "${args[@]}" > "$out_dir/$base.monk.out" 2>"$out_dir/$base.monk.runerr"
+    fi
+    echo $? > "$out_dir/$base.monk.rc"
   fi
 
   if [ "$bab_rc" -eq 0 ]; then
-    fish "$bab_fish" > "$out_dir/$base.babelfish.out" 2>"$out_dir/$base.babelfish.runerr"; echo $? > "$out_dir/$base.babelfish.rc"
+    if [ -f "$stdin_file" ]; then
+      fish "$bab_fish" "${args[@]}" < "$stdin_file" > "$out_dir/$base.babelfish.out" 2>"$out_dir/$base.babelfish.runerr"
+    else
+      fish "$bab_fish" "${args[@]}" > "$out_dir/$base.babelfish.out" 2>"$out_dir/$base.babelfish.runerr"
+    fi
+    echo $? > "$out_dir/$base.babelfish.rc"
   fi
 
   out_diff="n/a"

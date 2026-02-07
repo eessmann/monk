@@ -107,15 +107,16 @@ BABELFISH_VERSION_OVERRIDE=1.2.1 scripts/bakeoff.sh /tmp/monk-babelfish
 ```
 
 The script normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
+It also respects optional fixture sidecar files: `<name>.args` (whitespace-separated args) and `<name>.stdin` (stdin content).
 
 ## Bake-off results (2026-02-07)
 
 Environment:
 
-- Monk: git 256f52c (dirty working tree)
+- Monk: git 7cc4f8e (dirty working tree)
 - Babelfish: 1.2.1 (stdin-only CLI)
 - Fish: 4.2.0
-- Report output: `/tmp/monk-babelfish-20260207174100`
+- Report output: `/tmp/monk-babelfish-20260207232734`
 
 Summary (corpus + benchmarks + integration + golden + real-world fixtures):
 
@@ -130,7 +131,7 @@ Key deltas:
 - `benchmark/fixtures/large.bash`: Monk succeeds with set -e/-u/pipefail and read IFS-splitting warnings; babelfish exits 1 with `unsupported: &syntax.ForClause` and an AST dump on stderr
 - `test/fixtures/golden/extglob-basic.bash`: Monk succeeds; babelfish exits 1 with `unsupported: &syntax.ExtGlob`
 - `test/fixtures/realworld/pyramid-left.bash` and `test/fixtures/realworld/pyramid-right.bash`: Monk succeeds; babelfish exits 1 (unsupported C-style for loop)
-- `test/fixtures/realworld/version-compare.bash`: outputs differ because babelfish does not honor `${1:-default}` style fallbacks
+- `test/fixtures/realworld/version-compare.bash`: outputs and stderr differ (both translations trigger `test` argument errors under fish)
 
 Notes:
 

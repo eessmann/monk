@@ -126,6 +126,7 @@
 - [x] Differential testing: run both bash and fish, compare outputs
 - [x] Property: translated script output ≈ original script output
 - [x] Add real-world fixtures from external repos with manual fish translations for small scripts
+- [x] Add fixture metadata via `.args` and `.stdin` sidecar files for safe non-interactive tests
 - [x] Add semantic tests for `${var:=...}` / `${var:?err}` side effects and error propagation
 - [x] Add semantic tests for `((i++))`, `((i+=n))`, and `((expr))` status behavior (partial coverage)
 - [x] Add semantic tests for `case` pattern globs and fallthrough behavior
