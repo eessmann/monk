@@ -29,7 +29,11 @@ goldenFixtures =
     GoldenFixture "read-prompt" "test/fixtures/golden/read-prompt.bash" "test/fixtures/golden/read-prompt.fish",
     GoldenFixture "double-bracket-eq" "test/fixtures/golden/double-bracket-eq.bash" "test/fixtures/golden/double-bracket-eq.fish",
     GoldenFixture "glob-basic" "test/fixtures/golden/glob-basic.bash" "test/fixtures/golden/glob-basic.fish",
-    GoldenFixture "extglob-basic" "test/fixtures/golden/extglob-basic.bash" "test/fixtures/golden/extglob-basic.fish"
+    GoldenFixture "extglob-basic" "test/fixtures/golden/extglob-basic.bash" "test/fixtures/golden/extglob-basic.fish",
+    GoldenFixture
+      "case-pattern-expansion-glob"
+      "test/fixtures/golden/case-pattern-expansion-glob.bash"
+      "test/fixtures/golden/case-pattern-expansion-glob.fish"
   ]
 
 goldenTest :: GoldenFixture -> TestTree

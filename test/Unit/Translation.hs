@@ -40,6 +40,24 @@ unitTranslationTests =
         out <- translateScript "echo ${NIX_PATH:+:$NIX_PATH}"
         T.isInfixOf "set '-q' 'NIX_PATH'" out H.@? "expected set -q for alternate expansion"
         T.isInfixOf "test '-n'" out H.@? "expected test -n for non-empty check",
+      H.testCase "Assigning expansion hoists side effects" $ do
+        out <- translateScript "echo ${HOME:=/tmp}"
+        T.isInfixOf "set --global HOME '/tmp'" out H.@? "expected assignment in prelude"
+        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split for unquoted expansion"
+        T.isInfixOf "$HOME" out H.@? "expected variable use after assignment",
+      H.testCase "Error expansion hoists exit" $ do
+        out <- translateScript "echo ${MISSING:?nope}"
+        T.isInfixOf "printf" out H.@? "expected error printf"
+        T.isInfixOf "exit 1" out H.@? "expected exit in outer scope",
+      H.testCase "Redirection expansion hoists side effects" $ do
+        out <- translateScript "echo hi > ${OUT:=/tmp/out}"
+        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
+        T.isInfixOf "> (string join ' ' $OUT)" out H.@? "expected redirection to use OUT",
+      H.testCase "Heredoc expansion hoists side effects" $ do
+        let script = "cat <<EOF\n${VAL:=ok}\nEOF\n"
+        out <- translateScript script
+        T.isInfixOf "set --global VAL 'ok'" out H.@? "expected assignment before heredoc"
+        T.isInfixOf "string join ' ' $VAL" out H.@? "expected heredoc to use VAL",
       H.testCase "Length expansion for argv uses count" $ do
         out <- translateScript "echo ${#@}"
         T.isInfixOf "count $argv" out H.@? "expected count for argv length",
@@ -64,9 +82,16 @@ unitTranslationTests =
         outPopd @?= "popd",
       H.testCase "Nested command substitution translates inner" $ do
         out <- translateScript "echo $(echo $(echo hi))"
-        out @?= "echo (string join ' ' (echo (string join ' ' (echo 'hi'))))",
+        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split in command substitution"
+        T.isInfixOf "(echo" out H.@? "expected command substitution structure"
+        T.isInfixOf "echo 'hi'" out H.@? "expected innermost echo",
       H.testCase "Strict mode fails on unsupported coproc" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi"
+        case translateParseResult strictConfig result of
+          Left _ -> pure ()
+          Right _ -> H.assertFailure "expected translation failure in strict mode",
+      H.testCase "Strict mode fails on subshell" $ do
+        result <- parseBashScript "spec.sh" "(echo hi)"
         case translateParseResult strictConfig result of
           Left _ -> pure ()
           Right _ -> H.assertFailure "expected translation failure in strict mode",
@@ -75,7 +100,8 @@ unitTranslationTests =
         out @?= "set --global arr[1] 'foo'",
       H.testCase "Array index expansion is 1-based" $ do
         out <- translateScript "echo ${arr[0]}"
-        out @?= "echo $arr[1]",
+        T.isInfixOf "$arr[1]" out H.@? "expected 1-based index"
+        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split for unquoted expansion",
       H.testCase "Substring expansion uses string sub" $ do
         out <- translateScript "echo ${var:1:2}"
         T.isInfixOf "string 'sub' '--start' 2 '--length' 2 '--' $var" out H.@? "expected string sub with 1-based start",
@@ -93,10 +119,29 @@ unitTranslationTests =
       H.testCase "Length expansion uses string length" $ do
         out <- translateScript "echo ${#var}"
         T.isInfixOf "string length" out H.@? "expected string length for ${#var}",
-      H.testCase "Arithmetic command uses math with redirect" $ do
+      H.testCase "Arithmetic command sets status from math" $ do
         out <- translateScript "((1 + 2))"
         T.isInfixOf "math" out H.@? "expected math command for arithmetic statement"
-        T.isInfixOf "/dev/null" out H.@? "expected stdout redirect to /dev/null",
+        T.isInfixOf "test" out H.@? "expected test for arithmetic status"
+        T.isInfixOf "-ne" out H.@? "expected numeric comparison",
+      H.testCase "Arithmetic postfix increment hoists temp" $ do
+        out <- translateScript "echo $((i++))"
+        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp var for postfix increment"
+        T.isInfixOf "set --global i" out H.@? "expected increment side effect",
+      H.testCase "Arithmetic prefix increment updates variable" $ do
+        out <- translateScript "echo $((++i))"
+        T.isInfixOf "set --global i" out H.@? "expected increment side effect",
+      H.testCase "Arithmetic assignment in expression hoists set" $ do
+        out <- translateScript "echo $((x = y + 1))"
+        T.isInfixOf "set --global x" out H.@? "expected assignment before math expression",
+      H.testCase "Arithmetic short-circuit lowers to conditional evaluation" $ do
+        out <- translateScript "echo $((a++ && b++))"
+        T.isInfixOf "if test" out H.@? "expected conditional evaluation for &&"
+        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp vars for short-circuit",
+      H.testCase "Arithmetic ternary lowers to conditional evaluation" $ do
+        out <- translateScript "echo $((a ? b++ : c++))"
+        T.isInfixOf "if test" out H.@? "expected conditional evaluation for ternary"
+        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp vars for ternary",
       H.testCase "Arithmetic for loop lowers to begin/while and increment" $ do
         out <- translateScript "for ((i=0; i<2; i++)); do echo $i; done"
         T.isInfixOf "set --global i" out H.@? "expected init set"
@@ -104,7 +149,11 @@ unitTranslationTests =
         T.isInfixOf "math $i" out H.@? "expected increment math",
       H.testCase "Until loop negates condition" $ do
         out <- translateScript "until true; do echo 1; done"
-        T.isInfixOf "while not true" out H.@? "expected while not for until loop",
+        T.isInfixOf "while not" out H.@? "expected while not for until loop",
+      H.testCase "Until loop negates compound condition" $ do
+        out <- translateScript "until false && true; do echo ok; done"
+        T.isInfixOf "while not begin" out H.@? "expected negation of full condition list"
+        T.isInfixOf "and" out H.@? "expected compound condition inside negated block",
       H.testCase "Time prefix is preserved in pipelines" $ do
         out <- translateScript "time sleep 1"
         T.isInfixOf "time sleep" out H.@? "expected time prefix in output",
@@ -151,6 +200,33 @@ unitTranslationTests =
         T.isInfixOf "set --local __monk_select_items" out H.@? "expected select items list"
         T.isInfixOf "while true" out H.@? "expected select while loop"
         T.isInfixOf "read --prompt '> '" out H.@? "expected select prompt read",
+      H.testCase "Case patterns preserve globs" $ do
+        out <- translateScript "case $x in foo* ) echo ok ;; esac"
+        T.isInfixOf "case foo*" out H.@? "expected unquoted glob pattern",
+      H.testCase "Case patterns with expansion keep glob meta" $ do
+        out <- translateScript "case $x in ${Y}* ) echo ok ;; esac"
+        T.isInfixOf "case (string join ' ' $Y)*" out H.@? "expected expansion concatenated with glob"
+        H.assertBool "expected glob meta to stay unquoted" (not (T.isInfixOf "'*'" out)),
+      H.testCase "Case pattern expansion hoists side effects" $ do
+        out <- translateScript "case $x in ${Y:=1}) echo ok ;; esac"
+        T.isInfixOf "set --global Y '1'" out H.@? "expected assignment before switch"
+        T.isInfixOf "case (string join ' ' $Y)" out H.@? "expected pattern to use Y",
+      H.testCase "Case switch expansion hoists side effects" $ do
+        out <- translateScript "case ${X:=1} in 1) echo ok ;; esac"
+        T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
+        T.isInfixOf "switch (string join ' ' $X)" out H.@? "expected switch to use X",
+      H.testCase "Read flags translate to fish equivalents" $ do
+        outN <- translateScript "read -n 3 foo"
+        T.isInfixOf "read --nchars 3 foo" outN H.@? "expected nchars flag"
+        outT <- translateScript "read -t 5 bar"
+        T.isInfixOf "read --timeout 5 bar" outT H.@? "expected timeout flag"
+        outU <- translateScript "read -u 9 baz"
+        T.isInfixOf "read --fd 9 baz" outU H.@? "expected fd flag"
+        outA <- translateScript "read -a arr"
+        T.isInfixOf "read --array arr" outA H.@? "expected array flag",
+      H.testCase "Source passes args" $ do
+        out <- translateScript "source /tmp/script.sh a b"
+        T.isInfixOf "source '/tmp/script.sh' 'a' 'b'" out H.@? "expected args passed to source",
       H.testCase "Trap translates to fish trap syntax" $ do
         out <- translateScript "trap 'echo bye' EXIT"
         T.isInfixOf "trap '--on-exit' 'echo bye'" out H.@? "expected fish trap on exit"

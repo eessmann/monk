@@ -50,12 +50,12 @@ propertyTranslationTests =
             let script = "if [[ $x == " <> pat <> " ]]; then echo ok; fi"
             out <- QCM.run (translateScript script)
             QCM.assert (T.isInfixOf "string 'match' '-q' '--'" out),
-      QC.testProperty "Arithmetic command emits math with redirect" $
+      QC.testProperty "Arithmetic command emits math with test" $
         QC.forAll (QC.chooseInt (0, 5)) $ \n ->
           QCM.monadicIO $ do
             let script = "((" <> T.pack (show n) <> "))"
             out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf "math" out && T.isInfixOf "/dev/null" out),
+            QCM.assert (T.isInfixOf "math" out && T.isInfixOf "test" out && T.isInfixOf "-ne" out),
       QC.testProperty "Double bracket boolean trees preserve match/not counts" $
         QC.forAll genCond $ \cond ->
           QCM.monadicIO $ do
