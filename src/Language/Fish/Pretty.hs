@@ -153,7 +153,7 @@ prettyBlockSuffix xs = space <> hsep (map prettyExprOrRedirect xs)
 -- New Fish job model pretty printers
 prettyJobPipeline :: FishJobPipeline -> Doc ann
 prettyJobPipeline (FishJobPipeline time vars stmt conts bg) =
-  let timeDoc = if time then "time" <> space else mempty
+  let timeDoc = if time then "command time" <> space else mempty
       varsDoc = if null vars then mempty else hsep (map prettyVarAssign vars) <> space
       headDoc = group (timeDoc <> varsDoc <> prettyFishStatement stmt)
       restDocs = map (\(PipeTo v s) -> space <> "|" <+> (if null v then mempty else hsep (map prettyVarAssign v) <> space) <> prettyFishStatement s) conts
@@ -292,9 +292,43 @@ prettyCaseItem :: CaseItem -> Doc ann
 prettyCaseItem (CaseItem pats body) =
   -- Use NonEmpty patterns/body
   "case"
-    <+> hsep (punctuate " |" (map prettyFishExpr (NE.toList pats)))
+    <+> hsep (punctuate " |" (map prettyCasePattern (NE.toList pats)))
     <> hardline
     <> indent 2 (vsep (map prettyFishStatement (NE.toList body))) -- Patterns separated by |
+
+prettyCasePattern :: FishExpr TStr -> Doc ann
+prettyCasePattern = \case
+  ExprLiteral txt -> pretty txt
+  other ->
+    case flattenPatternConcat other of
+      Just parts
+        | needsRawGlobConcat parts ->
+            mconcat (map prettyPatternPart parts)
+      _ -> prettyFishExpr other
+
+flattenPatternConcat :: FishExpr TStr -> Maybe [FishExpr TStr]
+flattenPatternConcat expr =
+  let parts = go expr
+   in if length parts > 1 then Just parts else Nothing
+  where
+    go (ExprStringConcat a b) = go a <> go b
+    go e = [e]
+
+needsRawGlobConcat :: [FishExpr TStr] -> Bool
+needsRawGlobConcat parts =
+  any isGlobLiteral parts && any (not . isLiteral) parts
+  where
+    isLiteral = \case
+      ExprLiteral {} -> True
+      _ -> False
+    isGlobLiteral = \case
+      ExprLiteral txt -> T.any (`elem` ("*?[]{}" :: String)) txt
+      _ -> False
+
+prettyPatternPart :: FishExpr TStr -> Doc ann
+prettyPatternPart = \case
+  ExprLiteral txt -> pretty txt
+  other -> prettyFishExpr other
 
 prettyRedirect :: Redirect -> Doc ann
 prettyRedirect redir =
@@ -341,6 +375,9 @@ prettyReadFlag = \case
   ReadUniversal -> "--universal"
   ReadExport -> "--export"
   ReadArray -> "--array"
+  ReadNChars n -> "--nchars" <+> pretty n
+  ReadTimeout t -> "--timeout" <+> pretty t
+  ReadFD fd -> "--fd" <+> pretty fd
 
 prettySetFlag :: SetFlag -> Doc ann
 prettySetFlag = \case

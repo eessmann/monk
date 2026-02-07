@@ -1,6 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeApplications #-}
 
 module Language.Fish.Translator.Control
   ( translateIfExpression,
@@ -8,6 +7,7 @@ module Language.Fish.Translator.Control
     translateCaseExpression,
     translateSelectExpression,
     translateCondTokens,
+    translateCondTokensM,
     negateJobList,
     toNonEmptyStmtList,
   )
@@ -15,13 +15,15 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Data.Type.Equality (testEquality, (:~:) (Refl))
 import Language.Fish.AST
-import Language.Fish.Translator.Commands (translateTokensToStatusCmd)
+import Language.Fish.Translator.Commands (translateTokensToStatusCmd, translateTokensToStatusCmdM)
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)
 import Language.Fish.Translator.Variables
+  ( patternExprFromToken,
+    translateTokenToExprM,
+    translateTokenToListExpr,
+  )
 import ShellCheck.AST
-import Type.Reflection (typeRep)
 
 --------------------------------------------------------------------------------
 -- Helpers
@@ -35,6 +37,32 @@ isEmptyStatement = \case
   EmptyStmt -> True
   StmtList [] -> True
   _ -> False
+
+tokenHasExpansion :: Token -> Bool
+tokenHasExpansion = \case
+  T_NormalWord _ parts -> wordHasExpansion parts
+  T_DoubleQuoted _ parts -> wordHasExpansion parts
+  T_DollarBraced {} -> True
+  T_DollarArithmetic {} -> True
+  T_Arithmetic {} -> True
+  T_DollarExpansion {} -> True
+  T_Backticked {} -> True
+  T_DollarBraceCommandExpansion {} -> True
+  T_ProcSub {} -> True
+  _ -> False
+
+wordHasExpansion :: [Token] -> Bool
+wordHasExpansion = any isExpansionPart
+  where
+    isExpansionPart = \case
+      T_DollarBraced {} -> True
+      T_DollarArithmetic {} -> True
+      T_Arithmetic {} -> True
+      T_DollarExpansion {} -> True
+      T_Backticked {} -> True
+      T_DollarBraceCommandExpansion {} -> True
+      T_ProcSub {} -> True
+      _ -> False
 
 --------------------------------------------------------------------------------
 -- If / Function / Case
@@ -50,14 +78,14 @@ translateIfExpression translateStmt conditionBranches elseBranch = do
         Just neElse -> Begin neElse []
         Nothing -> Begin (Stmt (Command "true" []) NE.:| []) []
     translateIf' ((condTokens, thenTokens) : rest) elseStmts =
-      let condition = translateCondTokens condTokens
-       in do
-            thenBlock <- mapM translateStmt thenTokens
-            nestedElse <- translateIf' rest elseStmts
-            let elseBlock = [Stmt nestedElse]
-            pure $ case toNonEmptyStmtList thenBlock of
-              Just neThen -> If condition neThen elseBlock []
-              Nothing -> If condition (Comment "Empty 'then' block" NE.:| []) elseBlock []
+      do
+        condition <- translateCondTokensM condTokens
+        thenBlock <- mapM translateStmt thenTokens
+        nestedElse <- translateIf' rest elseStmts
+        let elseBlock = [Stmt nestedElse]
+        pure $ case toNonEmptyStmtList thenBlock of
+          Just neThen -> If condition neThen elseBlock []
+          Nothing -> If condition (Comment "Empty 'then' block" NE.:| []) elseBlock []
 
 translateFunction :: (Token -> TranslateM FishStatement) -> String -> Token -> TranslateM FishStatement
 translateFunction translateStmt funcName bodyToken = withFunctionScope $ do
@@ -73,20 +101,57 @@ translateFunction translateStmt funcName bodyToken = withFunctionScope $ do
 
 translateCaseExpression :: (Token -> TranslateM FishStatement) -> Token -> [(CaseType, [Token], [Token])] -> TranslateM FishStatement
 translateCaseExpression translateStmt switchExpr cases = do
+  (preSwitch, switchArg) <- translateTokenToExprM switchExpr
   caseItems <- mapM (translateCaseItem translateStmt) cases
-  let switchArg = translateTokenToExpr switchExpr
-      filtered = catMaybes caseItems
-  pure $ case NE.nonEmpty filtered of
-    Just neCases -> Stmt (Switch switchArg neCases [])
-    Nothing -> Comment "Skipped case expression with no valid cases"
+  let prePatterns = concatMap fst caseItems
+      filtered = catMaybes (map snd caseItems)
+      switchStmt =
+        case NE.nonEmpty filtered of
+          Just neCases -> Stmt (Switch switchArg neCases [])
+          Nothing -> Comment "Skipped case expression with no valid cases"
+      prelude = preSwitch <> prePatterns
+  case prelude of
+    [] -> pure switchStmt
+    _ ->
+      case toNonEmptyStmtList (prelude <> [switchStmt]) of
+        Just body -> pure (Stmt (Begin body []))
+        Nothing -> pure (Comment "Skipped case expression with no valid cases")
 
-translateCaseItem :: (Token -> TranslateM FishStatement) -> (CaseType, [Token], [Token]) -> TranslateM (Maybe CaseItem)
+translateCaseItem :: (Token -> TranslateM FishStatement) -> (CaseType, [Token], [Token]) -> TranslateM ([FishStatement], Maybe CaseItem)
 translateCaseItem translateStmt (_, patterns, body) = do
-  let patternExprs = map translateTokenToExpr patterns
+  patternPlans <- mapM translateCasePatternM patterns
+  let prePatterns = concatMap fst patternPlans
+      patternExprs = map snd patternPlans
   bodyStmts <- mapM translateStmt body
-  pure $ case (NE.nonEmpty patternExprs, toNonEmptyStmtList bodyStmts) of
-    (Just nePatterns, Just neBody) -> Just CaseItem {casePatterns = nePatterns, caseBody = neBody}
-    _ -> Nothing
+  pure $
+    ( prePatterns,
+      case (NE.nonEmpty patternExprs, toNonEmptyStmtList bodyStmts) of
+        (Just nePatterns, Just neBody) -> Just CaseItem {casePatterns = nePatterns, caseBody = neBody}
+        _ -> Nothing
+    )
+
+translateCasePatternM :: Token -> TranslateM ([FishStatement], FishExpr TStr)
+translateCasePatternM tok =
+  case tok of
+    T_NormalWord _ parts
+      | wordHasExpansion parts -> translateCasePatternPartsM parts
+    _ | tokenHasExpansion tok -> translateTokenToExprM tok
+    _ -> pure ([], patternExprFromToken tok)
+
+translateCasePatternPartsM :: [Token] -> TranslateM ([FishStatement], FishExpr TStr)
+translateCasePatternPartsM parts = do
+  translated <- mapM translateCasePatternPartM parts
+  let pre = concatMap fst translated
+      exprs = map snd translated
+  pure $
+    case exprs of
+      [] -> (pre, ExprLiteral "")
+      (x : xs) -> (pre, foldl' ExprStringConcat x xs)
+
+translateCasePatternPartM :: Token -> TranslateM ([FishStatement], FishExpr TStr)
+translateCasePatternPartM part
+  | tokenHasExpansion part = translateTokenToExprM part
+  | otherwise = pure ([], patternExprFromToken part)
 
 --------------------------------------------------------------------------------
 -- Select loops
@@ -154,17 +219,16 @@ selectIndexExpr varName =
 translateCondTokens :: [Token] -> FishJobList
 translateCondTokens tokens = jobListFromStatus (translateTokensToStatusCmd tokens)
 
+translateCondTokensM :: [Token] -> TranslateM FishJobList
+translateCondTokensM tokens = do
+  cmd <- translateTokensToStatusCmdM tokens
+  pure (jobListFromStatus cmd)
+
 negateJobList :: FishJobList -> FishJobList
-negateJobList (FishJobList (jc NE.:| rest)) =
-  FishJobList (negateConj jc NE.:| rest)
-  where
-    negateConj conj = conj {jcJob = negatePipeline (jcJob conj)}
-    negatePipeline jp = jp {jpStatement = negateStmt (jpStatement jp)}
-    negateStmt (Stmt (cmd :: FishCommand a)) =
-      case testEquality (typeRep @a) (typeRep @TStatus) of
-        Just Refl -> Stmt (Not cmd)
-        Nothing -> Stmt (Not (Command "true" []))
-    negateStmt _ = Stmt (Not (Command "true" []))
+negateJobList (FishJobList conjs) =
+  let body = NE.map (Stmt . JobConj) conjs
+      negCmd = Not (Begin body [])
+   in FishJobList (FishJobConjunction Nothing (pipelineOf negCmd) [] NE.:| [])
 
 jobListFromStatus :: FishCommand TStatus -> FishJobList
 jobListFromStatus cmd =

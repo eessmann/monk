@@ -9,6 +9,7 @@ module Language.Fish.Translator
   )
 where
 
+import Prelude hiding (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
@@ -19,12 +20,14 @@ import Language.Fish.Translator.Builtins
     translateExportCommand,
     translateLocalCommand,
     translateReadonlyCommand,
-    translateScopedAssignment,
     translateShiftCommand,
     translateTrapCommand,
     translateUnsetCommand,
   )
 import Language.Fish.Translator.Commands
+  ( translateSimpleCommandM,
+    translateTokenToStatusCmdM,
+  )
 import Language.Fish.Translator.Control qualified as Control
 import Language.Fish.Translator.ForArithmetic (translateForArithmetic)
 import Language.Fish.Translator.IO qualified as FIO
@@ -35,12 +38,18 @@ import Language.Fish.Translator.Monad
     TranslateState (..),
     TranslationContext (..),
     addWarning,
+    noteUnsupported,
     runTranslateWithPositions,
     unsupportedStmt,
     withTokenRange,
   )
-import Language.Fish.Translator.Redirections (parseRedirectTokens, translateRedirectToken)
+import Language.Fish.Translator.Redirections
+  ( parseRedirectTokens,
+    parseRedirectTokensM,
+    translateRedirectTokenM,
+  )
 import Language.Fish.Translator.Variables
+import Polysemy.State (gets)
 import ShellCheck.AST
 import ShellCheck.Interface (ParseResult (..), Position)
 
@@ -110,38 +119,50 @@ translateToken token =
                 translateTrapCommand args
           (cmdTok : args)
             | tokenToLiteralText cmdTok == "exec" ->
-                let (redirs, plainArgs) = parseRedirectTokens args
-                    fishAssignments = concatMap (translateScopedAssignment locals) assignments
-                    execStmt = Stmt (Command "exec" redirs)
-                 in if null plainArgs && not (null redirs)
-                      then do
-                        addWarning "exec with file descriptor redirection may require manual adjustment in fish"
-                        case NE.nonEmpty fishAssignments of
-                          Just neAssigns ->
-                            case Control.toNonEmptyStmtList (NE.toList neAssigns ++ [execStmt]) of
-                              Just body -> pure (Stmt (Begin body []))
-                              Nothing -> pure (Comment "Empty exec with assignments")
-                          Nothing -> pure execStmt
-                      else pure (simplifyStatement (translateSimpleCommand scopeFlags assignments cmdToks))
-          _ -> pure (simplifyStatement (translateSimpleCommand scopeFlags assignments cmdToks))
+                let scopeFor name =
+                      if Set.member name locals
+                        then [SetLocal]
+                        else [SetGlobal]
+                 in do
+                      (preRedirs, redirs, plainArgs) <- parseRedirectTokensM args
+                      if null plainArgs && not (null redirs)
+                        then do
+                          fishAssignments <-
+                            fmap concat $
+                              forM assignments $ \tok ->
+                                case tok of
+                                  T_Assignment _ _ var _ _ ->
+                                    translateAssignmentWithFlagsM (scopeFor (T.pack var)) tok
+                                  _ -> translateAssignmentWithFlagsM (scopeFor "") tok
+                          let execStmt = Stmt (Command "exec" redirs)
+                          addWarning "exec with file descriptor redirection may require manual adjustment in fish"
+                          case Control.toNonEmptyStmtList (preRedirs <> fishAssignments <> [execStmt]) of
+                            Just body -> pure (Stmt (Begin body []))
+                            Nothing -> pure (Comment "Empty exec with assignments")
+                        else simplifyStatement <$> translateSimpleCommandM scopeFlags assignments cmdToks
+          _ -> simplifyStatement <$> translateSimpleCommandM scopeFlags assignments cmdToks
       T_Pipeline _ bang cmds ->
         case (bang, cmds) of
           ([], [single]) -> translateToken single
-          _ -> pure (FIO.translatePipeline bang cmds)
+          _ -> FIO.translatePipelineM bang cmds
       T_IfExpression _ conditionBranches elseBranch ->
         Control.translateIfExpression translateToken conditionBranches elseBranch
       T_WhileExpression _ cond body -> do
         bodyStmts <- mapM translateToken body
         case Control.toNonEmptyStmtList bodyStmts of
-          Just neBody -> pure (Stmt (While (Control.translateCondTokens cond) neBody []))
+          Just neBody -> do
+            condJob <- Control.translateCondTokensM cond
+            pure (Stmt (While condJob neBody []))
           Nothing -> pure (Comment "Skipped empty while loop body")
       T_UntilExpression _ cond body -> do
         bodyStmts <- mapM translateToken body
         case Control.toNonEmptyStmtList bodyStmts of
-          Just neBody -> pure (Stmt (While (Control.negateJobList (Control.translateCondTokens cond)) neBody []))
+          Just neBody -> do
+            condJob <- Control.translateCondTokensM cond
+            pure (Stmt (While (Control.negateJobList condJob) neBody []))
           Nothing -> pure (Comment "Skipped empty until loop body")
       T_Arithmetic _ exprTok ->
-        pure (Stmt (translateArithmetic exprTok))
+        Stmt <$> translateArithmeticStatusM exprTok
       T_ForArithmetic _ initTok condTok incTok body ->
         translateForArithmetic translateToken initTok condTok incTok body
       T_Function _ _ _ funcName body -> Control.translateFunction translateToken funcName body
@@ -151,28 +172,36 @@ translateToken token =
           Just neBody -> pure (Stmt (Begin neBody []))
           Nothing -> pure (Comment "Skipped empty brace group")
       T_Subshell _ tokens -> do
+        note <- noteUnsupported "Subshell does not isolate environment in fish; best-effort translation emitted"
         bodyStmts <- mapM translateToken tokens
         case Control.toNonEmptyStmtList bodyStmts of
-          Just neBody -> pure (Stmt (Begin neBody []))
-          Nothing -> pure (Comment "Skipped empty subshell")
-      T_AndIf _ l r ->
-        let lp = FIO.pipelineOf (translateTokenToStatusCmd l)
-            rp = FIO.pipelineOf (translateTokenToStatusCmd r)
-         in pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp])))
-      T_OrIf _ l r ->
-        let lp = FIO.pipelineOf (translateTokenToStatusCmd l)
-            rp = FIO.pipelineOf (translateTokenToStatusCmd r)
-         in pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp])))
-      T_Backgrounded _ bgToken -> pure (Stmt (Background (translateTokenToStatusCmd bgToken)))
+          Just neBody -> pure (StmtList [note, Stmt (Begin neBody [])])
+          Nothing -> pure note
+      T_AndIf _ l r -> do
+        lp <- FIO.pipelineOf <$> translateTokenToStatusCmdM l
+        rp <- FIO.pipelineOf <$> translateTokenToStatusCmdM r
+        pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp])))
+      T_OrIf _ l r -> do
+        lp <- FIO.pipelineOf <$> translateTokenToStatusCmdM l
+        rp <- FIO.pipelineOf <$> translateTokenToStatusCmdM r
+        pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp])))
+      T_Backgrounded _ bgToken -> do
+        cmd <- translateTokenToStatusCmdM bgToken
+        pure (Stmt (Background cmd))
       T_Annotation _ _ inner -> translateToken inner
       T_ForIn _ var tokens body -> do
-        let args = map translateTokenToListExpr tokens
+        argParts <- mapM translateTokenToListExprM tokens
+        let pre = concatMap fst argParts
+            args = map snd argParts
         bodyStmts <- mapM translateToken body
         case (NE.nonEmpty args, Control.toNonEmptyStmtList bodyStmts) of
           (Just neArgs, Just neBody) ->
             let (x NE.:| xs) = neArgs
                 listExpr = foldl' ExprListConcat x xs
-             in pure (Stmt (For (T.pack var) listExpr neBody []))
+                forStmt = Stmt (For (T.pack var) listExpr neBody [])
+             in case Control.toNonEmptyStmtList (pre <> [forStmt]) of
+                  Just block -> pure (Stmt (Begin block []))
+                  Nothing -> pure (Comment "Skipped empty for loop body or list")
           _ -> pure (Comment "Skipped empty for loop body or list")
       T_SelectIn _ var tokens body ->
         Control.translateSelectExpression translateToken var tokens body
@@ -180,9 +209,20 @@ translateToken token =
       T_CoProc {} -> unsupportedStmt "Coprocess (coproc)"
       T_CoProcBody {} -> unsupportedStmt "Coprocess body (coproc)"
       T_Redirecting _ redirs cmd -> do
-        let redirExprs = mapMaybe translateRedirectToken redirs
+        parts <- mapM translateRedirectTokenM redirs
+        let (preRedirs, redirExprs) =
+              foldl'
+                (\(preAcc, redirAcc) (p, r) -> (preAcc <> p, redirAcc <> [r]))
+                ([], [])
+                (catMaybes parts)
         translated <- translateToken cmd
-        pure (attachRedirs redirExprs translated)
+        let attached = attachRedirs redirExprs translated
+        if null preRedirs
+          then pure attached
+          else
+            case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
+              Just body -> pure (Stmt (Begin body []))
+              Nothing -> pure (Comment "Skipped empty redirection block")
       _ -> unsupportedStmt ("Skipped token at statement level: " <> T.pack (show token))
 
 wrapStmtList :: [FishStatement] -> FishStatement

@@ -34,14 +34,6 @@ data Options = Options
   }
   deriving stock (Show, Eq)
 
-data Translation = Translation
-  { trPath :: FilePath,
-    trStatements :: [FishStatement],
-    trState :: TranslateState,
-    trSourceMap :: M.Map Text (Maybe FilePath)
-  }
-  deriving stock (Show, Eq)
-
 main :: IO ()
 main = do
   opts <- execParser (info (optionsParser <**> helper) (fullDesc <> progDesc "Translate bash scripts to fish"))
@@ -118,6 +110,8 @@ translateFile opts cfg path = do
         Right (stmt, st) -> do
           unless (optQuietWarnings opts) $
             emitTranslateWarnings (warnings st)
+          unless (optQuietWarnings opts) $
+            emitTranslateNotes path (warnings st)
           sourceMap <-
             if optRecursive opts
               then collectSourceMap opts path (prRoot parseRes)
@@ -187,7 +181,7 @@ outputInline opts translations rootPath =
   case M.lookup rootPath translations of
     Nothing -> emitWarn opts "warning: no translation output"
     Just _ -> do
-      stmts <- inlineStatements opts translations Set.empty rootPath
+      stmts <- inlineStatements (emitWarn opts) translations Set.empty rootPath
       writeOutput opts (renderFish stmts)
 
 outputSeparate :: Options -> M.Map FilePath Translation -> FilePath -> IO ()
@@ -211,109 +205,6 @@ writeOutput opts output =
   case optOutput opts of
     Nothing -> putText output
     Just path -> writeFileText path output
-
-inlineStatements ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  FilePath ->
-  IO [FishStatement]
-inlineStatements opts translations stack path =
-  case M.lookup path translations of
-    Nothing -> do
-      emitWarn opts ("warning: missing translation for sourced file: " <> toText path)
-      pure [Comment ("Missing source: " <> toText path)]
-    Just tr -> do
-      let stack' = Set.insert path stack
-      concatMapM (inlineStatement opts translations stack' tr) (trStatements tr)
-
-inlineStatement ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  Translation ->
-  FishStatement ->
-  IO [FishStatement]
-inlineStatement opts translations stack tr = \case
-  Stmt (Source expr) ->
-    case expr of
-      ExprLiteral txt ->
-        case M.lookup txt (trSourceMap tr) >>= id of
-          Just resolved
-            | Set.member resolved stack -> do
-                emitWarn opts ("warning: recursive source detected: " <> toText resolved)
-                pure [Comment ("Skipped recursive source: " <> toText resolved)]
-            | otherwise -> inlineStatements opts translations stack resolved
-          Nothing -> pure [Stmt (Source expr)]
-      _ -> pure [Stmt (Source expr)]
-  StmtList stmts -> concatMapM (inlineStatement opts translations stack tr) stmts
-  Stmt cmd -> do
-    cmd' <- inlineCommand opts translations stack tr cmd
-    pure [Stmt cmd']
-  other -> pure [other]
-
-inlineCommand ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  Translation ->
-  FishCommand t ->
-  IO (FishCommand t)
-inlineCommand opts translations stack tr = \case
-  Begin body suffix -> do
-    body' <- inlineBody opts translations stack tr body
-    pure (Begin body' suffix)
-  If cond thn els suffix -> do
-    thn' <- inlineBody opts translations stack tr thn
-    els' <- inlineBodyList opts translations stack tr els
-    pure (If cond thn' els' suffix)
-  While cond body suffix -> do
-    body' <- inlineBody opts translations stack tr body
-    pure (While cond body' suffix)
-  For var listExpr body suffix -> do
-    body' <- inlineBody opts translations stack tr body
-    pure (For var listExpr body' suffix)
-  Switch expr cases suffix -> do
-    cases' <- traverse (inlineCaseItem opts translations stack tr) cases
-    pure (Switch expr cases' suffix)
-  Function func -> do
-    body' <- inlineBody opts translations stack tr (funcBody func)
-    pure (Function func {funcBody = body'})
-  other -> pure other
-
-inlineBody ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  Translation ->
-  NonEmpty FishStatement ->
-  IO (NonEmpty FishStatement)
-inlineBody opts translations stack tr body = do
-  body' <- inlineBodyList opts translations stack tr (NE.toList body)
-  case NE.nonEmpty body' of
-    Just neBody -> pure neBody
-    Nothing -> pure (Comment "Skipped empty inlined body" NE.:| [])
-
-inlineBodyList ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  Translation ->
-  [FishStatement] ->
-  IO [FishStatement]
-inlineBodyList opts translations stack tr stmts =
-  concatMapM (inlineStatement opts translations stack tr) stmts
-
-inlineCaseItem ::
-  Options ->
-  M.Map FilePath Translation ->
-  Set.Set FilePath ->
-  Translation ->
-  CaseItem ->
-  IO CaseItem
-inlineCaseItem opts translations stack tr (CaseItem pats body) = do
-  body' <- inlineBody opts translations stack tr body
-  pure (CaseItem pats body')
 
 rewriteSources :: M.Map FilePath Translation -> Translation -> [FishStatement]
 rewriteSources translations tr =
@@ -434,13 +325,78 @@ formatRange :: SourceRange -> Text
 formatRange SourceRange {rangeStart = SourcePos {..}} =
   srcFile <> ":" <> show srcLine <> ":" <> show srcColumn
 
+emitTranslateNotes :: FilePath -> [Warning] -> IO ()
+emitTranslateNotes path warns = do
+  let (highCount, mediumCount, lowCount) = summarizeWarnings warns
+      total = highCount + mediumCount + lowCount
+      score = confidenceScore warns
+      noteHeader = "note: " <> toText path <> ": translation confidence " <> T.pack (show score) <> "/100"
+      details =
+        "note: "
+          <> T.pack (show total)
+          <> " warning(s) ("
+          <> T.pack (show highCount)
+          <> " high, "
+          <> T.pack (show mediumCount)
+          <> " medium, "
+          <> T.pack (show lowCount)
+          <> " low)"
+  hPutStrLn stderr (toString noteHeader)
+  when (total > 0) $
+    hPutStrLn stderr (toString details)
+  when (highCount > 0) $
+    hPutStrLn stderr "note: high-risk translations present; review recommended"
+
+data WarningSeverity
+  = WarnHigh
+  | WarnMedium
+  | WarnLow
+  deriving stock (Eq, Show)
+
+summarizeWarnings :: [Warning] -> (Int, Int, Int)
+summarizeWarnings warns =
+  foldl' tally (0, 0, 0) warns
+  where
+    tally (highC, medC, lowC) warn =
+      case warningSeverity warn of
+        WarnHigh -> (highC + 1, medC, lowC)
+        WarnMedium -> (highC, medC + 1, lowC)
+        WarnLow -> (highC, medC, lowC + 1)
+
+confidenceScore :: [Warning] -> Int
+confidenceScore warns =
+  let (highC, medC, lowC) = summarizeWarnings warns
+      raw = 100 - (highC * 20) - (medC * 10) - (lowC * 4)
+   in max 0 (min 100 raw)
+
+warningSeverity :: Warning -> WarningSeverity
+warningSeverity Warning {warnMessage = msg} =
+  let msgLower = T.toLower msg
+   in if any (`T.isInfixOf` msgLower) highKeywords
+        then WarnHigh
+        else if any (`T.isInfixOf` msgLower) mediumKeywords
+          then WarnMedium
+          else WarnLow
+  where
+    highKeywords =
+      [ "unsupported",
+        "not supported",
+        "no direct fish equivalent",
+        "manual",
+        "skipped"
+      ]
+    mediumKeywords =
+      [ "emitting comment",
+        "outside a function",
+        "may require manual",
+        "may need"
+      ]
+
 emitWarn :: Options -> Text -> IO ()
 emitWarn opts msg =
   unless (optQuietWarnings opts) $
     hPutStrLn stderr (toString msg)
 
-concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
-concatMapM f xs = fmap concat (mapM f xs)
 
 tokenToLiteralText :: Token -> Text
 tokenToLiteralText = T.pack . getLiteralStringDef ""

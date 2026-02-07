@@ -4,6 +4,7 @@
 
 module Language.Fish.Translator.Monad
   ( TranslateM,
+    TranslateEffs,
     TranslateState (..),
     TranslateConfig (..),
     defaultConfig,
@@ -16,6 +17,7 @@ module Language.Fish.Translator.Monad
     evalTranslateWithPositions,
     addWarning,
     unsupported,
+    noteUnsupported,
     unsupportedStmt,
     withFunctionScope,
     addLocalVars,
@@ -24,9 +26,16 @@ module Language.Fish.Translator.Monad
   )
 where
 
+import Prelude hiding (Reader, State, ask, get, gets, modify, runReader, runState)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.AST (FishStatement (..), SourcePos (..), SourceRange (..))
+import Polysemy (Sem, run)
+import Polysemy.Error (Error, runError, throw)
+import Polysemy.Input (Input, input, runInputConst)
+import Polysemy.Reader (Reader, ask, runReader)
+import Polysemy.State (State, get, gets, modify, runState)
+import Polysemy.Writer (Writer, runWriter, tell)
 import ShellCheck.AST (Id, Token, getId)
 import ShellCheck.Interface (Position (..))
 
@@ -79,7 +88,15 @@ data TranslateState = TranslateState
   }
   deriving stock (Show, Eq)
 
-type TranslateM = StateT TranslateState (Either TranslateError)
+type TranslateEffs =
+  [ Input (M.Map Id SourceRange),
+    Reader TranslateConfig,
+    State TranslateState,
+    Writer [Warning],
+    Error TranslateError
+  ]
+
+type TranslateM = Sem TranslateEffs
 
 runTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError (a, TranslateState)
 runTranslate cfg = runTranslateWithPositions cfg mempty
@@ -90,16 +107,28 @@ runTranslateWithPositions ::
   TranslateM a ->
   Either TranslateError (a, TranslateState)
 runTranslateWithPositions cfg positions m =
-  let initState =
+  let ranges = toSourceRanges positions
+      initState =
         TranslateState
           { sourceMap = mempty,
             warnings = [],
             context = TranslationContext False False Set.empty,
             config = cfg,
-            tokenRanges = toSourceRanges positions,
+            tokenRanges = ranges,
             rangeStack = []
           }
-   in runStateT m initState
+      result =
+        run
+          . runError
+          . runWriter
+          . runState initState
+          . runReader cfg
+          . runInputConst ranges
+          $ m
+   in case result of
+        Left err -> Left err
+        Right (warns, (st, a)) ->
+          Right (a, st {warnings = warnings st <> warns})
 
 evalTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError a
 evalTranslate cfg m = fmap fst (runTranslate cfg m)
@@ -116,16 +145,22 @@ addWarning :: Text -> TranslateM ()
 addWarning msg = do
   st <- get
   let range = listToMaybe (rangeStack st)
-  modify' (\s -> s {warnings = warnings s <> [Warning msg range]})
+  tell [Warning msg range]
 
 unsupported :: Text -> TranslateM ()
 unsupported msg = do
   st <- get
+  cfg <- ask
   let range = listToMaybe (rangeStack st)
-      isStrict = strictMode (config st)
+      isStrict = strictMode cfg
   if isStrict
-    then lift (Left (Unsupported msg range))
-    else modify' (\s -> s {warnings = warnings s <> [Warning msg range]})
+    then throw (Unsupported msg range)
+    else tell [Warning msg range]
+
+noteUnsupported :: Text -> TranslateM FishStatement
+noteUnsupported msg = do
+  unsupported msg
+  pure (Comment ("NOTE: " <> msg))
 
 unsupportedStmt :: Text -> TranslateM FishStatement
 unsupportedStmt msg = do
@@ -137,14 +172,14 @@ withFunctionScope action = do
   st <- get
   let ctx = context st
       newCtx = ctx {inFunction = True, localVars = Set.empty}
-  modify' (\s -> s {context = newCtx})
+  modify (\s -> s {context = newCtx})
   result <- action
-  modify' (\s -> s {context = ctx})
+  modify (\s -> s {context = ctx})
   pure result
 
 addLocalVars :: [Text] -> TranslateM ()
 addLocalVars names =
-  modify'
+  modify
     ( \s ->
         let ctx = context s
          in s {context = ctx {localVars = Set.union (localVars ctx) (Set.fromList names)}}
@@ -158,13 +193,14 @@ isLocalVar name = do
 withTokenRange :: Token -> TranslateM a -> TranslateM a
 withTokenRange tok action = do
   let tokId = getId tok
-  mRange <- gets (M.lookup tokId . tokenRanges)
+  ranges <- input
+  let mRange = M.lookup tokId ranges
   case mRange of
     Nothing -> action
     Just range -> do
-      modify' (\st -> st {rangeStack = range : rangeStack st})
+      modify (\st -> st {rangeStack = range : rangeStack st})
       result <- action
-      modify' (\st -> st {rangeStack = drop 1 (rangeStack st)})
+      modify (\st -> st {rangeStack = drop 1 (rangeStack st)})
       pure result
 
 toSourceRanges :: M.Map Id (Position, Position) -> M.Map Id SourceRange

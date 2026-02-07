@@ -16,18 +16,20 @@ category:            Translate Bash to Fish shell
 build-type:          Simple
 extra-doc-files:     README.md
                      CHANGELOG.md
-tested-with:         GHC == 9.12.2
+tested-with:         GHC == {9.12.2}
 
 source-repository head
   type:                git
   location:            https://github.com/eessmann/monk.git
 
 common common-options
-  build-depends:       base ^>= 4.21
+  build-depends:       base >= 4.21 && <5
                      , relude
                      , ShellCheck ^>= 0.11
                      , prettyprinter ^>= 1.7
                      , safe-exceptions ^>= 0.1.7
+                     , polysemy ^>= 1.9
+                     , polysemy-plugin ^>= 0.4
 
   -- Use relude as the Prelude via mixins.
   mixins:              base hiding (Prelude)
@@ -35,6 +37,7 @@ common common-options
                      , relude
 
   ghc-options:         -Wall
+                       -Werror
                        -Wcompat
                        -Widentities
                        -Wincomplete-uni-patterns
@@ -42,6 +45,7 @@ common common-options
                        -Wredundant-constraints
                        -Wnoncanonical-monad-instances
                        -fhide-source-paths
+                       -fplugin=Polysemy.Plugin
                        -Wmissing-export-lists
                        -Wpartial-fields
                        -Wmissing-deriving-strategies
@@ -69,6 +73,7 @@ library
   import:              common-options
   hs-source-dirs:      src
   exposed-modules:     Monk
+                     , Language.Fish.Inline
   other-modules:       Language.Fish.AST
                      , Language.Fish.Pretty
                      , Language.Fish.Translator
@@ -103,12 +108,16 @@ test-suite monk-test
   main-is:             Spec.hs
   other-modules:       Gen
                      , TestSupport
+                     , ShellSupport
                      , Golden
                      , Integration
+                     , Unit.Inline
+                     , Unit.Polysemy
                      , Unit.Pretty
                      , Unit.Translation
                      , Property.Pretty
                      , Property.Translation
+                     , Property.OutputEquivalence
   build-depends:       monk
                      , containers
                      , directory
@@ -128,6 +137,7 @@ benchmark monk-benchmark
   hs-source-dirs:      benchmark
   main-is:             Main.hs
   build-depends:       monk
+                     , text
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N

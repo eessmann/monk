@@ -3,6 +3,7 @@
 
 module Language.Fish.Translator.IO
   ( translatePipeline,
+    translatePipelineM,
     translateTokenToMaybeStatusCmd,
     translatePipelineToStatus,
     pipelineOf,
@@ -15,7 +16,10 @@ import Language.Fish.Translator.Commands
   ( stripTimePrefix,
     translateCommandTokensToStatus,
     translateTokenToStatusCmd,
+    translateTokenToStatusCmdM,
   )
+import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------
@@ -47,7 +51,17 @@ translatePipeline bang cmds =
         [] -> Stmt (Command "true" [])
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-           in if null bang then Stmt pipe else Stmt (Not pipe)
+           in if hasBang bang then Stmt (Not pipe) else Stmt pipe
+
+translatePipelineM :: [Token] -> [Token] -> TranslateM FishStatement
+translatePipelineM bang cmds = do
+  let (timed, cmds') = stripTimePrefix cmds
+  cmds'' <- mapM translateTokenToStatusCmdM cmds'
+  case cmds'' of
+    [] -> pure (Stmt (Command "true" []))
+    (c : cs) ->
+      let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+       in pure (if hasBang bang then Stmt (Not pipe) else Stmt pipe)
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
 translateTokenToMaybeStatusCmd token =
@@ -73,4 +87,7 @@ translatePipelineToStatus bang cmds =
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-           in if null bang then pipe else Not pipe
+           in if hasBang bang then Not pipe else pipe
+
+hasBang :: [Token] -> Bool
+hasBang = any (\tok -> tokenToLiteralText tok == "!")

@@ -16,6 +16,8 @@ module Monk
     TranslateError (..), -- ^ Translation errors.
     TranslateState (..), -- ^ Translation state (warnings, source ranges).
     Warning (..), -- ^ Non-fatal translation warnings.
+    Translation (..), -- ^ Translation bundle for inlining.
+    inlineStatements, -- ^ Inline translated sources (used by CLI/tests).
     renderFish, -- ^ Render a Fish AST (list of statements) to Text.
     parseBashFile, -- ^ Parse a Bash file from disk.
     parseBashScript, -- ^ Parse a Bash script from (filename, text) into a ShellCheck 'ParseResult'.
@@ -29,6 +31,7 @@ where
 import Language.Bash.Parser (parseBashFile, parseBashScript)
 import Language.Fish.AST
 import Language.Fish.AST qualified as AST
+import Language.Fish.Inline (Translation (..), inlineStatements)
 import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator (translateParseResult, translateRoot, translateToken)
 import Language.Fish.Translator.Monad

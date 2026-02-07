@@ -619,6 +619,9 @@ data ReadFlag
   | ReadUniversal
   | ReadExport
   | ReadArray
+  | ReadNChars Text
+  | ReadTimeout Text
+  | ReadFD Text
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------

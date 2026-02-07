@@ -136,13 +136,19 @@ parseForInc tok =
 
 parseIncToken :: Token -> Maybe FishStatement
 parseIncToken = \case
-  TA_Unary _ "++" inner -> incByVar inner "+" (ExprLiteral "1" NE.:| [])
-  TA_Unary _ "--" inner -> incByVar inner "-" (ExprLiteral "1" NE.:| [])
+  TA_Unary _ op inner
+    | stripUnaryMarkers op == "++" -> incByVar inner "+" (ExprLiteral "1" NE.:| [])
+  TA_Unary _ op inner
+    | stripUnaryMarkers op == "--" -> incByVar inner "-" (ExprLiteral "1" NE.:| [])
   TA_Assignment _ "+=" lhs rhs -> incByVar lhs "+" (arithArgsFromToken rhs)
   TA_Assignment _ "-=" lhs rhs -> incByVar lhs "-" (arithArgsFromToken rhs)
   TA_Sequence _ (t : _) -> parseIncToken t
   TA_Parenthesis _ t -> parseIncToken t
   _ -> Nothing
+
+stripUnaryMarkers :: String -> Text
+stripUnaryMarkers op =
+  T.dropAround (== '|') (toText op)
 
 parseIncText :: Text -> Maybe FishStatement
 parseIncText txt

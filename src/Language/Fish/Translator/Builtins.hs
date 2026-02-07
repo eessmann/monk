@@ -12,6 +12,7 @@ module Language.Fish.Translator.Builtins
   )
 where
 
+import Prelude hiding (gets)
 import Control.Monad (foldM)
 import Data.Set qualified as Set
 import Data.Text qualified as T
@@ -25,6 +26,7 @@ import Language.Fish.Translator.Monad
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
+import Polysemy.State (gets)
 import ShellCheck.AST
 
 translateLocalCommand :: [Token] -> TranslateM FishStatement
@@ -131,10 +133,10 @@ parseDeclareFlags = go
 parseDeclareArg :: [SetFlag] -> Token -> TranslateM (Maybe Text, [FishStatement])
 parseDeclareArg flags tok =
   case tok of
-    T_Assignment _ _ var _ _ ->
+    T_Assignment _ _ var _ _ -> do
       let name = toText var
-          stmts = translateAssignmentWithFlags flags tok
-       in pure (Just name, stmts)
+      stmts <- translateAssignmentWithFlagsM flags tok
+      pure (Just name, stmts)
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
@@ -270,10 +272,10 @@ scopeFlagsFor locals name =
 parseLocalArg :: Token -> TranslateM (Maybe (Text, [FishStatement]))
 parseLocalArg tok =
   case tok of
-    T_Assignment _ _ var _ _ ->
+    T_Assignment _ _ var _ _ -> do
       let name = toText var
-          stmts = translateAssignmentWithFlags [SetLocal] tok
-       in pure (Just (name, stmts))
+      stmts <- translateAssignmentWithFlagsM [SetLocal] tok
+      pure (Just (name, stmts))
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
@@ -290,10 +292,10 @@ parseLocalArg tok =
 parseExportArg :: Set.Set Text -> Token -> TranslateM [FishStatement]
 parseExportArg locals tok =
   case tok of
-    T_Assignment _ _ var _ _ ->
+    T_Assignment _ _ var _ _ -> do
       let name = toText var
           flags = exportFlags locals name
-       in pure (translateAssignmentWithFlags flags tok)
+      translateAssignmentWithFlagsM flags tok
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
