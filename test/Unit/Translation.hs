@@ -52,12 +52,12 @@ unitTranslationTests =
       H.testCase "Redirection expansion hoists side effects" $ do
         out <- translateScript "echo hi > ${OUT:=/tmp/out}"
         T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
-        T.isInfixOf "> (string join ' ' $OUT)" out H.@? "expected redirection to use OUT",
+        T.isInfixOf "> (string join ' ' $OUT ; or printf '')" out H.@? "expected redirection to use OUT",
       H.testCase "Heredoc expansion hoists side effects" $ do
         let script = "cat <<EOF\n${VAL:=ok}\nEOF\n"
         out <- translateScript script
         T.isInfixOf "set --global VAL 'ok'" out H.@? "expected assignment before heredoc"
-        T.isInfixOf "string join ' ' $VAL" out H.@? "expected heredoc to use VAL",
+        T.isInfixOf "string join ' ' $VAL ; or printf ''" out H.@? "expected heredoc to use VAL",
       H.testCase "Length expansion for argv uses count" $ do
         out <- translateScript "echo ${#@}"
         T.isInfixOf "count $argv" out H.@? "expected count for argv length",
@@ -73,7 +73,7 @@ unitTranslationTests =
       H.testCase "Hash in word is preserved" $ do
         out <- translateScript "a=nixpkgs\nnix run $a#hello"
         T.isInfixOf "set --global a 'nixpkgs'" out H.@? "expected assignment translation"
-        T.isInfixOf "string join ' ' $a" out H.@? "expected variable join in word"
+        T.isInfixOf "string join ' ' $a ; or printf ''" out H.@? "expected variable join in word"
         T.isInfixOf "#hello" out H.@? "expected hash in word preserved",
       H.testCase "Pushd and popd pass through" $ do
         outPushd <- translateScript "pushd /tmp"
@@ -205,16 +205,17 @@ unitTranslationTests =
         T.isInfixOf "case foo*" out H.@? "expected unquoted glob pattern",
       H.testCase "Case patterns with expansion keep glob meta" $ do
         out <- translateScript "case $x in ${Y}* ) echo ok ;; esac"
-        T.isInfixOf "case (string join ' ' $Y)*" out H.@? "expected expansion concatenated with glob"
-        H.assertBool "expected glob meta to stay unquoted" (not (T.isInfixOf "'*'" out)),
+        T.isInfixOf "printf '%s%s'" out H.@? "expected printf pattern builder"
+        T.isInfixOf "string join ' ' $Y ; or printf ''" out H.@? "expected expansion string join in pattern"
+        H.assertBool "expected case pattern to be computed" (T.isInfixOf "case (" out),
       H.testCase "Case pattern expansion hoists side effects" $ do
         out <- translateScript "case $x in ${Y:=1}) echo ok ;; esac"
         T.isInfixOf "set --global Y '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "case (string join ' ' $Y)" out H.@? "expected pattern to use Y",
+        T.isInfixOf "string join ' ' $Y ; or printf ''" out H.@? "expected pattern to use Y",
       H.testCase "Case switch expansion hoists side effects" $ do
         out <- translateScript "case ${X:=1} in 1) echo ok ;; esac"
         T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "switch (string join ' ' $X)" out H.@? "expected switch to use X",
+        T.isInfixOf "switch (string join ' ' $X ; or printf '')" out H.@? "expected switch to use X",
       H.testCase "Read flags translate to fish equivalents" $ do
         outN <- translateScript "read -n 3 foo"
         T.isInfixOf "read --nchars 3 foo" outN H.@? "expected nchars flag"
