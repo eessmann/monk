@@ -243,7 +243,7 @@ Hyperfine (CLI translation batches, compatible subset):
 - **Errexit/pipefail emulation**: best-effort and still imperfect, especially around bash exceptions and subtle command substitution rules.
 - **Semantic gaps remain**: word splitting, glob differences, and fish-only behaviors still require manual review.
 
-## Where babelfish may be stronger
+## Where babelfish is be stronger
 
 - **Simplicity**: quick install and low friction for small scripts
 - **Performance**: very fast translation throughput
