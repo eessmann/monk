@@ -34,6 +34,10 @@ integrationFixtures =
     IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
     IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash",
     IntegrationFixture "realworld/hello-world" "test/fixtures/realworld/hello-world.bash",
+    IntegrationFixture "realworld/echo-args" "test/fixtures/realworld/echo-args.bash",
+    IntegrationFixture "realworld/a2l" "test/fixtures/realworld/a2l.bash",
+    IntegrationFixture "realworld/coat" "test/fixtures/realworld/coat.bash",
+    IntegrationFixture "realworld/taoc" "test/fixtures/realworld/taoc.bash",
     IntegrationFixture "realworld/pyramid-right" "test/fixtures/realworld/pyramid-right.bash",
     IntegrationFixture "realworld/pyramid-left" "test/fixtures/realworld/pyramid-left.bash",
     IntegrationFixture "realworld/version-compare" "test/fixtures/realworld/version-compare.bash"
