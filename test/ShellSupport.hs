@@ -12,15 +12,18 @@ module ShellSupport
   )
 where
 
+import Control.Exception (bracket)
 import Data.Char (isAlpha, toLower)
 import Data.List (findIndices)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import System.Directory (findExecutable)
+import Data.Text.IO qualified as TIO
+import System.Directory (findExecutable, getTemporaryDirectory, removeFile)
 import System.Environment qualified as Env
 import System.Exit (ExitCode)
+import System.IO qualified as IO
 import System.Process (CreateProcess (env), proc, readCreateProcessWithExitCode)
 
 data Shell
@@ -73,19 +76,31 @@ runShell shell env0 script = runShellWith shell env0 script [] ""
 
 runShellWith :: Shell -> [(String, String)] -> Text -> [Text] -> Text -> IO RunResult
 runShellWith shell env0 script args stdinInput = do
-  let scriptWithArgs = prefixArgs shell args script
-      wrapped = wrapScript shell scriptWithArgs
-      (cmd, cmdArgs) = shellCommand shell wrapped
-      process = (proc cmd cmdArgs) {env = Just env0}
-  (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
-  let (stdoutPart, envPart) = splitEnv marker (T.pack out)
-  pure
-    RunResult
-      { rrExit = exitCode,
-        rrStdout = stdoutPart,
-        rrStderr = T.pack err,
-        rrEnv = parseEnv envPart
-      }
+  withTempScript script $ \scriptPath -> do
+    let wrapped = wrapScript shell script args scriptPath
+        (cmd, cmdArgs) = shellCommand shell wrapped
+        process = (proc cmd cmdArgs) {env = Just env0}
+    (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
+    let (stdoutPart, envPart) = splitEnv marker (T.pack out)
+    pure
+      RunResult
+        { rrExit = exitCode,
+          rrStdout = stdoutPart,
+          rrStderr = T.pack err,
+          rrEnv = parseEnv envPart
+        }
+
+withTempScript :: Text -> (FilePath -> IO a) -> IO a
+withTempScript script action = do
+  tmpDir <- getTemporaryDirectory
+  bracket (IO.openTempFile tmpDir "monk-script-") cleanup $ \(path, handle) -> do
+    TIO.hPutStr handle script
+    IO.hFlush handle
+    action path
+  where
+    cleanup (path, handle) = do
+      IO.hClose handle
+      removeFile path
 
 shellCommand :: Shell -> Text -> (FilePath, [String])
 shellCommand shell script =
@@ -96,39 +111,33 @@ shellCommand shell script =
 marker :: Text
 marker = "__MONK_ENV_BEGIN__"
 
-wrapScript :: Shell -> Text -> Text
-wrapScript shell script =
-  case shell of
-    ShellBash ->
-      let body = if T.null (T.strip script) then ":" else script
-          markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
-          statusLine = "monk_status=$?"
-          footer = [statusLine, markerLine, "env", "exit $monk_status"]
-          prefix = if scriptMayExit script then ["(" <> body <> ")"] else [body]
-       in T.intercalate "\n" (prefix <> footer)
-    ShellFish ->
-      let body = if T.null (T.strip script) then "true" else script
-          markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
-          statusLine = "set -l monk_status $status"
-          footer = [statusLine, markerLine, "env", "exit $monk_status"]
-       in if scriptMayExit script
-            then
-              let escaped = escapeSingleQuotes body
-                  inner = "fish --no-config -c '" <> escaped <> "'"
-               in T.intercalate "\n" ([inner] <> footer)
-            else T.intercalate "\n" ([body] <> footer)
+wrapScript :: Shell -> Text -> [Text] -> FilePath -> Text
+wrapScript shell script args scriptPath =
+  let markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
+      (statusLine, exitLine) =
+        case shell of
+          ShellBash -> ("monk_status=$?", "exit $monk_status")
+          ShellFish -> ("set -l monk_status $status", "exit $monk_status")
+      bodyLines = scriptLines shell script args scriptPath
+      footer = [statusLine, markerLine, "env", exitLine]
+   in T.intercalate "\n" (bodyLines <> footer)
 
-prefixArgs :: Shell -> [Text] -> Text -> Text
-prefixArgs shell args script
-  | null args = script
-  | otherwise =
-      case shell of
+scriptLines :: Shell -> Text -> [Text] -> FilePath -> [Text]
+scriptLines shell script args scriptPath =
+  let pathText = T.pack scriptPath
+      argsText = T.intercalate " " (map quoteArg args)
+      hasArgs = not (null args)
+      runChild cmd =
+        if hasArgs then cmd <> " " <> argsText else cmd
+   in case shell of
         ShellBash ->
-          let prefix = "set -- " <> T.intercalate " " (map quoteArg args)
-           in prefix <> "\n" <> script
+          if scriptMayExit script
+            then [runChild ("bash " <> quoteArg pathText)]
+            else [runChild ("source " <> quoteArg pathText)]
         ShellFish ->
-          let prefix = "set argv " <> T.intercalate " " (map quoteArg args)
-           in prefix <> "\n" <> script
+          if scriptMayExit script
+            then [runChild ("fish --no-config " <> quoteArg pathText)]
+            else [runChild ("source " <> quoteArg pathText)]
 
 quoteArg :: Text -> Text
 quoteArg txt =
@@ -136,12 +145,9 @@ quoteArg txt =
 
 scriptMayExit :: Text -> Bool
 scriptMayExit script =
-  any (== "exit") (map normalizeToken (T.words script))
+  any (`elem` ["exit", "exec"]) (map normalizeToken (T.words script))
   where
     normalizeToken = T.takeWhile isAlpha . T.dropWhile (not . isAlpha)
-
-escapeSingleQuotes :: Text -> Text
-escapeSingleQuotes = T.replace "'" "'\\''"
 
 splitEnv :: Text -> Text -> (Text, Text)
 splitEnv markerText output =
