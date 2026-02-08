@@ -5,9 +5,9 @@
 [![Hackage](https://img.shields.io/hackage/v/monk.svg?logo=haskell)](https://hackage.haskell.org/package/monk)
 [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Monk** is a sophisticated Haskell tool that translates Bash shell scripts into [Fish shell](https://fishshell.com/) scripts, helping you modernize your shell scripting workflow with Fish's more intuitive syntax and powerful features.
+**Monk** is a Haskell tool that translates Bash shell scripts into [Fish shell](https://fishshell.com/) scripts, helping you modernize your shell scripting workflow with Fish's more intuitive syntax and powerful features.
 
-## 🎯 Why Monk?
+## 🎯 Why Fish and Monk?
 
 Fish shell offers many advantages over Bash:
 - **Intuitive syntax** - No more `$((arithmetic))` or `[[ conditions ]]`
@@ -154,7 +154,7 @@ end
 
 ## 🏗️ Architecture
 
-Monk uses a sophisticated multi-stage translation pipeline:
+Monk uses a multi-stage translation pipeline:
 
 ```
 Bash Script → ShellCheck AST → Fish AST → Fish Script
@@ -192,7 +192,6 @@ cabal bench
 ## Docs
 
 - `docs/design/translator-todo.md`: translation semantics notes and open items
-- `docs/babelfish-comparison.md`: bake-off methodology and comparison notes
 
 ### Test Categories
 
@@ -204,10 +203,6 @@ cabal bench
 ## 📊 Current Status
 
 Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We also hoist side-effecting expansions across arguments, redirections, and case patterns, and lower short-circuit arithmetic into conditional evaluation to preserve side effects. Recent additions include `read` flag mapping (`-n/-t/-u/-a`) with IFS splitting notes and best-effort `set -e`/`pipefail` emulation.
-
-## 🤝 Comparison with Babelfish
-
-See `docs/babelfish-comparison.md` for a focused, reproducible bake-off methodology and a structured comparison.
 
 ### Non-trivial Translations (Behavior Notes)
 
