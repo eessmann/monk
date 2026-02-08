@@ -8,6 +8,7 @@ import Property.Translation
 import RealWorld
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Unit.Polysemy
+import Unit.Pipefail
 import Unit.Pretty
 import Unit.Translation
 import Unit.Inline
@@ -23,6 +24,7 @@ tests =
       unitTranslationTests,
       unitInlineTests,
       unitPolysemyTests,
+      unitPipefailTests,
       propertyPrettyTests,
       propertyTranslationTests,
       propertyOutputEquivalenceTests,

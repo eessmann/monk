@@ -108,4 +108,4 @@ translateScriptText path script = do
   parseResult <- parseBashScript path script
   case translateParseResult defaultConfig parseResult of
     Left err -> pure (Left ("translateParseResult failed: " <> show err))
-    Right (stmt, _) -> pure (Right (renderFish [stmt]))
+    Right translation -> pure (Right (renderTranslation translation))

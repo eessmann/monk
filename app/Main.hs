@@ -107,7 +107,8 @@ translateFile opts cfg path = do
         Left err -> do
           emitTranslateError err
           exitFailure
-        Right (stmt, st) -> do
+        Right result -> do
+          let st = translationState result
           unless (optQuietWarnings opts) $
             emitTranslateWarnings (warnings st)
           unless (optQuietWarnings opts) $
@@ -116,7 +117,7 @@ translateFile opts cfg path = do
             if optRecursive opts
               then collectSourceMap opts path (prRoot parseRes)
               else pure mempty
-          let stmts = flattenStatements stmt
+          let stmts = translationStatements result
           pure
             Translation
               { trPath = path,
@@ -124,11 +125,6 @@ translateFile opts cfg path = do
                 trState = st,
                 trSourceMap = sourceMap
               }
-
-flattenStatements :: FishStatement -> [FishStatement]
-flattenStatements = \case
-  StmtList xs -> xs
-  stmt -> [stmt]
 
 collectSourceMap :: Options -> FilePath -> Maybe Token -> IO (M.Map Text (Maybe FilePath))
 collectSourceMap opts path mRoot = do

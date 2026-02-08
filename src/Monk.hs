@@ -7,9 +7,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Monk
-  ( translateRoot, -- ^ Convert a ShellCheck AST (Root) into a Fish AST.
-    translateToken, -- ^ Convert a ShellCheck AST (Token) into a Fish AST.
+  ( TranslationResult (..), -- ^ Translation output (AST + state).
+    TranslationFailure (..), -- ^ Parse or translation failures.
     translateParseResult, -- ^ Translate a ShellCheck ParseResult with source locations.
+    translateBashFile, -- ^ Parse and translate a Bash file on disk.
+    translateBashScript, -- ^ Parse and translate Bash script text.
+    translationStatements, -- ^ Flatten top-level statements from a translation.
+    renderTranslation, -- ^ Render a translation to Fish source.
+    flattenStatements, -- ^ Flatten a FishStatement into a top-level list.
     defaultConfig, -- ^ Default translation configuration.
     strictConfig, -- ^ Strict translation configuration (unsupported constructs fail).
     TranslateConfig (..), -- ^ Translation configuration.
@@ -33,7 +38,7 @@ import Language.Fish.AST
 import Language.Fish.AST qualified as AST
 import Language.Fish.Inline (Translation (..), inlineStatements)
 import Language.Fish.Pretty (renderFish)
-import Language.Fish.Translator (translateParseResult, translateRoot, translateToken)
+import Language.Fish.Translator qualified as Translator
 import Language.Fish.Translator.Monad
   ( TranslateConfig (..),
     TranslateError (..),
@@ -41,6 +46,67 @@ import Language.Fish.Translator.Monad
     Warning (..),
     defaultConfig,
   )
+import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
+
+data TranslationResult = TranslationResult
+  { translationStatement :: FishStatement,
+    translationState :: TranslateState
+  }
+  deriving stock (Show, Eq)
+
+data TranslationFailure
+  = ParseErrors [PositionedComment]
+  | TranslateFailure TranslateError
+  deriving stock (Show, Eq)
+
+translateParseResult ::
+  TranslateConfig ->
+  ParseResult ->
+  Either TranslateError TranslationResult
+translateParseResult cfg parseResult = do
+  (stmt, st) <- Translator.translateParseResult cfg parseResult
+  pure (TranslationResult stmt st)
+
+translateBashFile ::
+  TranslateConfig ->
+  FilePath ->
+  IO (Either TranslationFailure TranslationResult)
+translateBashFile cfg path = do
+  parseResE <- parseBashFile path
+  pure $
+    case parseResE of
+      Left errs -> Left (ParseErrors errs)
+      Right parseRes ->
+        case translateParseResult cfg parseRes of
+          Left err -> Left (TranslateFailure err)
+          Right res -> Right res
+
+translateBashScript ::
+  TranslateConfig ->
+  FilePath ->
+  Text ->
+  IO (Either TranslationFailure TranslationResult)
+translateBashScript cfg fileName scriptText = do
+  parseRes <- parseBashScript fileName scriptText
+  pure $
+    case prRoot parseRes of
+      Nothing -> Left (ParseErrors (prComments parseRes))
+      Just _ ->
+        case translateParseResult cfg parseRes of
+          Left err -> Left (TranslateFailure err)
+          Right res -> Right res
+
+translationStatements :: TranslationResult -> [FishStatement]
+translationStatements = flattenStatements . translationStatement
+
+renderTranslation :: TranslationResult -> Text
+renderTranslation = renderFish . translationStatements
+
+flattenStatements :: FishStatement -> [FishStatement]
+flattenStatements stmt =
+  case stmt of
+    StmtList xs -> xs
+    other -> [other]
 
 projectName :: Text
 projectName = "monk"

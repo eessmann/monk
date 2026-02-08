@@ -4,6 +4,8 @@
 
 module Language.Fish.Translator.Monad
   ( TranslateM,
+    Hoisted (..),
+    HoistedM,
     TranslateEffs,
     TranslateState (..),
     TranslateConfig (..),
@@ -23,13 +25,19 @@ module Language.Fish.Translator.Monad
     addLocalVars,
     isLocalVar,
     withTokenRange,
+    isErrexitEnabled,
+    isPipefailEnabled,
+    setErrexitEnabled,
+    setPipefailEnabled,
+    preambleStatements,
   )
 where
 
 import Prelude hiding (Reader, State, ask, get, gets, modify, runReader, runState)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
-import Language.Fish.AST (FishStatement (..), SourcePos (..), SourceRange (..))
+import Language.Fish.AST
+import Language.Fish.Translator.Hoist (Hoisted (..))
 import Polysemy (Sem, run)
 import Polysemy.Error (Error, runError, throw)
 import Polysemy.Input (Input, input, runInputConst)
@@ -84,7 +92,11 @@ data TranslateState = TranslateState
     context :: TranslationContext,
     config :: TranslateConfig,
     tokenRanges :: M.Map Id SourceRange,
-    rangeStack :: [SourceRange]
+    rangeStack :: [SourceRange],
+    errexitEnabled :: Bool,
+    pipefailEnabled :: Bool,
+    pipefailHelperAdded :: Bool,
+    preamble :: [FishStatement]
   }
   deriving stock (Show, Eq)
 
@@ -97,6 +109,8 @@ type TranslateEffs =
   ]
 
 type TranslateM = Sem TranslateEffs
+
+type HoistedM a = TranslateM (Hoisted a)
 
 runTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError (a, TranslateState)
 runTranslate cfg = runTranslateWithPositions cfg mempty
@@ -115,7 +129,11 @@ runTranslateWithPositions cfg positions m =
             context = TranslationContext False False Set.empty,
             config = cfg,
             tokenRanges = ranges,
-            rangeStack = []
+            rangeStack = [],
+            errexitEnabled = False,
+            pipefailEnabled = False,
+            pipefailHelperAdded = False,
+            preamble = []
           }
       result =
         run
@@ -202,6 +220,23 @@ withTokenRange tok action = do
       result <- action
       modify (\st -> st {rangeStack = drop 1 (rangeStack st)})
       pure result
+
+isErrexitEnabled :: TranslateM Bool
+isErrexitEnabled = gets errexitEnabled
+
+isPipefailEnabled :: TranslateM Bool
+isPipefailEnabled = gets pipefailEnabled
+
+setErrexitEnabled :: Bool -> TranslateM ()
+setErrexitEnabled enabled =
+  modify (\st -> st {errexitEnabled = enabled})
+
+setPipefailEnabled :: Bool -> TranslateM ()
+setPipefailEnabled enabled =
+  modify (\st -> st {pipefailEnabled = enabled})
+
+preambleStatements :: TranslateM [FishStatement]
+preambleStatements = gets preamble
 
 toSourceRanges :: M.Map Id (Position, Position) -> M.Map Id SourceRange
 toSourceRanges = M.map (\(startPos, endPos) -> SourceRange (toSourcePos startPos) (toSourcePos endPos))

@@ -76,8 +76,8 @@ Notes:
    - [x] `Language.Fish.Translator` top-level glue
 
 5. **Adjust Call Sites**
-   - [x] `Monk.translateParseResult` and friends remain same signature.
-   - [x] Tests should not need changes if `TranslateState` output shape is preserved.
+   - [x] `Monk.translateParseResult` now returns a `TranslationResult` wrapper.
+   - [x] Tests updated to use `translationState` / `renderTranslation`.
 
 6. **Cleanup**
    - [x] Remove any leftover `StateT` imports and old helper shims.

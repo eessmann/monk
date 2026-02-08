@@ -1,6 +1,6 @@
 cabal-version:       3.14
 name:                monk
-version:             0.2.1
+version:             0.3.0
 synopsis:            Translate Bash scripts to Fish shell scripts.
 description:
     Monk translates shell scripts (Bash, etc.) into fish-shell code.
@@ -27,6 +27,7 @@ common common-options
                      , relude
                      , ShellCheck ^>= 0.11
                      , prettyprinter ^>= 1.7
+                     , extra ^>= 1.8
                      , safe-exceptions ^>= 0.1.7
                      , polysemy ^>= 1.9
                      , polysemy-plugin ^>= 0.4
@@ -75,13 +76,69 @@ library
   exposed-modules:     Monk
                      , Language.Fish.Inline
   other-modules:       Language.Fish.AST
+                     , Language.Fish.AST.Example
+                     , Language.Fish.AST.Types
                      , Language.Fish.Pretty
+                     , Language.Fish.Pretty.Command
+                     , Language.Fish.Pretty.Expr
+                     , Language.Fish.Pretty.Job
+                     , Language.Fish.Pretty.Pattern
+                     , Language.Fish.Pretty.Redirect
+                     , Language.Fish.Pretty.Statement
                      , Language.Fish.Translator
                      , Language.Fish.Translator.Builtins
+                     , Language.Fish.Translator.Builtins.Common
+                     , Language.Fish.Translator.Builtins.Declare
+                     , Language.Fish.Translator.Builtins.Scope
+                     , Language.Fish.Translator.Builtins.Shift
+                     , Language.Fish.Translator.Builtins.Trap
+                     , Language.Fish.Translator.Builtins.Unset
+                     , Language.Fish.Translator.Args
+                     , Language.Fish.Translator.Cond
+                     , Language.Fish.Translator.Hoist
+                     , Language.Fish.Translator.Hoist.Monad
                      , Language.Fish.Translator.Monad
                      , Language.Fish.Translator.Names
+                     , Language.Fish.Translator.Pipefail
+                     , Language.Fish.Translator.Pipeline
+                     , Language.Fish.Translator.Statement
+                     , Language.Fish.Translator.Token
                      , Language.Fish.Translator.Variables
+                     , Language.Fish.Translator.Variables.Assignments
+                     , Language.Fish.Translator.Variables.Arithmetic
+                     , Language.Fish.Translator.Variables.Arithmetic.Assignments
+                     , Language.Fish.Translator.Variables.Arithmetic.Core
+                     , Language.Fish.Translator.Variables.Arithmetic.Expr
+                     , Language.Fish.Translator.Variables.Arithmetic.Helpers
+                     , Language.Fish.Translator.Variables.Arithmetic.ShortCircuit
+                     , Language.Fish.Translator.Variables.Common
+                     , Language.Fish.Translator.Variables.Expressions
+                     , Language.Fish.Translator.Variables.Expressions.Arrays
+                     , Language.Fish.Translator.Variables.Expressions.Core
+                     , Language.Fish.Translator.Variables.Expressions.Lists
+                     , Language.Fish.Translator.Variables.Expressions.Split
+                     , Language.Fish.Translator.Variables.Expressions.Subst
+                     , Language.Fish.Translator.Variables.Expressions.Words
+                     , Language.Fish.Translator.Variables.Glob
+                     , Language.Fish.Translator.Variables.Index
+                     , Language.Fish.Translator.Variables.ParamExpansion
+                     , Language.Fish.Translator.Variables.ParamParse
+                     , Language.Fish.Translator.Variables.ProcessSubst
+                     , Language.Fish.Translator.Variables.Substitution
                      , Language.Fish.Translator.Commands
+                     , Language.Fish.Translator.Commands.Args
+                     , Language.Fish.Translator.Commands.CommandTokens
+                     , Language.Fish.Translator.Commands.CommandTokens.Builtins
+                     , Language.Fish.Translator.Commands.CommandTokens.Core
+                     , Language.Fish.Translator.Commands.CommandTokens.Dispatch
+                     , Language.Fish.Translator.Commands.CommandTokens.Status
+                     , Language.Fish.Translator.Commands.Echo
+                     , Language.Fish.Translator.Commands.Read
+                     , Language.Fish.Translator.Commands.SetOptions
+                     , Language.Fish.Translator.Commands.SimpleCommand
+                     , Language.Fish.Translator.Commands.Status
+                     , Language.Fish.Translator.Commands.Tests
+                     , Language.Fish.Translator.Commands.Time
                      , Language.Fish.Translator.Control
                      , Language.Fish.Translator.ForArithmetic
                      , Language.Fish.Translator.IO
@@ -115,6 +172,7 @@ test-suite monk-test
                      , Integration
                      , Unit.Inline
                      , Unit.Polysemy
+                     , Unit.Pipefail
                      , Unit.Pretty
                      , Unit.Translation
                      , Property.Pretty

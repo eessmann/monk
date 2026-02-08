@@ -30,6 +30,13 @@ integrationFixtures =
     IntegrationFixture "stdout-stderr-exit" "test/fixtures/integration/stdout-stderr-exit.bash",
     IntegrationFixture "cd-tmp" "test/fixtures/integration/cd-tmp.bash",
     IntegrationFixture "pushd-popd" "test/fixtures/integration/pushd-popd.bash",
+    IntegrationFixture "errexit-basic" "test/fixtures/integration/errexit-basic.bash",
+    IntegrationFixture "errexit-andor" "test/fixtures/integration/errexit-andor.bash",
+    IntegrationFixture "errexit-conditionals" "test/fixtures/integration/errexit-conditionals.bash",
+    IntegrationFixture "pipefail-basic" "test/fixtures/integration/pipefail-basic.bash",
+    IntegrationFixture "pipefail-toggle" "test/fixtures/integration/pipefail-toggle.bash",
+    IntegrationFixture "read-flags" "test/fixtures/integration/read-flags.bash",
+    IntegrationFixture "arith-short-circuit" "test/fixtures/integration/arith-short-circuit.bash",
     IntegrationFixture "time-prefix" "test/fixtures/integration/time-prefix.bash",
     IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
     IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash",
@@ -78,4 +85,4 @@ translateScriptText path script = do
   parseResult <- parseBashScript path script
   case translateParseResult defaultConfig parseResult of
     Left err -> pure (Left ("translateParseResult failed: " <> show err))
-    Right (stmt, _) -> pure (Right (renderFish [stmt]))
+    Right translation -> pure (Right (renderTranslation translation))

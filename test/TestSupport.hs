@@ -26,11 +26,11 @@ translateScript script = do
   result <- parseBashScript "spec.sh" script
   case translateParseResult defaultConfig result of
     Left err -> H.assertFailure ("translateParseResult failed: " <> show err) >> pure ""
-    Right (stmt, _) -> pure (renderFish [stmt])
+    Right translation -> pure (renderTranslation translation)
 
 translateScriptMaybe :: Text -> IO (Maybe Text)
 translateScriptMaybe script = do
   result <- parseBashScript "spec.sh" script
   case translateParseResult defaultConfig result of
     Left _ -> pure Nothing
-    Right (stmt, _) -> pure (Just (renderFish [stmt]))
+    Right translation -> pure (Just (renderTranslation translation))

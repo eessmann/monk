@@ -9,12 +9,13 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Monk
-  ( FishStatement (..),
-    Translation (..),
+  ( Translation (..),
     defaultConfig,
     inlineStatements,
     parseBashScript,
     renderFish,
+    translationStatements,
+    translationState,
     translateParseResult,
   )
 import Test.Tasty (TestTree, testGroup)
@@ -32,19 +33,19 @@ unitInlineTests =
         rootParse <- parseBashScript rootPath rootScript
         subParse <- parseBashScript subPath subScript
         case (translateParseResult defaultConfig rootParse, translateParseResult defaultConfig subParse) of
-          (Right (rootStmt, rootState), Right (subStmt, subState)) -> do
+          (Right rootResult, Right subResult) -> do
             let rootTr =
                   Translation
                     { trPath = rootPath,
-                      trStatements = flattenStatements rootStmt,
-                      trState = rootState,
+                      trStatements = translationStatements rootResult,
+                      trState = translationState rootResult,
                       trSourceMap = M.fromList [("sub.sh", Just subPath)]
                     }
                 subTr =
                   Translation
                     { trPath = subPath,
-                      trStatements = flattenStatements subStmt,
-                      trState = subState,
+                      trStatements = translationStatements subResult,
+                      trState = translationState subResult,
                       trSourceMap = mempty
                     }
                 translations = M.fromList [(rootPath, rootTr), (subPath, subTr)]
@@ -56,8 +57,3 @@ unitInlineTests =
           (Left err, _) -> H.assertFailure (show err)
           (_, Left err) -> H.assertFailure (show err)
     ]
-
-flattenStatements :: FishStatement -> [FishStatement]
-flattenStatements = \case
-  StmtList xs -> xs
-  stmt -> [stmt]

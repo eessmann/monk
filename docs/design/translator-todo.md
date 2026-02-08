@@ -174,7 +174,7 @@
 ### Stage 5: Testing & Polish
 - [x] Add comprehensive test suite
 - [x] Create benchmark scripts
-- [ ] Write documentation
+- [x] Write documentation (README + design notes)
 - [ ] Handle edge cases
 
 ## ✅ Added Tests Scope (planned)
@@ -194,7 +194,7 @@
 8. **Param expansions**: glob-to-regex conversion and `^`/`,` case mods are approximate
 9. **`read` semantics**: flag parity and IFS splitting differ from bash; warnings emitted for lossy cases
 10. **Arithmetic side effects**: short-circuit/ternary are emulated via temp vars; verify on edge cases
-11. **`set -e`/`pipefail`**: bash options have no fish equivalent; translation emits notes only
+11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`, but still diverges for `inherit_errexit` and some command substitution edge cases
 
 ## ✅ Quick Wins (Can do immediately)
 
@@ -213,15 +213,16 @@
 
 ## ▶ Next Up (Recommended Order)
 
-1. [ ] **Triage remaining semantic gaps**
-   - [ ] Validate short-circuit/ternary arithmetic semantics on edge cases
-   - [ ] `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting parity
-   - [ ] `set -e` / `errexit` semantics and pipeline failure behavior
-   - [ ] Non-literal `source`/`.` paths in recursive translation
-2. [ ] **Generate inline translation notes**
-   - [ ] Emit comments in Fish output for lossy translations and semantic gaps.
-3. [x] **Create benchmark scripts**
-   - [x] Add real-world translation inputs for perf and regression tracking.
-4. [ ] **Handle edge cases**
-   - [ ] Word splitting differences (`"$var"` vs `$var` list expansion), only when fish list semantics would fail.
-   - [ ] `printf` vs `echo` portability and escape handling.
+1. [x] **Triage remaining semantic gaps**
+   - [x] Validate short-circuit/ternary arithmetic semantics on edge cases
+   - [x] `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting parity
+   - [x] `set -e` / `errexit` semantics and pipeline failure behavior
+   - [x] Errexit/pipefail edge-case parity for `&&`/`||` lists and conditionals
+   - [x] Non-literal `source`/`.` paths in recursive translation (warn + keep as `source`)
+2. [x] **Handle edge cases**
+   - [x] Word splitting differences (`"$var"` vs `$var` list expansion), only when fish list semantics would fail.
+   - [x] `printf` vs `echo` portability and escape handling.
+3. [ ] **Polish translation quality**
+   - [x] Preserve literal `--` and `-n` args for `echo`
+   - [x] Consolidate duplicated pipeline/errexit helpers across translator modules
+   - [x] Document pipefail behavior inside command substitutions (bash `inherit_errexit` caveat)

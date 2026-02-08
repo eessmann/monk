@@ -10,11 +10,21 @@ import Data.List (lookup)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.AST
+import Language.Fish.Translator.Cond
+  ( testBinaryCommand,
+    testNonZeroCommand,
+  )
 import Language.Fish.Translator.Control qualified as Control
-import Language.Fish.Translator.IO qualified as FIO
 import Language.Fish.Translator.Monad (TranslateM, addWarning)
 import Language.Fish.Translator.Names (isValidVarName)
-import Language.Fish.Translator.Variables
+import Language.Fish.Translator.Pipeline (pipelineOf)
+import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Variables.Arithmetic
+  ( arithArgsFromText,
+    arithArgsFromToken,
+    arithVarName,
+    mathSubstFromArgsNoScale,
+  )
 import ShellCheck.AST
 
 translateForArithmetic ::
@@ -41,7 +51,7 @@ translateForArithmetic translateStmt initTok condTok incTok body = do
         fromMaybe
           (Comment "Empty arithmetic loop body" NE.:| [])
           (Control.toNonEmptyStmtList (bodyStmts <> [incStmt]))
-      condJob = FishJobList (FishJobConjunction Nothing (FIO.pipelineOf condCmd) [] NE.:| [])
+      condJob = FishJobList (FishJobConjunction Nothing (pipelineOf condCmd) [] NE.:| [])
       whileStmt = Stmt (While condJob loopBody [])
       initBlock = [initStmt, whileStmt]
   pure $ case Control.toNonEmptyStmtList initBlock of
@@ -56,7 +66,7 @@ parseForInitToken :: Token -> Maybe FishStatement
 parseForInitToken = \case
   TA_Assignment _ "=" lhs rhs -> do
     var <- arithVarName lhs
-    let expr = mathSubstFromArgs (arithArgsFromToken rhs)
+    let expr = mathSubstFromArgsNoScale (arithArgsFromToken rhs)
     pure (Stmt (Set [SetGlobal] var expr))
   TA_Sequence _ (t : _) -> parseForInitToken t
   TA_Parenthesis _ t -> parseForInitToken t
@@ -81,7 +91,7 @@ parseForCondToken tok =
         Just testOp ->
           let lhsExpr = arithValueExpr lhs
               rhsExpr = arithValueExpr rhs
-           in Just (Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr])
+           in Just (testBinaryCommand testOp lhsExpr rhsExpr)
         Nothing -> Just (arithNonZeroCond tok)
     TA_Sequence _ (t : _) -> parseForCondToken t
     TA_Parenthesis _ t -> parseForCondToken t
@@ -98,7 +108,7 @@ parseBinaryCond txt = do
   testOp <- lookup op testOpMap
   let lhsExpr = valueExpr lhs
       rhsExpr = valueExpr rhs
-  pure (Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr])
+  pure (testBinaryCommand testOp lhsExpr rhsExpr)
 
 testOpMap :: [(Text, Text)]
 testOpMap =
@@ -114,18 +124,12 @@ parseMathCond :: Text -> Maybe (FishCommand TStatus)
 parseMathCond txt = do
   args <- arithArgsFromText txt
   let expr = ExprMath args
-  pure (Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")])
+  pure (testNonZeroCommand expr)
 
 arithNonZeroCond :: Token -> FishCommand TStatus
 arithNonZeroCond tok =
   let expr = ExprMath (arithArgsFromToken tok)
-   in Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")]
-
-arithVarName :: Token -> Maybe Text
-arithVarName = \case
-  TA_Variable _ name _ -> Just (T.pack name)
-  TA_Expansion _ inner -> listToMaybe inner >>= arithVarName
-  _ -> Nothing
+   in testNonZeroCommand expr
 
 arithValueExpr :: Token -> FishExpr TInt
 arithValueExpr tok = ExprMath (arithArgsFromToken tok)
@@ -172,7 +176,7 @@ incByVar lhs op rhsArgs = do
 
 incByArgs :: Text -> Text -> NonEmpty (FishExpr TStr) -> FishStatement
 incByArgs var op rhsArgs =
-  Stmt (Set [SetGlobal] var (mathSubstFromArgs (ExprVariable (VarScalar var) NE.:| (ExprLiteral op : NE.toList rhsArgs))))
+  Stmt (Set [SetGlobal] var (mathSubstFromArgsNoScale (ExprVariable (VarScalar var) NE.:| (ExprLiteral op : NE.toList rhsArgs))))
 
 parseAssignmentText :: Text -> Maybe (Text, Text)
 parseAssignmentText txt =
@@ -211,11 +215,7 @@ mathSubstFromText txt =
 mathSubstFromTextMaybe :: Text -> Maybe (FishExpr (TList TStr))
 mathSubstFromTextMaybe txt = do
   args <- arithArgsFromText (T.strip txt)
-  pure (mathSubstFromArgs args)
-
-mathSubstFromArgs :: NonEmpty (FishExpr TStr) -> FishExpr (TList TStr)
-mathSubstFromArgs args =
-  ExprCommandSubst (Stmt (Command "math" (map ExprVal (NE.toList args))) NE.:| [])
+  pure (mathSubstFromArgsNoScale args)
 
 stripPrefixOp :: Text -> Text -> Maybe Text
 stripPrefixOp op txt = do

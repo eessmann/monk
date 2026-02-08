@@ -103,6 +103,31 @@ Available options:
   -h,--help              Show this help text
 ```
 
+### Library API
+
+Monk exposes a small, focused API via the `Monk` module:
+
+- `translateBashFile` / `translateBashScript`: parse + translate
+- `translateParseResult`: translate an existing ShellCheck `ParseResult`
+- `TranslationResult`: contains the translated AST plus `TranslateState`
+- `renderTranslation` / `translationStatements`: render or inspect output
+
+Example:
+
+```haskell
+import Monk
+
+main :: IO ()
+main = do
+  result <- translateBashFile defaultConfig "script.sh"
+  case result of
+    Left (ParseErrors errs) -> print errs
+    Left (TranslateFailure err) -> print err
+    Right tr -> do
+      putStrLn (toString (renderTranslation tr))
+      print (warnings (translationState tr))
+```
+
 ### Example Translation
 
 **Input (Bash):**
@@ -178,7 +203,7 @@ cabal bench
 
 ## 📊 Current Status
 
-Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We also hoist side-effecting expansions across arguments, redirections, and case patterns, and lower short-circuit arithmetic into conditional evaluation to preserve side effects. Recent additions include `read` flag mapping (`-n/-t/-u/-a`) with notes for `-r` and IFS splitting.
+Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We also hoist side-effecting expansions across arguments, redirections, and case patterns, and lower short-circuit arithmetic into conditional evaluation to preserve side effects. Recent additions include `read` flag mapping (`-n/-t/-u/-a`) with IFS splitting notes and best-effort `set -e`/`pipefail` emulation.
 
 ## 🤝 Comparison with Babelfish
 
@@ -195,14 +220,29 @@ See `docs/babelfish-comparison.md` for a focused, reproducible bake-off methodol
 - **`time` prefix**: `time cmd` is emitted as a Fish timed pipeline.
 - **`select` loops**: emulated with `read` and `seq`.
 - **Arithmetic short-circuit**: `a && b` and ternary arithmetic use temp vars and `if test` to preserve side effects.
-- **`read` parity**: `-n/-t/-u/-a` map to fish flags; `-r` and IFS splitting differences emit notes.
+- **`read` parity**: `-n/-t/-u/-a` map to fish flags; IFS splitting differences emit notes.
+- **Errexit/pipefail**: `set -e`/`set -o pipefail` are emulated (details below).
+
+### Errexit / Pipefail Emulation
+
+Monk emulates `set -e` by wrapping top-level commands and pipelines as `cmd; or exit $status`. This is best-effort and intentionally does **not** wrap condition lists (e.g., `if`, `while`, `until`) to match bash’s errexit exceptions. Caveats include nuanced bash rules around command substitutions, `!`, and compound lists that aren’t perfectly modeled.
+
+For `set -o pipefail`, Monk injects a helper at the top of the output:
+
+```fish
+function __monk_pipefail
+  ...
+end
+```
+
+Pipelines are wrapped to call `__monk_pipefail $pipestatus`, which returns the first non-zero status. This is best-effort and may differ from bash in complex cases (e.g., nested pipelines, background jobs, or when `pipestatus` is modified).
 
 ### Known Limitations
 
 | Limitation | Status | Notes |
 |---|---|---|
 | Word splitting | [ ] manual review | Fish does not perform implicit word splitting. |
-| `set -e` / `pipefail` semantics | [ ] manual review | Fish error behavior differs; Monk emits notes for `set -e/-u/pipefail`. |
+| `set -e` / `pipefail` semantics | [ ] best-effort | Emulated via `cmd; or exit $status` and `__monk_pipefail $pipestatus`; see caveats above. |
 | Non-literal `source` paths | [ ] manual review | Recursive translation only follows literal paths (notes emitted). |
 | Coprocesses (`coproc`) | [ ] unsupported | Warnings in normal mode; failure in `--strict`. |
  
@@ -211,7 +251,7 @@ Review warnings and test translated scripts in Fish.
 ## 🛣️ Roadmap
 
 ### Near Term
-- [ ] Deeper parity for `read` (`-d`, delimiter/IFS behaviors) and `set -e` semantics
+- [ ] Deeper parity for `read` (`-d`, delimiter/IFS behaviors) and errexit/pipefail edge cases
 - [ ] Expanded documentation with real-world translation examples
 
 ### Longer Term

@@ -19,30 +19,19 @@ import Language.Fish.Translator.Commands
     translateTokenToStatusCmdM,
   )
 import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Pipeline
+  ( applyPipefailIfEnabled,
+    jobPipelineFromList,
+    jobPipelineFromListWithTime,
+    pipelineOf,
+    wrapErrexitIfEnabled,
+  )
 import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------
 -- Pipelines and status commands
 --------------------------------------------------------------------------------
-
-pipelineOf :: FishCommand TStatus -> FishJobPipeline
-pipelineOf cmd =
-  FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
-
-jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
-jobPipelineFromList = jobPipelineFromListWithTime False
-
-jobPipelineFromListWithTime :: Bool -> [FishCommand TStatus] -> FishJobPipeline
-jobPipelineFromListWithTime _ [] = pipelineOf (Command "true" [])
-jobPipelineFromListWithTime timed (c : cs) =
-  FishJobPipeline
-    { jpTime = timed,
-      jpVariables = [],
-      jpStatement = Stmt c,
-      jpCont = map (\cmd' -> PipeTo {jpcVariables = [], jpcStatement = Stmt cmd'}) cs,
-      jpBackgrounded = False
-    }
 
 translatePipeline :: [Token] -> [Token] -> FishStatement
 translatePipeline bang cmds =
@@ -59,9 +48,12 @@ translatePipelineM bang cmds = do
   cmds'' <- mapM translateTokenToStatusCmdM cmds'
   case cmds'' of
     [] -> pure (Stmt (Command "true" []))
-    (c : cs) ->
+    (c : cs) -> do
       let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-       in pure (if hasBang bang then Stmt (Not pipe) else Stmt pipe)
+      pipe' <- applyPipefailIfEnabled pipe
+      let cmd = if hasBang bang then Not pipe' else pipe'
+      cmd' <- wrapErrexitIfEnabled cmd
+      pure (Stmt cmd')
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
 translateTokenToMaybeStatusCmd token =

@@ -19,6 +19,21 @@ unitTranslationTests =
         out <- translateScript "echo hi > >(cat)"
         T.isInfixOf "mkfifo" out H.@? "expected mkfifo in translation"
         T.isInfixOf "__monk_psub_fifo" out H.@? "expected fifo var name in translation",
+      H.testCase "Echo -e lowers to printf %b" $ do
+        out <- translateScript "echo -e \"hi\\nthere\""
+        T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
+      H.testCase "Echo -n stays echo with -n" $ do
+        out <- translateScript "echo -n hi"
+        T.isInfixOf "echo '-n' 'hi'" out H.@? "expected echo -n",
+      H.testCase "Echo -E stays echo without escapes" $ do
+        out <- translateScript "echo -E \"hi\\nthere\""
+        T.isInfixOf "echo" out H.@? "expected echo preserved",
+      H.testCase "Echo without options stays echo" $ do
+        out <- translateScript "echo hello"
+        out @?= "echo 'hello'",
+      H.testCase "Echo -- preserves literal arguments" $ do
+        out <- translateScript "echo -- -n"
+        out @?= "echo '--' '-n'",
       H.testCase "Process substitution input uses psub" $ do
         out <- translateScript "cat <(echo 123)"
         T.isInfixOf "psub" out H.@? "expected psub for input process substitution",

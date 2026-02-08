@@ -13,6 +13,7 @@ import Data.Set qualified as Set
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Monad (TranslateState)
+import Control.Monad.Extra (concatMapM)
 
 data Translation = Translation
   { trPath :: FilePath,
@@ -203,6 +204,3 @@ inlineCaseItem ::
 inlineCaseItem warn translations stack tr (CaseItem pats body) = do
   body' <- inlineBody warn translations stack tr body
   pure (CaseItem pats body')
-
-concatMapM :: (Monad m) => (a -> m [b]) -> [a] -> m [b]
-concatMapM f xs = fmap concat (mapM f xs)
