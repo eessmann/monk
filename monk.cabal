@@ -140,6 +140,8 @@ benchmark monk-benchmark
   hs-source-dirs:      benchmark
   main-is:             Main.hs
   build-depends:       monk
+                     , criterion
+                     , deepseq
                      , text
   ghc-options:         -threaded
                        -rtsopts

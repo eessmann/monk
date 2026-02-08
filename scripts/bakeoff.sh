@@ -27,11 +27,27 @@ if [ -z "$babelfish_version" ]; then
   babelfish_version="unknown"
 fi
 
+hyperfine_version=""
+if command -v hyperfine >/dev/null 2>&1; then
+  hyperfine_version=$(hyperfine --version 2>/dev/null | head -n 1)
+fi
+if [ -z "$hyperfine_version" ]; then
+  hyperfine_version="unavailable"
+fi
+
+hyperfine_enabled=${BAKEOFF_HYPERFINE:-1}
+hyperfine_runs=${HYPERFINE_RUNS:-10}
+hyperfine_warmup=${HYPERFINE_WARMUP:-1}
+
 {
   echo "date: $(date -Iseconds)"
   echo "monk: $monk_desc"
   echo "fish: $fish_version"
   echo "babelfish: $babelfish_version"
+  echo "hyperfine: $hyperfine_version"
+  echo "hyperfine_enabled: $hyperfine_enabled"
+  echo "hyperfine_runs: $hyperfine_runs"
+  echo "hyperfine_warmup: $hyperfine_warmup"
   echo "cwd: $(pwd)"
   echo "out_dir: $out_dir"
 } > "$meta"
@@ -39,18 +55,45 @@ fi
 printf "script\tmonk_rc\tmonk_warns\tmonk_notes\tbabelfish_rc\tout_diff\terr_diff\trc_diff\n" > "$report"
 
 shopt -s nullglob
-files=(
-  test/fixtures/corpus/*.bash
-  benchmark/fixtures/*.bash
-  test/fixtures/integration/*.bash
-  test/fixtures/golden/*.bash
-  test/fixtures/realworld/*.bash
-)
+files=()
+if [ -n "${BAKEOFF_FILELIST:-}" ] && [ -f "${BAKEOFF_FILELIST:-}" ]; then
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in
+      \#*) continue ;;
+    esac
+    files+=("$line")
+  done < "$BAKEOFF_FILELIST"
+else
+  files=(
+    test/fixtures/corpus/*.bash
+    benchmark/fixtures/*.bash
+    test/fixtures/integration/*.bash
+    test/fixtures/golden/*.bash
+    test/fixtures/realworld/*.bash
+  )
+fi
 
 normalize_err() {
   sed -e "s|$out_dir|<out_dir>|g" \
       -e "s|\\.monk\\.fish|.fish|g" \
       -e "s|\\.babelfish\\.fish|.fish|g"
+}
+
+write_batch_script() {
+  local script_path=$1
+  local runner=$2
+  shift 2
+  local files=("$@")
+  {
+    echo "#!/usr/bin/env bash"
+    echo "set -euo pipefail"
+    printf "files=("
+    printf "%q " "${files[@]}"
+    echo ")"
+    printf "%s\n" "$runner"
+  } > "$script_path"
+  chmod +x "$script_path"
 }
 
 for f in "${files[@]}"; do
@@ -129,5 +172,47 @@ for f in "${files[@]}"; do
   printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" "$f" "$monk_rc" "$monk_warns" "$monk_notes" "$bab_rc" "$out_diff" "$err_diff" "$rc_diff" >> "$report"
   echo "done: $base"
 done
+
+if [ "$hyperfine_enabled" != "0" ] && [ "$hyperfine_version" != "unavailable" ]; then
+  monk_cmd='for f in "${files[@]}"; do cabal run -v0 monk -- "$f" > /dev/null; done'
+  babelfish_cmd='for f in "${files[@]}"; do babelfish < "$f" > /dev/null; done'
+
+  if [ ${#files[@]} -gt 0 ]; then
+    monk_all="$out_dir/hyperfine-monk-all.sh"
+    babelfish_all="$out_dir/hyperfine-babelfish-all.sh"
+    write_batch_script "$monk_all" "$monk_cmd" "${files[@]}"
+    write_batch_script "$babelfish_all" "$babelfish_cmd" "${files[@]}"
+    hyperfine \
+      --warmup "$hyperfine_warmup" \
+      --runs "$hyperfine_runs" \
+      --ignore-failure \
+      --export-json "$out_dir/hyperfine-all.json" \
+      --export-markdown "$out_dir/hyperfine-all.md" \
+      --command-name monk "$monk_all" \
+      --command-name babelfish "$babelfish_all" \
+      || true
+    echo "hyperfine_all: $out_dir/hyperfine-all.json" >> "$meta"
+  fi
+
+  bench_files=(benchmark/fixtures/*.bash)
+  if [ ${#bench_files[@]} -gt 0 ]; then
+    monk_bench="$out_dir/hyperfine-monk-benchmark.sh"
+    babelfish_bench="$out_dir/hyperfine-babelfish-benchmark.sh"
+    write_batch_script "$monk_bench" "$monk_cmd" "${bench_files[@]}"
+    write_batch_script "$babelfish_bench" "$babelfish_cmd" "${bench_files[@]}"
+    hyperfine \
+      --warmup "$hyperfine_warmup" \
+      --runs "$hyperfine_runs" \
+      --ignore-failure \
+      --export-json "$out_dir/hyperfine-benchmark.json" \
+      --export-markdown "$out_dir/hyperfine-benchmark.md" \
+      --command-name monk "$monk_bench" \
+      --command-name babelfish "$babelfish_bench" \
+      || true
+    echo "hyperfine_benchmark: $out_dir/hyperfine-benchmark.json" >> "$meta"
+  fi
+else
+  echo "hyperfine_notes: skipped (disabled or not installed)" >> "$meta"
+fi
 
 echo "$out_dir"

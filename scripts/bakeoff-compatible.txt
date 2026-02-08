@@ -1,0 +1,21 @@
+# Fixtures that both monk and babelfish translate successfully.
+# Keep this list in sync with bake-off notes when failures change.
+
+test/fixtures/corpus/if-then.bash
+test/fixtures/corpus/simple-echo.bash
+benchmark/fixtures/small.bash
+test/fixtures/integration/cd-tmp.bash
+test/fixtures/integration/pushd-popd.bash
+test/fixtures/integration/pwd-cd.bash
+test/fixtures/integration/stdout-stderr-exit.bash
+test/fixtures/integration/time-prefix.bash
+test/fixtures/golden/assignments.bash
+test/fixtures/golden/case-pattern-expansion-glob.bash
+test/fixtures/golden/double-bracket-eq.bash
+test/fixtures/golden/echo-echo.bash
+test/fixtures/golden/echo-exit.bash
+test/fixtures/golden/glob-basic.bash
+test/fixtures/golden/pipeline.bash
+test/fixtures/golden/read-prompt.bash
+test/fixtures/realworld/hello-world.bash
+test/fixtures/realworld/version-compare.bash
