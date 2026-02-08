@@ -20,6 +20,7 @@ import Language.Fish.Translator.Commands (translateTokensToStatusCmd, translateT
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)
 import Language.Fish.Translator.Variables
   ( patternExprFromToken,
+    translateArithmeticStatusM,
     translateTokenToExprM,
     translateTokenToListExpr,
   )
@@ -231,7 +232,29 @@ translateCondTokens tokens = jobListFromStatus (translateTokensToStatusCmd token
 translateCondTokensM :: [Token] -> TranslateM FishJobList
 translateCondTokensM tokens = do
   cmd <- translateTokensToStatusCmdM tokens
-  pure (jobListFromStatus cmd)
+  case cmd of
+    Command "true" [] ->
+      case findArithmeticToken tokens of
+        Just (T_Arithmetic _ exprTok) -> do
+          arithCmd <- translateArithmeticStatusM exprTok
+          pure (jobListFromStatus arithCmd)
+        _ -> pure (jobListFromStatus cmd)
+    _ -> pure (jobListFromStatus cmd)
+
+findArithmeticToken :: [Token] -> Maybe Token
+findArithmeticToken = goList
+  where
+    goList = \case
+      [] -> Nothing
+      (t : ts) -> go t <|> goList ts
+    go = \case
+      t@T_Arithmetic {} -> Just t
+      T_SimpleCommand _ _ cmdToks -> goList cmdToks
+      T_Redirecting _ _ inner -> go inner
+      T_Pipeline _ _ cmds -> goList cmds
+      T_AndIf _ l r -> go l <|> go r
+      T_OrIf _ l r -> go l <|> go r
+      _ -> Nothing
 
 negateJobList :: FishJobList -> FishJobList
 negateJobList (FishJobList conjs) =

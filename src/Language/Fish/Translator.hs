@@ -84,9 +84,11 @@ translateToken token =
       T_Script _ _ stmts -> wrapStmtList <$> mapM translateToken stmts
       T_SimpleCommand _ assignments cmdToks -> do
         locals <- gets (localVars . context)
+        inFunc <- gets (inFunction . context)
+        let localFlag = if inFunc then SetFunction else SetLocal
         let scopeFlags name =
               if Set.member name locals
-                then [SetLocal]
+                then [localFlag]
                 else [SetGlobal]
         case cmdToks of
           (T_BraceGroup _ inner : rest) -> do
@@ -121,7 +123,7 @@ translateToken token =
             | tokenToLiteralText cmdTok == "exec" ->
                 let scopeFor name =
                       if Set.member name locals
-                        then [SetLocal]
+                        then [localFlag]
                         else [SetGlobal]
                  in do
                       (preRedirs, redirs, plainArgs) <- parseRedirectTokensM args
@@ -191,8 +193,10 @@ translateToken token =
       T_Annotation _ _ inner -> translateToken inner
       T_ForIn _ var tokens body -> do
         argParts <- mapM translateTokenToListExprM tokens
-        let pre = concatMap fst argParts
-            args = map snd argParts
+        let (pre, args) =
+              if null tokens
+                then ([], [ExprVariable (VarAll "argv")])
+                else (concatMap fst argParts, map snd argParts)
         bodyStmts <- mapM translateToken body
         case (NE.nonEmpty args, Control.toNonEmptyStmtList bodyStmts) of
           (Just neArgs, Just neBody) ->

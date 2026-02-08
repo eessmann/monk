@@ -365,6 +365,7 @@ data FishFunction = FishFunction
 
 data SetFlag
   = SetLocal
+  | SetFunction
   | SetGlobal
   | SetUniversal
   | SetExport

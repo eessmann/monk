@@ -20,12 +20,14 @@ module Language.Fish.Translator.Variables
   )
 where
 
+import Prelude hiding (gets)
 import Control.Monad (foldM)
 import Data.Char (isAlpha, isAlphaNum, isDigit, isSpace)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.AST
-import Language.Fish.Translator.Monad (TranslateM, isLocalVar, unsupported)
+import Language.Fish.Translator.Monad (TranslationContext (..), TranslateM, context, isLocalVar, unsupported)
+import Polysemy.State (gets)
 import ShellCheck.AST
 import ShellCheck.ASTLib (getBracedModifier, getBracedReference, getLiteralStringDef, oversimplify)
 
@@ -74,7 +76,22 @@ isNoSplitParamExpansion tok =
     _ ->
       let rawTxt = tokenRawText tok
           modifier = toText (getBracedModifier (toString rawTxt))
-       in modifier == "[@]"
+          paramName = paramNameFrom tok
+          hasArrayIndex txt = "[@]" `T.isInfixOf` txt || "[*]" `T.isInfixOf` txt
+          altSelf =
+            case paramName of
+              Just base -> isJust (parseAltModifier base modifier)
+              Nothing -> False
+          literal =
+            case tok of
+              T_DollarBraced _ _ inner -> tokenToLiteralText inner
+              T_ParamSubSpecialChar _ specialName -> toText specialName
+              _ -> ""
+       in hasArrayIndex modifier
+            || hasArrayIndex rawTxt
+            || hasArrayIndex literal
+            || literal `elem` ["@", "*"]
+            || altSelf
 
 isSimpleListExpansion :: [Token] -> Bool
 isSimpleListExpansion parts =
@@ -95,7 +112,6 @@ splitOnIfsExpr expr =
             [ ExprVal (ExprLiteral "split"),
               ExprVal (ExprLiteral "--"),
               ExprVal (ExprVariable (VarScalar "IFS")),
-              ExprVal (ExprLiteral "--"),
               ExprVal expr
             ]
         )
@@ -127,6 +143,7 @@ translateTokenToExpr = \case
           then ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts))
           else ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts)))
       else translateWordPartsToExpr parts
+  tok@T_ParamSubSpecialChar {} -> ExprJoinList (translateSimpleVar tok)
   T_DollarBraced _ _ word -> ExprJoinList (translateDollarBraced word)
   T_DollarArithmetic _ exprTok ->
     ExprJoinList (ExprCommandSubst (Stmt (mathCommandFromToken False exprTok) NE.:| []))
@@ -171,6 +188,7 @@ translateTokenToExprM = \case
           then pure ([], ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts)))
           else pure ([], ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts))))
       else translateWordPartsToExprM parts
+  tok@T_ParamSubSpecialChar {} -> pure ([], ExprJoinList (translateSimpleVar tok))
   T_DollarBraced _ _ word -> do
     (pre, listExpr) <- translateDollarBracedWithPrelude word
     pure (pre, ExprJoinList listExpr)
@@ -215,9 +233,15 @@ translateTokenToListExprWith splitEnabled = \case
       Just pat -> ExprGlob (parseGlobPattern pat)
       Nothing -> extglobShimListExpr (renderExtglobRaw op parts)
   T_SingleQuoted _ s -> ExprListLiteral [ExprLiteral (T.pack s)]
-  T_DoubleQuoted _ parts -> ExprListLiteral [translateDoubleQuotedExpr parts]
+  T_DoubleQuoted _ parts ->
+    case parts of
+      [tok]
+        | isNoSplitParamExpansion tok -> translateDollarBraced (unwrapBraced tok)
+      _ -> ExprListLiteral [translateDoubleQuotedExpr parts]
   T_NormalWord _ parts ->
     case parts of
+      [T_DoubleQuoted _ [innerTok]]
+        | isNoSplitParamExpansion innerTok -> translateDollarBraced (unwrapBraced innerTok)
       [T_DollarBraced _ _ word]
         | not splitEnabled -> translateDollarBraced word
         | isNoSplitParamExpansion word -> translateDollarBraced word
@@ -236,6 +260,7 @@ translateTokenToListExprWith splitEnabled = \case
              in if splitEnabled && wordNeedsSplit parts
                   then splitOnIfsExpr expr
                   else ExprListLiteral [expr]
+  tok@T_ParamSubSpecialChar {} -> translateSimpleVar tok
   T_DollarBraced _ _ word
     | not splitEnabled -> translateDollarBraced word
     | isNoSplitParamExpansion word -> translateDollarBraced word
@@ -280,11 +305,17 @@ translateTokenToListExprMWith splitEnabled = \case
       Just pat -> pure ([], ExprGlob (parseGlobPattern pat))
       Nothing -> pure ([], extglobShimListExpr (renderExtglobRaw op parts))
   T_SingleQuoted _ s -> pure ([], ExprListLiteral [ExprLiteral (T.pack s)])
-  T_DoubleQuoted _ parts -> do
-    (pre, expr) <- translateDoubleQuotedExprM parts
-    pure (pre, ExprListLiteral [expr])
+  T_DoubleQuoted _ parts ->
+    case parts of
+      [tok]
+        | isNoSplitParamExpansion tok -> translateDollarBracedWithPrelude (unwrapBraced tok)
+      _ -> do
+        (pre, expr) <- translateDoubleQuotedExprM parts
+        pure (pre, ExprListLiteral [expr])
   T_NormalWord _ parts ->
     case parts of
+      [T_DoubleQuoted _ [innerTok]]
+        | isNoSplitParamExpansion innerTok -> translateDollarBracedWithPrelude (unwrapBraced innerTok)
       [T_DollarBraced _ _ word]
         | not splitEnabled -> translateDollarBracedWithPrelude word
         | isNoSplitParamExpansion word -> translateDollarBracedWithPrelude word
@@ -307,6 +338,7 @@ translateTokenToListExprMWith splitEnabled = \case
                     then splitOnIfsExpr expr
                     else ExprListLiteral [expr]
             pure (pre, listExpr)
+  tok@T_ParamSubSpecialChar {} -> pure ([], translateSimpleVar tok)
   T_DollarBraced _ _ word -> do
     (pre, expr) <- translateDollarBracedWithPrelude word
     pure $
@@ -462,26 +494,66 @@ translateAssignmentWithFlagsM baseFlags tok =
 
 translateArithmetic :: Token -> FishCommand TStatus
 translateArithmetic exprToken =
-  let expr = ExprMath (arithArgsFromToken exprToken)
-   in Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")]
+  case stripArithWrappers exprToken of
+    TA_Binary _ op lhs rhs
+      | Just testOp <- arithCompareOp (toText op) ->
+          let lhsExpr = ExprMath (arithArgsFromToken lhs)
+              rhsExpr = ExprMath (arithArgsFromToken rhs)
+           in Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr]
+    _ ->
+      let expr = ExprMath (arithArgsFromToken exprToken)
+       in Command "test" [ExprVal expr, ExprVal (ExprLiteral "-ne"), ExprVal (ExprLiteral "0")]
 
 translateArithmeticStatusM :: Token -> TranslateM (FishCommand TStatus)
 translateArithmeticStatusM exprTok = do
-  (pre, valueExpr) <- arithStatementPlanM exprTok
-  let testCmd =
-        Command
-          "test"
-          [ ExprVal valueExpr,
-            ExprVal (ExprLiteral "-ne"),
-            ExprVal (ExprLiteral "0")
-          ]
-  pure $
-    case pre of
-      [] -> testCmd
-      _ ->
-        case NE.nonEmpty (pre <> [Stmt testCmd]) of
-          Just body -> Begin body []
-          Nothing -> testCmd
+  case stripArithWrappers exprTok of
+    TA_Binary _ op lhs rhs
+      | Just testOp <- arithCompareOp (toText op) -> do
+          (preL, lhsExpr) <- arithStatementPlanM lhs
+          (preR, rhsExpr) <- arithStatementPlanM rhs
+          let testCmd = Command "test" [ExprVal lhsExpr, ExprVal (ExprLiteral testOp), ExprVal rhsExpr]
+              pre = preL <> preR
+          pure $
+            case pre of
+              [] -> testCmd
+              _ ->
+                case NE.nonEmpty (pre <> [Stmt testCmd]) of
+                  Just body -> Begin body []
+                  Nothing -> testCmd
+    _ -> do
+      (pre, valueExpr) <- arithStatementPlanM exprTok
+      let testCmd =
+            Command
+              "test"
+              [ ExprVal valueExpr,
+                ExprVal (ExprLiteral "-ne"),
+                ExprVal (ExprLiteral "0")
+              ]
+      pure $
+        case pre of
+          [] -> testCmd
+          _ ->
+            case NE.nonEmpty (pre <> [Stmt testCmd]) of
+              Just body -> Begin body []
+              Nothing -> testCmd
+
+arithCompareOp :: Text -> Maybe Text
+arithCompareOp op =
+  case op of
+    "==" -> Just "-eq"
+    "!=" -> Just "-ne"
+    "<" -> Just "-lt"
+    "<=" -> Just "-le"
+    ">" -> Just "-gt"
+    ">=" -> Just "-ge"
+    _ -> Nothing
+
+stripArithWrappers :: Token -> Token
+stripArithWrappers = \case
+  TA_Parenthesis _ inner -> stripArithWrappers inner
+  TA_Expansion _ (inner : _) -> stripArithWrappers inner
+  TA_Sequence _ [inner] -> stripArithWrappers inner
+  other -> other
 
 mathCommandFromToken :: Bool -> Token -> FishCommand TStatus
 mathCommandFromToken suppressOutput exprToken =
@@ -489,7 +561,8 @@ mathCommandFromToken suppressOutput exprToken =
 
 mathCommandFromArgs :: Bool -> NonEmpty (FishExpr TStr) -> FishCommand TStatus
 mathCommandFromArgs suppressOutput args =
-  let mathArgs = map ExprVal (NE.toList args)
+  let scaleArgs = [ExprVal (ExprLiteral "--scale"), ExprVal (ExprLiteral "0")]
+      mathArgs = scaleArgs <> map ExprVal (NE.toList args)
       mathRedir = RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
       allArgs = if suppressOutput then mathArgs <> [mathRedir] else mathArgs
    in Command "math" allArgs
@@ -627,6 +700,40 @@ arithArgsPlan tok =
         Nothing -> do
           unsupported "Arithmetic assignment with unsupported lvalue; side effects may be lost"
           arithArgsPlan rhs
+    paramTok@(T_ParamSubSpecialChar _ name) ->
+      case name of
+        "#" -> do
+          let tmp = arithTempNameWith paramTok "argc"
+              countExpr =
+                ExprCommandSubst
+                  ( Stmt
+                      (Command "count" [ExprVal (ExprVariable (VarAll "argv"))])
+                      NE.:| []
+                  )
+              setStmt = Stmt (Set [SetLocal] tmp countExpr)
+          pure ([setStmt], [ExprVariable (VarScalar tmp)])
+        _ ->
+          let varName = specialVarName (toText name)
+           in pure ([], [ExprVariable (VarScalar varName)])
+    bracedTok@(T_DollarBraced _ _ inner) ->
+      case paramNameFrom inner of
+        Just name
+          | name == "#" -> do
+              let tmp = arithTempNameWith bracedTok "argc"
+                  countExpr =
+                    ExprCommandSubst
+                      ( Stmt
+                          (Command "count" [ExprVal (ExprVariable (VarAll "argv"))])
+                          NE.:| []
+                      )
+                  setStmt = Stmt (Set [SetLocal] tmp countExpr)
+              pure ([setStmt], [ExprVariable (VarScalar tmp)])
+          | otherwise ->
+              let varName = specialVarName name
+               in pure ([], [ExprVariable (VarScalar varName)])
+        Nothing ->
+          let txt = tokenToLiteralText inner
+           in pure ([], [ExprLiteral txt])
     TA_Variable _ name _ -> pure ([], [ExprVariable (VarScalar (toText name))])
     T_Literal _ s -> pure ([], [ExprLiteral (toText s)])
     T_SingleQuoted _ s -> pure ([], [ExprLiteral (toText s)])
@@ -785,7 +892,8 @@ assignmentArgs opTxt var rhsArgs
 
 mathSubstFromArgs :: NonEmpty (FishExpr TStr) -> FishExpr (TList TStr)
 mathSubstFromArgs args =
-  ExprCommandSubst (Stmt (Command "math" (map ExprVal (NE.toList args))) NE.:| [])
+  let scaleArgs = [ExprVal (ExprLiteral "--scale"), ExprVal (ExprLiteral "0")]
+   in ExprCommandSubst (Stmt (Command "math" (scaleArgs <> map ExprVal (NE.toList args))) NE.:| [])
 
 wrapParens :: [FishExpr TStr] -> [FishExpr TStr]
 wrapParens exprs = [ExprLiteral "("] <> exprs <> [ExprLiteral ")"]
@@ -914,7 +1022,7 @@ translateDollarBracedWithPrelude word =
                     Stmt
                       ( Command
                           "printf"
-                          [ ExprVal (ExprLiteral "%s\n"),
+                          [ ExprVal (ExprLiteral "%s\\n"),
                             ExprVal (ExprJoinList errExpr),
                             RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
                           ]
@@ -930,7 +1038,7 @@ translateDollarBracedWithPrelude word =
                     Stmt
                       ( Command
                           "printf"
-                          [ ExprVal (ExprLiteral "%s\n"),
+                          [ ExprVal (ExprLiteral "%s\\n"),
                             ExprVal (ExprJoinList errExpr),
                             RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
                           ]
@@ -945,7 +1053,9 @@ translateDollarBracedWithPrelude word =
 scopeFlagsForVarM :: Text -> TranslateM [SetFlag]
 scopeFlagsForVarM name = do
   isLocal <- isLocalVar name
-  pure (if isLocal then [SetLocal] else [SetGlobal])
+  inFunc <- gets (inFunction . context)
+  let localFlag = if inFunc then SetFunction else SetLocal
+  pure (if isLocal then [localFlag] else [SetGlobal])
 
 translateSimpleVar :: Token -> FishExpr (TList TStr)
 translateSimpleVar word =
@@ -1015,7 +1125,12 @@ splitParamOperator word@(T_NormalWord _ parts) =
     (_, []) -> splitLiteralOperator word parts
     (_, T_ParamSubSpecialChar _ op : rest) ->
       let opTxt = toText op
-       in if opTxt `elem` paramOps then Just (opTxt, rest) else Nothing
+       in case opTxt of
+            ":" -> parseColonOp rest
+            _ ->
+              if opTxt `elem` paramOps
+                then Just (opTxt, rest)
+                else splitLiteralOperator word parts
     _ -> splitLiteralOperator word parts
   where
     isParamOp (T_ParamSubSpecialChar _ _) = True
@@ -1030,20 +1145,50 @@ splitParamOperator word@(T_NormalWord _ parts) =
         ":+",
         "+"
       ]
+    parseColonOp rest =
+      case rest of
+        (T_ParamSubSpecialChar _ next : rest') ->
+          let combined = ":" <> toText next
+           in if combined `elem` paramOps
+                then Just (combined, rest')
+                else splitLiteralOperator word parts
+        (T_Literal _ s : rest') ->
+          case T.uncons (toText s) of
+            Just (c, suffix)
+              | T.singleton c `elem` ["-", "+", "=", "?"] ->
+                  let combined = ":" <> T.singleton c
+                      suffixTokens =
+                        [T_Literal (Id 0) (toString suffix) | not (T.null suffix)]
+                   in if combined `elem` paramOps
+                        then Just (combined, suffixTokens <> rest')
+                        else splitLiteralOperator word parts
+            _ -> splitLiteralOperator word parts
+        _ -> splitLiteralOperator word parts
     splitLiteralOperator word' parts' = do
       name <- paramNameFrom word'
       (literal, rest) <- case parts' of
         (T_Literal _ s : xs) -> Just (toText s, xs)
         _ -> Nothing
-      op <- findOp name literal
-      let prefix = name <> op
-          suffix = T.drop (T.length prefix) literal
+      (prefix, op) <- findOp name literal
+      let suffix = T.drop (T.length (prefix <> op)) literal
           suffixTokens =
             ([T_Literal (Id 0) (toString suffix) | not (T.null suffix)])
       pure (op, suffixTokens <> rest)
     findOp name literal =
-      let matches op = T.isPrefixOf (name <> op) literal
-       in find matches paramOps
+      let nameWithIndex =
+            case T.stripPrefix name literal of
+              Just rest ->
+                case T.uncons rest of
+                  Just ('[', more) ->
+                    let (idx, remainder) = T.breakOn "]" more
+                     in if T.null remainder
+                          then name
+                          else name <> "[" <> idx <> "]"
+                  _ -> name
+              Nothing -> name
+          matches prefix op = T.isPrefixOf (prefix <> op) literal
+          findMatch prefix = fmap (prefix,) (find (matches prefix) paramOps)
+       in findMatch nameWithIndex <|> findMatch name
 splitParamOperator _ = Nothing
 
 paramNameFrom :: Token -> Maybe Text
@@ -1155,13 +1300,30 @@ varSetCond name =
 
 emitList :: FishExpr (TList TStr) -> FishStatement
 emitList expr =
-  Stmt
-    ( Command
-        "printf"
-        [ ExprVal (ExprLiteral "%s\n"),
-          ExprVal expr
-        ]
-    )
+  let countExpr =
+        ExprCommandSubst
+          ( Stmt
+              (Command "count" [ExprVal expr])
+              NE.:| []
+          )
+      cond =
+        jobListFromStatus
+          ( Command
+              "test"
+              [ ExprVal countExpr,
+                ExprVal (ExprLiteral "-gt"),
+                ExprVal (ExprLiteral "0")
+              ]
+          )
+      thenStmt =
+        Stmt
+          ( Command
+              "printf"
+              [ ExprVal (ExprLiteral "%s\\n"),
+                ExprVal expr
+              ]
+          )
+   in Stmt (If cond (thenStmt NE.:| []) [] [])
 
 commandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
 commandSubst = ExprCommandSubst
@@ -1315,6 +1477,11 @@ translateWordPartsToExpr = translateDoubleQuotedExpr
 
 translateWordPartsToExprM :: [Token] -> TranslateM ([FishStatement], FishExpr TStr)
 translateWordPartsToExprM = translateDoubleQuotedExprM
+
+unwrapBraced :: Token -> Token
+unwrapBraced = \case
+  T_DollarBraced _ _ inner -> inner
+  other -> other
 
 --------------------------------------------------------------------------------
 -- Command substitution helpers (nested substitutions)
@@ -1543,7 +1710,7 @@ translateErrorExpansionWith condFn name errExpr =
         Stmt
           ( Command
               "printf"
-              [ ExprVal (ExprLiteral "%s\n"),
+              [ ExprVal (ExprLiteral "%s\\n"),
                 ExprVal (ExprJoinList errExpr),
                 RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
               ]
@@ -1567,24 +1734,44 @@ translateModifierExpansion word = do
   let rawTxt = tokenRawText word
       modifier = toText (getBracedModifier (toString rawTxt))
       varName = specialVarName name
-  if isLengthExpansion rawTxt modifier
-    then Just (translateLengthExpansion name varName modifier)
-    else case parseSubstringModifier modifier of
-      Just (offsetTxt, lenTxt) ->
-        Just (translateSubstringExpansion varName offsetTxt lenTxt)
-      Nothing ->
-        case parsePatternRemoval modifier of
-          Just (isPrefix, greedy, pat) ->
-            Just (translatePatternRemoval varName isPrefix greedy pat)
+  case parseAltModifier name modifier of
+    Just altExpr -> Just (translateAltExpansionWith varNonEmptyCond name altExpr)
+    Nothing ->
+      if isLengthExpansion rawTxt modifier
+        then Just (translateLengthExpansion name varName modifier)
+        else case parseSubstringModifier modifier of
+          Just (offsetTxt, lenTxt) ->
+            Just (translateSubstringExpansion varName offsetTxt lenTxt)
           Nothing ->
-            case parsePatternReplacement modifier of
-              Just (allMatches, pat, repl, anchor) ->
-                Just (translatePatternReplacement varName allMatches pat repl anchor)
+            case parsePatternRemoval modifier of
+              Just (isPrefix, greedy, pat) ->
+                Just (translatePatternRemoval varName isPrefix greedy pat)
               Nothing ->
-                case parseCaseModifier modifier of
-                  Just CaseUpper -> Just (translateCaseModification varName True)
-                  Just CaseLower -> Just (translateCaseModification varName False)
-                  Nothing -> Nothing
+                case parsePatternReplacement modifier of
+                  Just (allMatches, pat, repl, anchor) ->
+                    Just (translatePatternReplacement varName allMatches pat repl anchor)
+                  Nothing ->
+                    case parseCaseModifier modifier of
+                      Just CaseUpper -> Just (translateCaseModification varName True)
+                      Just CaseLower -> Just (translateCaseModification varName False)
+                      Nothing -> Nothing
+
+parseAltModifier :: Text -> Text -> Maybe (FishExpr (TList TStr))
+parseAltModifier name modifier = do
+  let trimmed = stripIndexPrefix modifier
+  rest <- T.stripPrefix ":+" trimmed
+  let inner0 = fromMaybe rest (T.stripPrefix "\"" rest >>= T.stripSuffix "\"")
+  inner1 <-
+    case T.stripPrefix "${" inner0 >>= T.stripSuffix "}" of
+      Just braceInner -> Just braceInner
+      Nothing -> T.stripPrefix "$" inner0
+  let base =
+        fromMaybe inner1
+          ( T.stripSuffix "[@]" inner1
+              <|> T.stripSuffix "[*]" inner1
+          )
+  guard (base == name)
+  pure (ExprVariable (VarAll (specialVarName base)))
 
 data CaseMod = CaseUpper | CaseLower
 
@@ -1600,9 +1787,12 @@ isArrayLengthModifier modifier =
 
 translateLengthExpansion :: Text -> Text -> Text -> FishExpr (TList TStr)
 translateLengthExpansion rawName varName modifier =
-  if isCountLengthExpansion rawName modifier
-    then countVarExpr varName
-    else ExprListLiteral [ExprStringOp StrLength (varAsString varName)]
+  if rawName == "#"
+    then countVarExpr "argv"
+    else
+      if isCountLengthExpansion rawName modifier
+        then countVarExpr varName
+        else ExprListLiteral [ExprStringOp StrLength (varAsString varName)]
   where
     isCountLengthExpansion name modTxt =
       name `elem` ["@", "*"] || isArrayLengthModifier modTxt

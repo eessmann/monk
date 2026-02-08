@@ -159,7 +159,7 @@ hereDocExpr :: [Token] -> FishExpr TStr
 hereDocExpr = hereExpr "%s"
 
 hereStringExpr :: [Token] -> FishExpr TStr
-hereStringExpr = hereExpr "%s\n"
+hereStringExpr = hereExpr "%s\\n"
 
 hereExpr :: Text -> [Token] -> FishExpr TStr
 hereExpr fmt toks =
@@ -178,7 +178,7 @@ hereDocExprM :: [Token] -> TranslateM ([FishStatement], FishExpr TStr)
 hereDocExprM = hereExprM "%s"
 
 hereStringExprM :: [Token] -> TranslateM ([FishStatement], FishExpr TStr)
-hereStringExprM = hereExprM "%s\n"
+hereStringExprM = hereExprM "%s\\n"
 
 hereExprM :: Text -> [Token] -> TranslateM ([FishStatement], FishExpr TStr)
 hereExprM fmt toks = do

@@ -183,6 +183,7 @@ translateCommandTokens cmdTokens =
       let name = tokenToLiteralText c
           (redirs, plainArgs) = parseRedirectTokens args
           argExprs = map translateTokenToExprOrRedirect plainArgs
+          testArgs = normalizeTestExprs (argExprs ++ redirs)
           fallback = Command name (argExprs ++ redirs)
        in if T.null name
             then Nothing
@@ -190,20 +191,24 @@ translateCommandTokens cmdTokens =
               Just timedCmd -> Just timedCmd
               Nothing ->
                 Just $
-                  if null redirs
-                    then case isSingleBracketTest c plainArgs of
-                      Just testCmd -> testCmd
-                      Nothing -> case isDoubleBracketTest c plainArgs of
-                        Just testCmd -> testCmd
-                        Nothing -> case T.unpack name of
-                          "exit" -> translateExit plainArgs
-                          "source" -> translateSource plainArgs
-                          "." -> translateSource plainArgs
-                          "eval" -> translateEval plainArgs
-                          "exec" -> translateExec plainArgs
-                          "read" -> translateRead plainArgs
-                          _ -> Command name argExprs
-                    else fallback
+                  case T.unpack name of
+                    "test" -> Command "test" testArgs
+                    _ ->
+                      if null redirs
+                        then case isSingleBracketTest c plainArgs of
+                          Just testCmd -> testCmd
+                          Nothing -> case isDoubleBracketTest c plainArgs of
+                            Just testCmd -> testCmd
+                            Nothing -> case T.unpack name of
+                              "exit" -> translateExit plainArgs
+                              "source" -> translateSource plainArgs
+                              "." -> translateSource plainArgs
+                              "eval" -> translateEval plainArgs
+                              "exec" -> translateExec plainArgs
+                              "read" -> translateRead plainArgs
+                              "shopt" -> Command "true" (argExprs ++ redirs)
+                              _ -> Command name argExprs
+                        else fallback
 
 translateCommandTokensM :: [Token] -> TranslateM ([FishStatement], Maybe (FishCommand TStatus))
 translateCommandTokensM cmdTokens =
@@ -213,51 +218,59 @@ translateCommandTokensM cmdTokens =
       let name = tokenToLiteralText c
       (preRedirs, redirs, plainArgs) <- parseRedirectTokensM args
       (preArgs, argExprs) <- translateArgsM plainArgs
+      let testArgs = normalizeTestExprs (argExprs ++ redirs)
       let fallback = Command name (argExprs ++ redirs)
       if T.null name
         then pure (preRedirs <> preArgs, Nothing)
         else case translateTimeReserved name plainArgs of
           Just timedCmd -> pure (preRedirs <> preArgs, Just timedCmd)
           Nothing ->
-            if null redirs
-              then case isSingleBracketTokens c plainArgs of
-                Just middle -> do
-                  (pre, testArgs) <- translateArgsM middle
-                  pure (preRedirs <> pre, Just (Command "test" testArgs))
-                Nothing ->
-                  case isDoubleBracketTokens c plainArgs of
+            case T.unpack name of
+              "test" ->
+                pure (preRedirs <> preArgs, Just (Command "test" testArgs))
+              _ ->
+                if null redirs
+                  then case isSingleBracketTokens c plainArgs of
                     Just middle -> do
-                      (pre, cmd) <- translateDoubleBracketArgsM middle
-                      pure (preRedirs <> pre, Just cmd)
+                      (pre, bracketArgs) <- translateArgsM middle
+                      pure (preRedirs <> pre, Just (Command "test" (normalizeTestExprs bracketArgs)))
                     Nothing ->
-                      case T.unpack name of
-                        "exit" ->
-                          pure (preRedirs <> preArgs, Just (translateExitFromExprs plainArgs argExprs))
-                        "source" ->
-                          pure (preRedirs <> preArgs, Just (Command "source" argExprs))
-                        "." ->
-                          pure (preRedirs <> preArgs, Just (Command "source" argExprs))
-                        "eval" -> do
-                          (pre, expr) <- translateEvalM plainArgs
-                          let cmd = Eval expr
+                      case isDoubleBracketTokens c plainArgs of
+                        Just middle -> do
+                          (pre, cmd) <- translateDoubleBracketArgsM middle
                           pure (preRedirs <> pre, Just cmd)
-                        "exec" ->
-                          pure (preRedirs <> preArgs, Just (Command "exec" argExprs))
-                        "set" -> do
-                          let issues = detectSetOptionIssues plainArgs
-                          notes <- mapM noteUnsupported issues
-                          if null issues
-                            then pure (preRedirs <> preArgs, Just (Command "set" argExprs))
-                            else pure (preRedirs <> preArgs <> notes, Nothing)
-                        "read" -> do
-                          let ReadParseResult {readFlags, readVars, readIssues, readUnsupported} =
-                                parseReadArgsDetailed plainArgs [] [] [] False
-                          notes <- mapM noteUnsupported (nub readIssues)
-                          if readUnsupported
-                            then pure (preRedirs <> preArgs <> notes, Just (Command "read" argExprs))
-                            else pure (preRedirs <> preArgs <> notes, Just (Read readFlags readVars))
-                        _ ->
-                          pure (preRedirs <> preArgs, Just (Command name argExprs))
+                        Nothing ->
+                          case T.unpack name of
+                            "exit" ->
+                              pure (preRedirs <> preArgs, Just (translateExitFromExprs plainArgs argExprs))
+                            "source" ->
+                              pure (preRedirs <> preArgs, Just (Command "source" argExprs))
+                            "." ->
+                              pure (preRedirs <> preArgs, Just (Command "source" argExprs))
+                            "eval" -> do
+                              (pre, expr) <- translateEvalM plainArgs
+                              let cmd = Eval expr
+                              pure (preRedirs <> pre, Just cmd)
+                            "exec" ->
+                              pure (preRedirs <> preArgs, Just (Command "exec" argExprs))
+                            "set" -> do
+                              let issues = detectSetOptionIssues plainArgs
+                              notes <- mapM noteUnsupported issues
+                              if null issues
+                                then pure (preRedirs <> preArgs, Just (Command "set" argExprs))
+                                else pure (preRedirs <> preArgs <> notes, Nothing)
+                            "read" -> do
+                              let ReadParseResult {readFlags, readVars, readIssues, readUnsupported} =
+                                    parseReadArgsDetailed plainArgs [] [] [] False
+                              notes <- mapM noteUnsupported (nub readIssues)
+                              if readUnsupported
+                                then pure (preRedirs <> preArgs <> notes, Just (Command "read" argExprs))
+                                else pure (preRedirs <> preArgs <> notes, Just (Read readFlags readVars))
+                            "shopt" -> do
+                              note <- noteUnsupported "shopt has no fish equivalent; ignored"
+                              pure (preRedirs <> preArgs <> [note], Just (Command "true" (argExprs ++ redirs)))
+                            _ ->
+                              pure (preRedirs <> preArgs, Just (Command name argExprs))
               else pure (preRedirs <> preArgs, Just fallback)
 
 translateTimeReserved :: Text -> [Token] -> Maybe (FishCommand TStatus)
@@ -474,10 +487,45 @@ isSingleBracketTest bracketToken args =
                 lastText = tokenToLiteralText lastToken
                 middle = NE.init neArgs
              in if lastText == "]"
-                  then Just (Command "test" (map translateTokenToExprOrRedirect middle))
+                  then Just (Command "test" (normalizeTestExprs (map translateTokenToExprOrRedirect middle)))
                   else Nothing
           Nothing -> Nothing
         else Nothing
+
+normalizeTestExprs :: [ExprOrRedirect] -> [ExprOrRedirect]
+normalizeTestExprs = map normalize
+  where
+    normalize expr =
+      case expr of
+        ExprVal (ExprLiteral "==") -> ExprVal (ExprLiteral "=")
+        ExprVal (ExprListLiteral [ExprLiteral "=="]) -> ExprVal (ExprListLiteral [ExprLiteral "="])
+        _ -> expr
+
+tokenHasExpansion :: Token -> Bool
+tokenHasExpansion = \case
+  T_NormalWord _ parts -> wordHasExpansion parts
+  T_DoubleQuoted _ parts -> wordHasExpansion parts
+  T_DollarBraced {} -> True
+  T_DollarArithmetic {} -> True
+  T_Arithmetic {} -> True
+  T_DollarExpansion {} -> True
+  T_Backticked {} -> True
+  T_DollarBraceCommandExpansion {} -> True
+  T_ProcSub {} -> True
+  _ -> False
+
+wordHasExpansion :: [Token] -> Bool
+wordHasExpansion = any isExpansionPart
+  where
+    isExpansionPart = \case
+      T_DollarBraced {} -> True
+      T_DollarArithmetic {} -> True
+      T_Arithmetic {} -> True
+      T_DollarExpansion {} -> True
+      T_Backticked {} -> True
+      T_DollarBraceCommandExpansion {} -> True
+      T_ProcSub {} -> True
+      _ -> False
 
 isSingleBracketTokens :: Token -> [Token] -> Maybe [Token]
 isSingleBracketTokens bracketToken args =
@@ -531,9 +579,13 @@ translateDoubleBracketArgsM :: [Token] -> TranslateM ([FishStatement], FishComma
 translateDoubleBracketArgsM toks =
   case toks of
     [lhs, opTok, rhs] -> do
+      let op = tokenToLiteralText opTok
       (preL, lhsExpr) <- translateTokenToExprM lhs
-      (preR, rhsExpr) <- translateTokenToExprM rhs
-      let cmd = translateBinaryConditionExprs (tokenToLiteralText opTok) lhsExpr rhsExpr
+      (preR, rhsExpr) <-
+        if op == "=~"
+          then translateRegexTokenToExprM rhs
+          else translateTokenToExprM rhs
+      let cmd = translateBinaryConditionExprs op lhsExpr rhsExpr
       pure (preL <> preR, cmd)
     _ -> pure ([], Command "true" [])
 
@@ -579,9 +631,11 @@ translateTokenToStatusCmdM tok =
   case tok of
     T_SimpleCommand _ assignments cmdToks -> do
       locals <- gets (localVars . context)
+      inFunc <- gets (inFunction . context)
+      let localFlag = if inFunc then SetFunction else SetLocal
       let scopeFlags name =
             if Set.member name locals
-              then [SetLocal]
+              then [localFlag]
               else [SetGlobal]
       stmt <- translateSimpleCommandM scopeFlags assignments cmdToks
       pure (stmtToStatusCommand stmt)
@@ -622,9 +676,13 @@ translateConditionTokenM = \case
     let cmd = Command "test" [ExprVal (ExprLiteral (toText op)), ExprVal expr]
     pure (wrapPrelude pre cmd)
   TC_Binary _ _ op lhs rhs -> do
+    let opText = toText op
     (preL, lhsExpr) <- translateTokenToExprM lhs
-    (preR, rhsExpr) <- translateTokenToExprM rhs
-    let cmd = translateBinaryConditionExprs (toText op) lhsExpr rhsExpr
+    (preR, rhsExpr) <-
+      if opText == "=~"
+        then translateRegexTokenToExprM rhs
+        else translateTokenToExprM rhs
+    let cmd = translateBinaryConditionExprs opText lhsExpr rhsExpr
     pure (wrapPrelude (preL <> preR) cmd)
   TC_Nullary _ _ tok -> do
     (pre, expr) <- translateTokenToExprM tok
@@ -677,7 +735,7 @@ translateBinaryCondition op lhs rhs
         [ ExprVal (ExprLiteral "match"),
           ExprVal (ExprLiteral flag),
           ExprVal (ExprLiteral "--"),
-          ExprVal (translateTokenToExpr rhs),
+          ExprVal (translateRegexTokenToExpr rhs),
           ExprVal (translateTokenToExpr lhs)
         ]
 
@@ -703,6 +761,16 @@ translateBinaryConditionExprs op lhs rhs
           ExprVal rhs,
           ExprVal lhs
         ]
+
+translateRegexTokenToExpr :: Token -> FishExpr TStr
+translateRegexTokenToExpr tok
+  | tokenHasExpansion tok = translateTokenToExpr tok
+  | otherwise = ExprLiteral (tokenToLiteralText tok)
+
+translateRegexTokenToExprM :: Token -> TranslateM ([FishStatement], FishExpr TStr)
+translateRegexTokenToExprM tok
+  | tokenHasExpansion tok = translateTokenToExprM tok
+  | otherwise = pure ([], ExprLiteral (tokenToLiteralText tok))
 
 wrapPrelude :: [FishStatement] -> FishCommand TStatus -> FishCommand TStatus
 wrapPrelude [] cmd = cmd

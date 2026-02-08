@@ -140,9 +140,9 @@ unitPrettyTests =
               T.intercalate
                 "\n"
                 [ "switch 'x'",
-                  "  case foo",
+                  "  case 'foo'",
                   "    echo 'a'",
-                  "  case bar",
+                  "  case 'bar'",
                   "    echo 'b'",
                   "end"
                 ]

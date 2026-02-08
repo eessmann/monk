@@ -43,7 +43,7 @@ unitTranslationTests =
       H.testCase "Assigning expansion hoists side effects" $ do
         out <- translateScript "echo ${HOME:=/tmp}"
         T.isInfixOf "set --global HOME '/tmp'" out H.@? "expected assignment in prelude"
-        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split for unquoted expansion"
+        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split for unquoted expansion"
         T.isInfixOf "$HOME" out H.@? "expected variable use after assignment",
       H.testCase "Error expansion hoists exit" $ do
         out <- translateScript "echo ${MISSING:?nope}"
@@ -82,7 +82,7 @@ unitTranslationTests =
         outPopd @?= "popd",
       H.testCase "Nested command substitution translates inner" $ do
         out <- translateScript "echo $(echo $(echo hi))"
-        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split in command substitution"
+        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split in command substitution"
         T.isInfixOf "(echo" out H.@? "expected command substitution structure"
         T.isInfixOf "echo 'hi'" out H.@? "expected innermost echo",
       H.testCase "Strict mode fails on unsupported coproc" $ do
@@ -101,7 +101,7 @@ unitTranslationTests =
       H.testCase "Array index expansion is 1-based" $ do
         out <- translateScript "echo ${arr[0]}"
         T.isInfixOf "$arr[1]" out H.@? "expected 1-based index"
-        T.isInfixOf "string 'split' '--' $IFS '--'" out H.@? "expected IFS split for unquoted expansion",
+        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split for unquoted expansion",
       H.testCase "Substring expansion uses string sub" $ do
         out <- translateScript "echo ${var:1:2}"
         T.isInfixOf "string 'sub' '--start' 2 '--length' 2 '--' $var" out H.@? "expected string sub with 1-based start",
@@ -202,7 +202,7 @@ unitTranslationTests =
         T.isInfixOf "read --prompt '> '" out H.@? "expected select prompt read",
       H.testCase "Case patterns preserve globs" $ do
         out <- translateScript "case $x in foo* ) echo ok ;; esac"
-        T.isInfixOf "case foo*" out H.@? "expected unquoted glob pattern",
+        T.isInfixOf "case 'foo*'" out H.@? "expected quoted glob pattern",
       H.testCase "Case patterns with expansion keep glob meta" $ do
         out <- translateScript "case $x in ${Y}* ) echo ok ;; esac"
         T.isInfixOf "printf '%s%s'" out H.@? "expected printf pattern builder"

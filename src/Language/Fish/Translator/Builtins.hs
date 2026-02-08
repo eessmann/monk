@@ -34,7 +34,8 @@ translateLocalCommand args = do
   inFunc <- gets (inFunction . context)
   unless inFunc $
     addWarning "local used outside a function; fish will treat it as local to the current scope"
-  parsed <- mapM parseLocalArg args
+  let localFlag = if inFunc then SetFunction else SetLocal
+  parsed <- mapM (parseLocalArg localFlag) args
   let names = map fst (catMaybes parsed)
       stmts = concatMap snd (catMaybes parsed)
   addLocalVars names
@@ -45,8 +46,9 @@ translateLocalCommand args = do
 
 translateExportCommand :: [Token] -> TranslateM FishStatement
 translateExportCommand args = do
+  inFunc <- gets (inFunction . context)
   locals <- gets (localVars . context)
-  parsed <- mapM (parseExportArg locals) args
+  parsed <- mapM (parseExportArg inFunc locals) args
   let stmts = concat parsed
   pure $
     if null stmts
@@ -84,7 +86,7 @@ translateDeclareCommandWith baseFlags args = do
       parsed <- mapM (parseDeclareArg scopeFlags) rest
       let names = mapMaybe fst parsed
           stmts = concatMap snd parsed
-      when (SetLocal `elem` scopeFlags) (addLocalVars names)
+      when (any (`elem` [SetLocal, SetFunction]) scopeFlags) (addLocalVars names)
       pure $
         if null stmts
           then Comment "Skipped declare with no supported arguments"
@@ -95,7 +97,7 @@ declareScopeFlags inFunc flags =
   let scope =
         if declareGlobal flags || not inFunc
           then SetGlobal
-          else SetLocal
+          else SetFunction
       base = [scope]
    in if declareExport flags
         then base <> [SetExport]
@@ -145,7 +147,7 @@ parseDeclareArg flags tok =
            in pure (Just name, [Stmt (Set flags name expr)])
         Nothing ->
           if isValidVarName txt
-            then pure (Just txt, [Stmt (Set flags txt (ExprListLiteral []))])
+            then pure (Just txt, [Stmt (Set flags txt (ExprVariable (VarAll txt)))])
             else do
               addWarning ("Unsupported declare argument: " <> txt)
               pure (Nothing, [])
@@ -255,64 +257,64 @@ translateTrapCommand args =
       let upper = T.toUpper sig
        in fromMaybe upper (T.stripPrefix "SIG" upper)
 
-translateScopedAssignment :: Set.Set Text -> Token -> [FishStatement]
-translateScopedAssignment locals tok =
+translateScopedAssignment :: Set.Set Text -> Bool -> Token -> [FishStatement]
+translateScopedAssignment locals inFunc tok =
   case tok of
     T_Assignment _ _ var _ _ ->
-      translateAssignmentWithFlags (scopeFlagsFor locals (toText var)) tok
+      translateAssignmentWithFlags (scopeFlagsFor locals inFunc (toText var)) tok
     _ ->
-      translateAssignmentWithFlags (scopeFlagsFor locals "") tok
+      translateAssignmentWithFlags (scopeFlagsFor locals inFunc "") tok
 
-scopeFlagsFor :: Set.Set Text -> Text -> [SetFlag]
-scopeFlagsFor locals name =
+scopeFlagsFor :: Set.Set Text -> Bool -> Text -> [SetFlag]
+scopeFlagsFor locals inFunc name =
   if Set.member name locals
-    then [SetLocal]
+    then [if inFunc then SetFunction else SetLocal]
     else [SetGlobal]
 
-parseLocalArg :: Token -> TranslateM (Maybe (Text, [FishStatement]))
-parseLocalArg tok =
+parseLocalArg :: SetFlag -> Token -> TranslateM (Maybe (Text, [FishStatement]))
+parseLocalArg localFlag tok =
   case tok of
     T_Assignment _ _ var _ _ -> do
       let name = toText var
-      stmts <- translateAssignmentWithFlagsM [SetLocal] tok
+      stmts <- translateAssignmentWithFlagsM [localFlag] tok
       pure (Just (name, stmts))
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
         Just (name, valueTxt) ->
           let expr = ExprListLiteral [ExprLiteral valueTxt]
-           in pure (Just (name, [Stmt (Set [SetLocal] name expr)]))
+           in pure (Just (name, [Stmt (Set [localFlag] name expr)]))
         Nothing ->
           if isValidVarName txt
-            then pure (Just (txt, [Stmt (Set [SetLocal] txt (ExprListLiteral []))]))
+            then pure (Just (txt, [Stmt (Set [localFlag] txt (ExprListLiteral []))]))
             else do
               addWarning ("Unsupported local argument: " <> txt)
               pure Nothing
 
-parseExportArg :: Set.Set Text -> Token -> TranslateM [FishStatement]
-parseExportArg locals tok =
+parseExportArg :: Bool -> Set.Set Text -> Token -> TranslateM [FishStatement]
+parseExportArg inFunc locals tok =
   case tok of
     T_Assignment _ _ var _ _ -> do
       let name = toText var
-          flags = exportFlags locals name
+          flags = exportFlags inFunc locals name
       translateAssignmentWithFlagsM flags tok
     _ -> do
       let txt = tokenToLiteralText tok
       case parseAssignmentLiteral txt of
         Just (name, valueTxt) ->
           let expr = ExprListLiteral [ExprLiteral valueTxt]
-           in pure [Stmt (Set (exportFlags locals name) name expr)]
+           in pure [Stmt (Set (exportFlags inFunc locals name) name expr)]
         Nothing ->
           if isValidVarName txt
-            then pure [Stmt (Set (exportFlags locals txt) txt (ExprVariable (VarAll txt)))]
+            then pure [Stmt (Set (exportFlags inFunc locals txt) txt (ExprVariable (VarAll txt)))]
             else do
               addWarning ("Unsupported export argument: " <> txt)
               pure []
 
-exportFlags :: Set.Set Text -> Text -> [SetFlag]
-exportFlags locals name =
+exportFlags :: Bool -> Set.Set Text -> Text -> [SetFlag]
+exportFlags inFunc locals name =
   if Set.member name locals
-    then [SetLocal, SetExport]
+    then [if inFunc then SetFunction else SetLocal, SetExport]
     else [SetGlobal, SetExport]
 
 parseAssignmentLiteral :: Text -> Maybe (Text, Text)

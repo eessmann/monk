@@ -221,8 +221,12 @@ prettyExprOrRedirect = \case
 
 prettyVarRef :: FishVarRef t -> Doc ann
 prettyVarRef = \case
-  VarAll name -> "$" <> pretty name
-  VarScalar name -> "$" <> pretty name
+  VarAll name
+    | name == "#" -> "(count $argv)"
+    | otherwise -> "$" <> pretty name
+  VarScalar name
+    | name == "#" -> "(count $argv)"
+    | otherwise -> "$" <> pretty name
   VarIndex name idx -> "$" <> pretty name <> brackets (prettyFishIndex idx)
 
 --------------------------------------------------------------------------------
@@ -248,7 +252,7 @@ prettyFishExpr = \case
           <+> escapeFishString ""
       )
   ExprMath args ->
-    parens ("math" <+> hsep (map prettyFishExpr (NE.toList args)))
+    parens ("math" <+> "--scale" <+> "0" <+> hsep (map prettyFishExpr (NE.toList args)))
   ExprCommandSubst stmts ->
     "(" <> align (vsep (map prettyFishStatement (NE.toList stmts))) <> ")"
   ExprListLiteral [] -> mempty
@@ -301,19 +305,16 @@ prettyCaseItem :: CaseItem -> Doc ann
 prettyCaseItem (CaseItem pats body) =
   -- Use NonEmpty patterns/body
   "case"
-    <+> hsep (punctuate " |" (map prettyCasePattern (NE.toList pats)))
+    <+> hsep (map prettyCasePattern (NE.toList pats))
     <> hardline
-    <> indent 2 (vsep (map prettyFishStatement (NE.toList body))) -- Patterns separated by |
+    <> indent 2 (vsep (map prettyFishStatement (NE.toList body)))
 
 prettyCasePattern :: FishExpr TStr -> Doc ann
 prettyCasePattern = \case
-  ExprLiteral txt -> pretty txt
   other ->
     case flattenPatternConcat other of
-      Just parts
-        | needsRawGlobConcat parts ->
-            mconcat (map prettyPatternPart parts)
-      _ -> prettyFishExpr other
+      Just parts -> mconcat (map prettyCasePatternPart parts)
+      Nothing -> prettyCasePatternPart other
 
 flattenPatternConcat :: FishExpr TStr -> Maybe [FishExpr TStr]
 flattenPatternConcat expr =
@@ -323,20 +324,9 @@ flattenPatternConcat expr =
     go (ExprStringConcat a b) = go a <> go b
     go e = [e]
 
-needsRawGlobConcat :: [FishExpr TStr] -> Bool
-needsRawGlobConcat parts =
-  any isGlobLiteral parts && any (not . isLiteral) parts
-  where
-    isLiteral = \case
-      ExprLiteral {} -> True
-      _ -> False
-    isGlobLiteral = \case
-      ExprLiteral txt -> T.any (`elem` ("*?[]{}" :: String)) txt
-      _ -> False
-
-prettyPatternPart :: FishExpr TStr -> Doc ann
-prettyPatternPart = \case
-  ExprLiteral txt -> pretty txt
+prettyCasePatternPart :: FishExpr TStr -> Doc ann
+prettyCasePatternPart = \case
+  ExprLiteral txt -> escapeFishString txt
   other -> prettyFishExpr other
 
 prettyRedirect :: Redirect -> Doc ann
@@ -391,6 +381,7 @@ prettyReadFlag = \case
 prettySetFlag :: SetFlag -> Doc ann
 prettySetFlag = \case
   SetLocal -> "--local"
+  SetFunction -> "--function"
   SetGlobal -> "--global"
   SetUniversal -> "--universal"
   SetExport -> "--export"
