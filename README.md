@@ -256,46 +256,10 @@ Review warnings and test translated scripts in Fish.
 
 ### Longer Term
 - [ ] Performance optimizations for large scripts
-- [ ] IDE/editor integrations
 
 ## 🤝 Contributing
 
 We welcome contributions! Monk is built with modern Haskell practices:
-
-### Development Setup
-
-```bash
-git clone https://github.com/eessmann/monk.git
-cd monk
-
-# Install dependencies
-cabal update
-cabal build --only-dependencies
-
-# Build and test
-cabal build all
-cabal test all
-
-# Code formatting
-hlint .
-```
-
-### Contribution Areas
-
-- **Parser improvements**: Better Bash construct handling
-- **Fish semantics**: Expanding AST coverage of Fish features  
-- **Translation quality**: More idiomatic Fish output
-- **Error handling**: Better error messages and recovery
-- **Documentation**: Examples, tutorials, API docs
-- **Testing**: More comprehensive test cases
-
-### Code Style
-
-- Follow [Ormolu](https://github.com/tweag/ormolu) formatting
-- Use `hlint` for code quality
-- Comprehensive documentation with Haddock
-- Property-based tests for core functionality
-- Type-driven development with GADTs
 
 ## 📚 Resources
 
@@ -318,13 +282,7 @@ Monk is released under the [MIT License](LICENSE).
 - **ShellCheck** team for excellent Bash parsing infrastructure
 - **Fish Shell** team for creating a fantastic modern shell
 - **Haskell** community for powerful language features and libraries
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/eessmann/monk/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/eessmann/monk/discussions)  
-- **Email**: essmanne@gmail.com
-
+- 
 ---
 
 **Monk**: *Because every Bash script deserves to be a Fish* 🐟
