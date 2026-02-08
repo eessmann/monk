@@ -108,35 +108,66 @@ BABELFISH_VERSION_OVERRIDE=1.2.1 scripts/bakeoff.sh /tmp/monk-babelfish
 
 The script normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
 It also respects optional fixture sidecar files: `<name>.args` (whitespace-separated args) and `<name>.stdin` (stdin content).
+If `hyperfine` is installed, the script also records CLI timing runs. You can configure:
 
-## Bake-off results (2026-02-07)
+```bash
+BAKEOFF_HYPERFINE=0   # disable timing runs
+HYPERFINE_RUNS=10     # default
+HYPERFINE_WARMUP=1    # default
+```
+
+Hyperfine outputs are written to `hyperfine-all.md/json` and `hyperfine-benchmark.md/json` in the output directory.
+
+## Bake-off results (2026-02-08)
 
 Environment:
 
-- Monk: git 7cc4f8e (dirty working tree)
+- Monk: git ecd1435 (dirty working tree)
 - Babelfish: 1.2.1 (stdin-only CLI)
 - Fish: 4.2.0
-- Report output: `/tmp/monk-babelfish-20260207232734`
+- Hyperfine: 1.20.0 (runs=10, warmup=1, disabled for this run)
+- Report output: `/tmp/monk-babelfish-20260208094732`
 
 Summary (corpus + benchmarks + integration + golden + real-world fixtures):
 
-- Total scripts: 23
-- Monk success: 23/23 (warnings on `large`, `medium`, `time-prefix`)
-- Babelfish success: 18/23 (fails on `large`, `medium`, `extglob-basic`, `pyramid-left`, `pyramid-right`)
+- Total scripts: 28
+- Monk success: 28/28 (warnings on `large`, `medium`, `time-prefix`)
+- Babelfish success: 18/28 (fails on `large`, `medium`, `extglob-basic`, `a2l`, `coat`, `echo-args`, `taoc`, `neofetch`, `pyramid-left`, `pyramid-right`)
 - Runtime diffs where both succeeded: 1/18
 
 Key deltas:
 
-- `benchmark/fixtures/medium.bash`: Monk succeeds with set -e/-u/pipefail warnings; babelfish exits 1 with `unsupported: &syntax.UnaryArithm` and an AST dump on stderr
-- `benchmark/fixtures/large.bash`: Monk succeeds with set -e/-u/pipefail and read IFS-splitting warnings; babelfish exits 1 with `unsupported: &syntax.ForClause` and an AST dump on stderr
+- `benchmark/fixtures/medium.bash`: Monk succeeds with set -e/-u/pipefail warnings; babelfish exits 1 with a `UnaryArithm` AST dump on stderr
+- `benchmark/fixtures/large.bash`: Monk succeeds with set -e/-u/pipefail and read IFS-splitting warnings; babelfish exits 1 with a `ForClause` AST dump on stderr
 - `test/fixtures/golden/extglob-basic.bash`: Monk succeeds; babelfish exits 1 with `unsupported: &syntax.ExtGlob`
 - `test/fixtures/realworld/pyramid-left.bash` and `test/fixtures/realworld/pyramid-right.bash`: Monk succeeds; babelfish exits 1 (unsupported C-style for loop)
+- `test/fixtures/realworld/a2l.bash`, `test/fixtures/realworld/coat.bash`, `test/fixtures/realworld/taoc.bash`: Monk succeeds; babelfish exits 1 (unsupported `DeclClause` / readonly parsing)
+- `test/fixtures/realworld/echo-args.bash`: Monk succeeds; babelfish exits 1 (unsupported `UnaryArithm`)
+- `test/fixtures/realworld/neofetch.bash`: Monk succeeds; babelfish exits 1 (unsupported `ParamExp` with indexed/default expansion)
 - `test/fixtures/realworld/version-compare.bash`: outputs and stderr differ (both translations trigger `test` argument errors under fish)
 
 Notes:
 
 - Babelfish expects input on stdin; passing a file path yields no translation output.
 - For scripts where both tools succeeded (excluding the diffs above), stdout, stderr, and exit codes matched.
+- Hyperfine results are omitted for this full run because babelfish fails on multiple fixtures; including those timings would bias comparisons.
+
+Compatible subset timing (both tools succeed):
+
+- Compatible file list: `scripts/bakeoff-compatible.txt`
+- Report output: `/tmp/monk-babelfish-compatible-20260208094832`
+- Scripts: 18 (Monk 18/18, Babelfish 18/18, diffs: `test/fixtures/realworld/version-compare.bash`)
+
+Hyperfine (CLI translation batches, compatible subset):
+
+- All fixtures: Monk `2.470 ± 0.080 s` (min 2.321, max 2.539), Babelfish `22.9 ± 0.8 ms` (min 22.1, max 24.8)
+- Benchmark fixtures: omitted (babelfish fails on medium/large; ignore-failure timings would bias results)
+
+Criterion (monk-benchmark):
+
+- `small`: mean 506.4 μs
+- `medium`: mean 2.750 ms
+- `large`: mean 3.414 ms
 
 ## Where Monk is currently stronger
 
