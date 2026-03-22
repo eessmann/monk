@@ -1,30 +1,43 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+-- | Inline translated scripts by replacing literal @source@ calls with
+-- previously translated statements.
 module Language.Fish.Inline
   ( Translation (..),
+    WarnFn,
     inlineStatements,
   )
 where
 
+import Control.Monad.Extra (concatMapM)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Monad (TranslateState)
-import Control.Monad.Extra (concatMapM)
 
+-- | Translation artifacts for one source file.
 data Translation = Translation
-  { trPath :: FilePath,
+  { -- | Source path used for this translation.
+    trPath :: FilePath,
+    -- | Translated fish statements.
     trStatements :: [FishStatement],
+    -- | Translator state captured for diagnostics and source mapping.
     trState :: TranslateState,
+    -- | Mapping from literal source paths to resolved files.
     trSourceMap :: M.Map Text (Maybe FilePath)
   }
   deriving stock (Show, Eq)
 
+-- | Callback used to report inlining warnings.
 type WarnFn = Text -> IO ()
 
+-- | Inline transitive @source@ statements for the file at @path@.
+--
+-- The @translations@ map should contain all translated files, and @stack@
+-- tracks the current include chain so recursion can be detected.
 inlineStatements ::
   WarnFn ->
   M.Map FilePath Translation ->

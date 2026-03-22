@@ -7,40 +7,41 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Monk
-  ( TranslationResult (..), -- ^ Translation output (AST + state).
-    TranslationFailure (..), -- ^ Parse or translation failures.
-    translateParseResult, -- ^ Translate a ShellCheck ParseResult with source locations.
-    translateBashFile, -- ^ Parse and translate a Bash file on disk.
-    translateBashScript, -- ^ Parse and translate Bash script text.
-    translationStatements, -- ^ Flatten top-level statements from a translation.
-    renderTranslation, -- ^ Render a translation to Fish source.
-    flattenStatements, -- ^ Flatten a FishStatement into a top-level list.
-    defaultConfig, -- ^ Default translation configuration.
-    strictConfig, -- ^ Strict translation configuration (unsupported constructs fail).
-    TranslateConfig (..), -- ^ Translation configuration.
-    TranslateError (..), -- ^ Translation errors.
-    TranslateState (..), -- ^ Translation state (warnings, source ranges).
-    Warning (..), -- ^ Non-fatal translation warnings.
-    Translation (..), -- ^ Translation bundle for inlining.
-    inlineStatements, -- ^ Inline translated sources (used by CLI/tests).
-    renderFish, -- ^ Render a Fish AST (list of statements) to Text.
-    parseBashFile, -- ^ Parse a Bash file from disk.
-    parseBashScript, -- ^ Parse a Bash script from (filename, text) into a ShellCheck 'ParseResult'.
-    projectName, -- ^ The name of the project.
+  ( TranslationResult (..),
+    TranslationFailure (..),
+    translateParseResult,
+    translateBashFile,
+    translateBashScript,
+    translationStatements,
+    renderTranslation,
+    flattenStatements,
+    defaultConfig,
+    strictConfig,
+    TranslateConfig (..),
+    TranslateError (..),
+    TranslateState (..),
+    TranslationContext (..),
+    Warning (..),
+    Translation (..),
+    WarnFn,
+    inlineStatements,
+    renderFish,
+    parseBashFile,
+    parseBashScript,
+    projectName,
     module AST,
   )
 where
 
--- \^ The Fish AST.
-
 import Language.Bash.Parser (parseBashFile, parseBashScript)
 import Language.Fish.AST
 import Language.Fish.AST qualified as AST
-import Language.Fish.Inline (Translation (..), inlineStatements)
+import Language.Fish.Inline (Translation (..), WarnFn, inlineStatements)
 import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator qualified as Translator
 import Language.Fish.Translator.Monad
   ( TranslateConfig (..),
+    TranslationContext (..),
     TranslateError (..),
     TranslateState (..),
     Warning (..),
@@ -48,17 +49,24 @@ import Language.Fish.Translator.Monad
   )
 import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 
+-- | Result of a successful translation.
 data TranslationResult = TranslationResult
-  { translationStatement :: FishStatement,
+  { -- | Root fish statement produced by the translator.
+    translationStatement :: FishStatement,
+    -- | Final translation state containing warnings and source mapping.
     translationState :: TranslateState
   }
   deriving stock (Show, Eq)
 
+-- | Failure modes for parse and translation entry points.
 data TranslationFailure
+  -- | ShellCheck parse errors.
   = ParseErrors [PositionedComment]
+  -- | Translation failed with a semantic error.
   | TranslateFailure TranslateError
   deriving stock (Show, Eq)
 
+-- | Translate a parsed shell script into fish AST plus translation state.
 translateParseResult ::
   TranslateConfig ->
   ParseResult ->
@@ -67,6 +75,7 @@ translateParseResult cfg parseResult = do
   (stmt, st) <- Translator.translateParseResult cfg parseResult
   pure (TranslationResult stmt st)
 
+-- | Parse and translate a Bash file on disk.
 translateBashFile ::
   TranslateConfig ->
   FilePath ->
@@ -81,6 +90,7 @@ translateBashFile cfg path = do
           Left err -> Left (TranslateFailure err)
           Right res -> Right res
 
+-- | Parse and translate Bash script text with an explicit source filename.
 translateBashScript ::
   TranslateConfig ->
   FilePath ->
@@ -96,20 +106,25 @@ translateBashScript cfg fileName scriptText = do
           Left err -> Left (TranslateFailure err)
           Right res -> Right res
 
+-- | Flatten the translated root statement into top-level statements.
 translationStatements :: TranslationResult -> [FishStatement]
 translationStatements = flattenStatements . translationStatement
 
+-- | Render a translation result as fish source text.
 renderTranslation :: TranslationResult -> Text
 renderTranslation = renderFish . translationStatements
 
+-- | Convert a root statement into a top-level statement list.
 flattenStatements :: FishStatement -> [FishStatement]
 flattenStatements stmt =
   case stmt of
     StmtList xs -> xs
     other -> [other]
 
+-- | Project name used in CLI and benchmark labels.
 projectName :: Text
 projectName = "monk"
 
+-- | Strict translation settings that fail on unsupported constructs.
 strictConfig :: TranslateConfig
 strictConfig = defaultConfig {strictMode = True}

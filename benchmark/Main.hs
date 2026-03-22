@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main (main) where
@@ -6,7 +5,7 @@ module Main (main) where
 import Criterion.Main (bench, bgroup, defaultMain, env, nfIO)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Monk (FishStatement (..), defaultConfig, parseBashScript, projectName, renderFish, translateParseResult)
+import Monk (defaultConfig, parseBashScript, projectName, renderTranslation, translateParseResult)
 
 fixtures :: [(String, FilePath)]
 fixtures =
@@ -34,10 +33,5 @@ translateFixture path src = do
     Left err ->
       let msg = "translateParseResult failed for " <> path <> ": " <> show err
        in error (T.pack msg)
-    Right (stmt, _) ->
-      pure (renderFish (flattenStatements stmt))
-
-flattenStatements :: FishStatement -> [FishStatement]
-flattenStatements = \case
-  StmtList xs -> xs
-  stmt -> [stmt]
+    Right translation ->
+      pure (renderTranslation translation)

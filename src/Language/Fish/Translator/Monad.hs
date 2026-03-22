@@ -56,6 +56,7 @@ data TranslateConfig = TranslateConfig
   }
   deriving stock (Show, Eq)
 
+-- | Default translation settings used by the public API.
 defaultConfig :: TranslateConfig
 defaultConfig =
   TranslateConfig

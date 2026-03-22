@@ -97,7 +97,7 @@ data FishStatement where
   Stmt :: (Typeable a) => FishCommand a -> FishStatement
   -- | A list of statements (used for scripts and block bodies).
   StmtList :: [FishStatement] -> FishStatement
-  -- | A line comment (without the leading '#').
+  -- | A line comment (without the leading @#@ character).
   Comment :: Text -> FishStatement
   -- | An explicit empty statement.
   EmptyStmt :: FishStatement
@@ -171,7 +171,7 @@ data FishCommand (t :: FishType) where
   Background :: (Typeable a) => FishCommand a -> FishCommand TStatus
   Wait :: Maybe (FishExpr TInt) -> FishCommand TStatus
   Exec :: FishExpr TStr -> [ExprOrRedirect] -> FishCommand TStatus
-  -- | Command decoration (`builtin`, `command`, `exec`).
+  -- | Command decoration (@builtin@, @command@, @exec@).
   Decorated ::
     (Typeable a) =>
     Decoration ->
@@ -332,7 +332,7 @@ instance Eq (FishIndex a b) where
 
 --------------------------------------------------------------------------------
 
--- | Function flags accepted by `function`.
+-- | Function flags accepted by @function@.
 data FunctionFlag
   = FuncDescription Text
   | FuncOnEvent Text
@@ -356,7 +356,7 @@ data FishFunction = FishFunction
 
 --------------------------------------------------------------------------------
 
--- | Flags accepted by `set`.
+-- | Flags accepted by @set@.
 
 --------------------------------------------------------------------------------
 
@@ -387,14 +387,14 @@ data VariableAssignment = VariableAssignment
   }
   deriving stock (Show, Eq)
 
--- | Pipeline continuation: `|` followed by variables and a statement.
+-- | Pipeline continuation: @|@ followed by variables and a statement.
 data JobPipeCont = PipeTo
   { jpcVariables :: [VariableAssignment],
     jpcStatement :: FishStatement
   }
   deriving stock (Show, Eq)
 
--- | Pipeline with optional `time`, leading variables, and backgrounding.
+-- | Pipeline with optional @time@, leading variables, and backgrounding.
 data FishJobPipeline = FishJobPipeline
   { jpTime :: Bool,
     jpVariables :: [VariableAssignment],
@@ -404,13 +404,13 @@ data FishJobPipeline = FishJobPipeline
   }
   deriving stock (Show, Eq)
 
--- | Conjunction keywords used by fish: `and` / `or`.
+-- | Conjunction keywords used by fish: @and@ / @or@.
 data Conjunction
   = ConjAnd
   | ConjOr
   deriving stock (Show, Eq)
 
--- | Conjunction continuation: `and job` or `or job`.
+-- | Conjunction continuation: @and job@ or @or job@.
 data FishJobConjCont
   = JCAnd FishJobPipeline
   | JCOr FishJobPipeline
@@ -474,7 +474,7 @@ data RedirectTarget
   | RedirectClose
   deriving stock (Show, Eq)
 
--- | Command decoration (`builtin`, `command`, `exec`).
+-- | Command decoration (@builtin@, @command@, @exec@).
 data Decoration
   = DecBuiltin
   | DecCommand
@@ -526,28 +526,40 @@ eqGADT eqSameType left right =
 
 --------------------------------------------------------------------------------
 
+-- | Command producing a string value.
 type CmdStr = FishCommand TStr
 
+-- | Command producing an integer value.
 type CmdInt = FishCommand TInt
 
+-- | Command producing a boolean value.
 type CmdBool = FishCommand TBool
 
+-- | Command producing a list value.
 type CmdList a = FishCommand (TList a)
 
+-- | Command producing an exit status.
 type CmdStatus = FishCommand TStatus
 
+-- | Command producing unit.
 type CmdUnit = FishCommand TUnit
 
+-- | Expression producing a string value.
 type ExprStr = FishExpr TStr
 
+-- | Expression producing an integer value.
 type ExprInt = FishExpr TInt
 
+-- | Expression producing a boolean value.
 type ExprBool = FishExpr TBool
 
+-- | Expression producing a list value.
 type ExprList a = FishExpr (TList a)
 
+-- | Expression producing an exit status.
 type ExprStatus = FishExpr TStatus
 
+-- | Expression producing unit.
 type ExprUnit = FishExpr TUnit
 
 --------------------------------------------------------------------------------
@@ -596,7 +608,7 @@ data GlobPart
   | GlobBraces (NonEmpty Text)
   deriving stock (Show, Eq)
 
--- | String operations used by `string`.
+-- | String operations used by @string@.
 data StringOp
   = StrLength
   | StrLower
@@ -609,7 +621,7 @@ data StringOp
   | StrMatch Text
   deriving stock (Show, Eq)
 
--- | Flags for the `read` builtin.
+-- | Flags for the @read@ builtin.
 data ReadFlag
   = ReadPrompt Text
   | ReadLocal

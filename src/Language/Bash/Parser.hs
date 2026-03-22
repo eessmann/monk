@@ -23,8 +23,9 @@ import ShellCheck.Parser (parseScript)
 
 -------------------------------------------------------------------------------
 
--- | Parse a Bash script from (filename, text) into a ShellCheck 'ParseResult'.
---   The 'filename' is used by ShellCheck for diagnostics and source lookups.
+-- | Parse a Bash script from @filename@ and script text into a ShellCheck
+-- @ParseResult@.
+-- The filename is used by ShellCheck for diagnostics and source lookups.
 parseBashScript ::
   -- | Script filename
   FilePath ->
@@ -33,7 +34,7 @@ parseBashScript ::
   IO ParseResult
 parseBashScript fileName scriptText = do
   -- Prepare a default system interface. In real code you might want
-  -- to customize how 'source' lookups behave or pass '-x' style logic.
+  -- to customize how source lookups behave or pass -x style logic.
   let si = newSystemInterface
 
       ps =
@@ -49,8 +50,8 @@ parseBashScript fileName scriptText = do
 
 --------------------------------------------------------------------------------
 
--- | Parse a Bash file from disk. Returns either parse warnings/errors
---   or the successful 'ParseResult'.
+-- | Parse a Bash file from disk. Returns either parse warnings or errors, or a
+-- successful @ParseResult@.
 parseBashFile :: FilePath -> IO (Either [PositionedComment] ParseResult)
 parseBashFile filePath = do
   scriptTextOrErr <- tryAny (readFileBS filePath)
