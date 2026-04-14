@@ -4,8 +4,10 @@
 set rows 5
 for i in (seq 0 (math "$rows - 1"))
     set spaces (math "$rows - $i - 1")
-    for j in (seq 1 $spaces)
-        printf ' '
+    if test $spaces -gt 0
+        for j in (seq 1 $spaces)
+            printf ' '
+        end
     end
     for j in (seq 0 $i)
         printf '*'

@@ -2,12 +2,14 @@
 
 module ShellSupport
   ( Shell (..),
+    ShellRunMode (..),
     RunResult (..),
     EnvDelta (..),
     shouldRunIntegration,
     prepareEnv,
     runShell,
     runShellWith,
+    runShellWithMode,
     diffEnv,
   )
 where
@@ -29,6 +31,12 @@ import System.Process (CreateProcess (env), proc, readCreateProcessWithExitCode)
 data Shell
   = ShellBash
   | ShellFish
+  deriving stock (Eq, Show)
+
+data ShellRunMode
+  = ShellRunAuto
+  | ShellRunSource
+  | ShellRunExec
   deriving stock (Eq, Show)
 
 data RunResult = RunResult
@@ -75,9 +83,12 @@ runShell :: Shell -> [(String, String)] -> Text -> IO RunResult
 runShell shell env0 script = runShellWith shell env0 script [] ""
 
 runShellWith :: Shell -> [(String, String)] -> Text -> [Text] -> Text -> IO RunResult
-runShellWith shell env0 script args stdinInput = do
+runShellWith = runShellWithMode ShellRunAuto
+
+runShellWithMode :: ShellRunMode -> Shell -> [(String, String)] -> Text -> [Text] -> Text -> IO RunResult
+runShellWithMode runMode shell env0 script args stdinInput = do
   withTempScript script $ \scriptPath -> do
-    let wrapped = wrapScript shell script args scriptPath
+    let wrapped = wrapScript runMode shell script args scriptPath
         (cmd, cmdArgs) = shellCommand shell wrapped
         process = (proc cmd cmdArgs) {env = Just env0}
     (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
@@ -111,33 +122,40 @@ shellCommand shell script =
 marker :: Text
 marker = "__MONK_ENV_BEGIN__"
 
-wrapScript :: Shell -> Text -> [Text] -> FilePath -> Text
-wrapScript shell script args scriptPath =
+wrapScript :: ShellRunMode -> Shell -> Text -> [Text] -> FilePath -> Text
+wrapScript runMode shell script args scriptPath =
   let markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
       (statusLine, exitLine) =
         case shell of
           ShellBash -> ("monk_status=$?", "exit $monk_status")
           ShellFish -> ("set -l monk_status $status", "exit $monk_status")
-      bodyLines = scriptLines shell script args scriptPath
+      bodyLines = scriptLines runMode shell script args scriptPath
       footer = [statusLine, markerLine, "env", exitLine]
    in T.intercalate "\n" (bodyLines <> footer)
 
-scriptLines :: Shell -> Text -> [Text] -> FilePath -> [Text]
-scriptLines shell script args scriptPath =
+scriptLines :: ShellRunMode -> Shell -> Text -> [Text] -> FilePath -> [Text]
+scriptLines runMode shell script args scriptPath =
   let pathText = T.pack scriptPath
       argsText = T.intercalate " " (map quoteArg args)
       hasArgs = not (null args)
       runChild cmd =
         if hasArgs then cmd <> " " <> argsText else cmd
+      effectiveMode =
+        case runMode of
+          ShellRunAuto ->
+            if scriptMayExit script
+              then ShellRunExec
+              else ShellRunSource
+          mode -> mode
    in case shell of
         ShellBash ->
-          if scriptMayExit script
-            then [runChild ("bash " <> quoteArg pathText)]
-            else [runChild ("source " <> quoteArg pathText)]
+          case effectiveMode of
+            ShellRunExec -> [runChild ("bash " <> quoteArg pathText)]
+            _ -> [runChild ("source " <> quoteArg pathText)]
         ShellFish ->
-          if scriptMayExit script
-            then [runChild ("fish --no-config " <> quoteArg pathText)]
-            else [runChild ("source " <> quoteArg pathText)]
+          case effectiveMode of
+            ShellRunExec -> [runChild ("fish --no-config " <> quoteArg pathText)]
+            _ -> [runChild ("source " <> quoteArg pathText)]
 
 quoteArg :: Text -> Text
 quoteArg txt =
@@ -172,7 +190,7 @@ parseEnv = Map.fromList . mapMaybe parseLine . filter (not . T.null) . T.lines
 -- Only compare deltas to avoid shell-specific baseline differences.
 diffEnv :: Map.Map Text Text -> Map.Map Text Text -> EnvDelta
 diffEnv baseEnv newEnv =
-  let ignored = Set.fromList ["OLDPWD"]
+  let ignored = Set.fromList ["OLDPWD", "_"]
       stripIgnored = Map.filterWithKey (\k _ -> not (Set.member k ignored))
       baseFiltered = stripIgnored baseEnv
       newFiltered = stripIgnored newEnv

@@ -44,6 +44,11 @@ jobs:
         path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
         key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
 
+    - name: Install fish
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y fish
+
     - name: Install dependencies
       run: |
         cabal build all --only-dependencies
@@ -53,10 +58,11 @@ jobs:
         cabal build all
 
     - name: Test
+      env:
+        MONK_INTEGRATION: "1"
       run: |
         cabal test all
 
     - name: Documentation
       run: |
         cabal haddock
-

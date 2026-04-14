@@ -6,7 +6,7 @@ module RealWorld
 where
 
 import Data.Text.IO qualified as TIO
-import FixtureSupport (loadFixtureArgs, loadFixtureStdin)
+import FixtureSupport (loadFixtureArgs, loadFixturePrereqs, loadFixtureStdin)
 import ShellSupport
   ( RunResult (..),
     Shell (..),
@@ -16,6 +16,7 @@ import ShellSupport
     runShellWith,
     shouldRunIntegration,
   )
+import System.Directory (findExecutable)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -77,7 +78,7 @@ realWorldFixtures =
 
 realWorldTests :: TestTree
 realWorldTests =
-  testGroup "Real-world fixtures (manual fish)" (map realWorldTest realWorldFixtures)
+  testGroup "Real-world fixtures (manual fish baseline only)" (map realWorldTest realWorldFixtures)
 
 realWorldTest :: RealWorldFixture -> TestTree
 realWorldTest RealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.testCase rfName $ do
@@ -88,18 +89,21 @@ realWorldTest RealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.test
       case runnable of
         Left _reason -> pure ()
         Right () -> do
-          bashSrc <- TIO.readFile rfBashPath
-          fishSrc <- TIO.readFile rfFishPath
-          args <- loadFixtureArgs rfBashPath
-          stdinInput <- loadFixtureStdin rfBashPath
-          baseEnv <- prepareEnv
-          baseBash <- runShell ShellBash baseEnv ""
-          baseFish <- runShell ShellFish baseEnv ""
-          bashRes <- runShellWith ShellBash baseEnv bashSrc args stdinInput
-          fishRes <- runShellWith ShellFish baseEnv fishSrc args stdinInput
-          let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
-              fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
-          rrExit bashRes @?= rrExit fishRes
-          rrStdout bashRes @?= rrStdout fishRes
-          rrStderr bashRes @?= rrStderr fishRes
-          bashDelta @?= fishDelta
+          prereqs <- loadFixturePrereqs rfBashPath
+          prereqOk <- and <$> mapM (fmap isJust . findExecutable) prereqs
+          when prereqOk $ do
+            bashSrc <- TIO.readFile rfBashPath
+            fishSrc <- TIO.readFile rfFishPath
+            args <- loadFixtureArgs rfBashPath
+            stdinInput <- loadFixtureStdin rfBashPath
+            baseEnv <- prepareEnv
+            baseBash <- runShell ShellBash baseEnv ""
+            baseFish <- runShell ShellFish baseEnv ""
+            bashRes <- runShellWith ShellBash baseEnv bashSrc args stdinInput
+            fishRes <- runShellWith ShellFish baseEnv fishSrc args stdinInput
+            let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
+                fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
+            rrExit bashRes @?= rrExit fishRes
+            rrStdout bashRes @?= rrStdout fishRes
+            rrStderr bashRes @?= rrStderr fishRes
+            bashDelta @?= fishDelta

@@ -56,4 +56,21 @@ unitInlineTests =
             T.isInfixOf "set 'argv' $__monk_saved_argv_" out H.@? "expected argv restore"
           (Left err, _) -> H.assertFailure (show err)
           (_, Left err) -> H.assertFailure (show err)
+    , H.testCase "Inline source warns on non-literal paths" $ do
+        rootParse <- parseBashScript "root.sh" "source \"$child\"\n"
+        case translateParseResult defaultConfig rootParse of
+          Left err -> H.assertFailure (show err)
+          Right rootResult -> do
+            let rootTr =
+                  Translation
+                    { trPath = "root.sh",
+                      trStatements = translationStatements rootResult,
+                      trState = translationState rootResult,
+                      trSourceMap = mempty
+                    }
+                translations = M.fromList [("root.sh", rootTr)]
+            warnsRef <- newIORef []
+            _ <- inlineStatements (\msg -> modifyIORef' warnsRef (msg :)) translations Set.empty "root.sh"
+            warns <- reverse <$> readIORef warnsRef
+            H.assertBool "expected non-literal source warning" (any (T.isInfixOf "non-literal source path") warns)
     ]
