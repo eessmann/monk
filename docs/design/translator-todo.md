@@ -1,5 +1,7 @@
 # Bash to Fish Translator - TODO Checklist
 
+Audit note (2026-03-22): checked boxes in this file mean Monk has some implementation for the construct. Exactness now lives in `docs/design/translator-audit.md`, which classifies features as `exact`, `best-effort`, `unsupported`, or `unverified` and records the current test evidence.
+
 ## 🔴 Critical (Blocking Issues)
 
 ### Foundation
@@ -74,12 +76,12 @@
   - [x] With variable expansion vs literal
 - [x] Process substitution (`T_ProcSub`)
   - [x] `<(cmd)` → `(cmd | psub)`
-  - [x] `>(cmd)` → FIFO + background pipeline workaround (cleanup TBD)
+  - [x] `>(cmd)` → FIFO + background pipeline workaround via temp dir + cleanup block
   - [x] FIFO cleanup/teardown after use
 
 ### Control Flow
 - [x] Select loops (`T_SelectIn`) - emulated with read loop
-- [x] Trap handling - map to Fish trap syntax
+- [x] Trap handling - lower simple `EXIT`/signal traps to Fish event handlers
 - [x] Proper exit code propagation
 - [x] Preserve `source file args...` in recursive inline mode (set `argv` around inlined body)
 
@@ -109,15 +111,16 @@
 ## 🔵 Nice to Have (Polish)
 
 ### Optimizations
-- [ ] Combine consecutive `set` statements
-- [ ] Simplify redundant subshells: `(echo x)` → `echo x`
-- [ ] Optimize pipeline constructs
+- [x] Add an explicit post-translation simplification pass
+- [ ] Flatten safe consecutive `set` prelude wrappers without merging `set` commands that change overwrite/list semantics
+- [ ] Simplify remaining redundant subshell-like wrappers where scope/status behavior is unchanged
+- [ ] Optimize pipeline constructs only when wrapper elision is provably a no-op
 
 ### User Experience  
 - [x] Add `--strict` mode to fail on unsupported constructs
 - [x] Generate comments explaining non-trivial translations (subshell/read flags/set -e/arith short-circuit)
 - [x] Provide confidence scores for translations
-- [ ] Create migration guide for manual fixes
+- [x] Create migration guide for manual fixes
 - [x] Emit warnings for best-effort subshell translation (non-isolating)
 
 ### Testing Improvements
@@ -125,6 +128,7 @@
 - [x] Create corpus of bash scripts for testing
 - [x] Differential testing: run both bash and fish, compare outputs
 - [x] Property: translated script output ≈ original script output
+- [x] Run semantic parity suites in CI with `fish` installed and `MONK_INTEGRATION=1`
 - [x] Add real-world fixtures from external repos with manual fish translations for small scripts
 - [x] Add fixture metadata via `.args` and `.stdin` sidecar files for safe non-interactive tests
 - [x] Add semantic tests for `${var:=...}` / `${var:?err}` side effects and error propagation
@@ -138,6 +142,12 @@
 - [x] Add golden fixture for mixed expansion+glob case patterns
 - [x] Add semantic tests for `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting
 - [x] Add Polysemy effect tests per `docs/design/polysemy_testing_strategy.md`
+- [x] Add direct warning-path tests for `shopt`, delimiter/silent `read`, malformed `trap`/`shift`/`unset`/`declare`/`local`/`export`, and unsupported arithmetic `for ((...))` fallbacks
+- [x] Expand generated differential cases beyond basic arithmetic/arrays/pipelines to cover args, stdin, env-prefix commands, here-strings, and case/glob behavior
+- [x] Add runtime parity fixtures for side-effecting parameter expansion in command arguments, redirection targets, and `case` switch expressions
+- [x] Add runtime parity coverage for simple `<(...)` process substitution
+- [x] Add runtime parity coverage for recursive literal `source` with argv and environment effects
+- [x] Extend fixture sidecars to cover test prerequisites, recursive-source mode, run mode, and platform gating
 
 ## 📋 Implementation Checklist
 
@@ -176,6 +186,12 @@
 - [x] Create benchmark scripts
 - [x] Write documentation (README + design notes)
 - [ ] Handle edge cases
+  - [x] Add gated runtime coverage for side-effecting parameter expansions in args, redirections, and `case`
+  - [x] Add gated runtime coverage for simple `<(...)`
+  - [x] Add gated runtime coverage for recursive literal `source`
+  - [x] Add Linux-gated runtime coverage for `>(...)`
+  - [ ] Add gated runtime coverage for background jobs under `set -e` / `pipefail`
+  - [x] Close the command-substitution `set -e` gap exposed by `realworld/echo-args`
 
 ## ✅ Added Tests Scope (planned)
 
@@ -194,7 +210,9 @@
 8. **Param expansions**: glob-to-regex conversion and `^`/`,` case mods are approximate
 9. **`read` semantics**: flag parity and IFS splitting differ from bash; warnings emitted for lossy cases
 10. **Arithmetic side effects**: short-circuit/ternary are emulated via temp vars; verify on edge cases
-11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`, but still diverges for `inherit_errexit` and some command substitution edge cases
+11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`, but still diverges on background jobs, `wait`, and some compound-list edge cases
+12. **`shopt`**: ignored with a warning; no fish emulation exists
+13. **Delimiter-heavy `read` forms**: `-d`/`-s` now lower directly, but bash and fish still diverge in some stdin-driven cases and combined short-flag clusters need more coverage
 
 ## ✅ Quick Wins (Can do immediately)
 
@@ -213,16 +231,14 @@
 
 ## ▶ Next Up (Recommended Order)
 
-1. [x] **Triage remaining semantic gaps**
-   - [x] Validate short-circuit/ternary arithmetic semantics on edge cases
-   - [x] `read` flags (`-r`, `-n`, `-t`, `-u`, `-a`) and IFS splitting parity
-   - [x] `set -e` / `errexit` semantics and pipeline failure behavior
-   - [x] Errexit/pipefail edge-case parity for `&&`/`||` lists and conditionals
-   - [x] Non-literal `source`/`.` paths in recursive translation (warn + keep as `source`)
-2. [x] **Handle edge cases**
-   - [x] Word splitting differences (`"$var"` vs `$var` list expansion), only when fish list semantics would fail.
-   - [x] `printf` vs `echo` portability and escape handling.
-3. [ ] **Polish translation quality**
-   - [x] Preserve literal `--` and `-n` args for `echo`
-   - [x] Consolidate duplicated pipeline/errexit helpers across translator modules
-   - [x] Document pipefail behavior inside command substitutions (bash `inherit_errexit` caveat)
+1. [ ] **Close the remaining gated semantic blockers**
+   - [ ] Fix background-job parity for `wait`, `set -e`, and `set -o pipefail`, then promote the drafted background fixtures into the gated suite.
+2. [ ] **Tighten the remaining best-effort areas**
+   - [ ] Expand runtime coverage for delimiter-heavy `read -d` cases and combined short-flag clusters, or explicitly keep them best-effort where exact lowering is not achievable.
+   - [ ] Keep option-heavy `trap` forms and non-literal `source` explicitly warning-driven unless a precise exact strategy emerges.
+   - [ ] Decide whether `>(...)` needs broader cross-platform evidence beyond the current Linux-gated fixture.
+   - [ ] Keep `docs/design/translator-audit.md` as the fidelity matrix and only check off TODO items when runtime evidence or explicit best-effort documentation exists.
+3. [ ] **Finish the post-audit polish work**
+   - [ ] Narrow the remaining unchecked optimization boxes into concrete simplifier rewrites with translation-shape and runtime coverage.
+   - [ ] Split any optimization into smaller TODO items if it proves semantically unsafe.
+   - [ ] Decide whether `neofetch` stays bake-off-only or gets a reduced automatable generated-output slice.

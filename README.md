@@ -176,8 +176,11 @@ Bash Script → ShellCheck AST → Fish AST → Fish Script
 Monk includes comprehensive test coverage:
 
 ```bash
-# Run all tests
+# Run fast tests; shell parity checks are skipped unless MONK_INTEGRATION=1
 cabal test
+
+# Run the full bash-vs-fish parity suite locally
+MONK_INTEGRATION=1 cabal test
 
 # Run with coverage
 cabal test --enable-coverage
@@ -192,6 +195,8 @@ cabal bench
 ## Docs
 
 - `docs/design/translator-todo.md`: translation semantics notes and open items
+- `docs/design/translator-audit.md`: exact vs best-effort audit, evidence matrix, and follow-up test backlog
+- `docs/migration-guide.md`: manual remediation patterns for warning-driven or best-effort translations
 
 ### Test Categories
 
@@ -200,27 +205,33 @@ cabal bench
 - **Integration Tests**: End-to-end script translation
 - **Fish Compatibility**: Generated code runs correctly in Fish
 
+CI installs `fish` and runs the curated parity suite with `MONK_INTEGRATION=1`.
+
 ## 📊 Current Status
 
-Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We also hoist side-effecting expansions across arguments, redirections, and case patterns, and lower short-circuit arithmetic into conditional evaluation to preserve side effects. Recent additions include `read` flag mapping (`-n/-t/-u/-a`) with IFS splitting notes and best-effort `set -e`/`pipefail` emulation.
+Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We hoist side-effecting expansions across arguments, redirections, and case patterns, lower short-circuit arithmetic into conditional evaluation to preserve side effects, and exercise simple `<(...)`, Linux-gated `>(...)`, recursive literal `source`, simple `trap ... EXIT`, and `realworld/echo-args` in the bash-vs-fish integration suite. Recent additions also include an explicit post-translation simplification pass and broader `read` flag coverage.
+
+Use [`docs/design/translator-audit.md`](docs/design/translator-audit.md) as the source of truth for whether a feature is currently exact, best-effort, unsupported, or still under-verified.
 
 ### Non-trivial Translations (Behavior Notes)
 
 - **Arrays are 1-indexed**: Bash `arr[0]` becomes Fish `$arr[1]`.
 - **Parameter expansions**: `${var:off:len}`, `${var#pat}`, `${var//old/new}`, and case mods are lowered to `string` commands; regex/pattern behavior is approximate.
 - **Command substitution in strings**: `$(...)` in double-quoted contexts becomes `string join ' '` over the substitution list.
-- **Process substitution**: `<(cmd)` becomes `(cmd | psub)`; `>(cmd)` uses a FIFO + background pipeline workaround.
+- **Process substitution**: `<(cmd)` becomes `(cmd | psub)`; `>(cmd)` uses a FIFO + temp-dir background consumer workaround and is gated in Linux CI.
 - **Here-docs/strings**: `<<EOF`/`<<<` are lowered to `printf` into process substitution.
 - **Globs/extglobs**: simple globs are native; unsupported extglob operators fall back to a bash `extglob` shim.
 - **`time` prefix**: `time cmd` is emitted as a Fish timed pipeline.
 - **`select` loops**: emulated with `read` and `seq`.
 - **Arithmetic short-circuit**: `a && b` and ternary arithmetic use temp vars and `if test` to preserve side effects.
 - **`read` parity**: `-n/-t/-u/-a` map to fish flags; IFS splitting differences emit notes.
+- **`read -d/-s`**: lower to `--delimiter` / `--silent`; delimiter-heavy cases still emit warnings because bash and fish do not match exactly.
+- **`trap`**: simple `trap '...' EXIT` lowers to a Fish process-exit handler; option-heavy forms still warn for manual review.
 - **Errexit/pipefail**: `set -e`/`set -o pipefail` are emulated (details below).
 
 ### Errexit / Pipefail Emulation
 
-Monk emulates `set -e` by wrapping top-level commands and pipelines as `cmd; or exit $status`. This is best-effort and intentionally does **not** wrap condition lists (e.g., `if`, `while`, `until`) to match bash’s errexit exceptions. Caveats include nuanced bash rules around command substitutions, `!`, and compound lists that aren’t perfectly modeled.
+Monk emulates `set -e` by wrapping top-level commands and pipelines as `cmd; or exit $status`. This is best-effort and intentionally does **not** wrap condition lists (e.g., `if`, `while`, `until`) to match bash’s errexit exceptions. The current lowering is command-substitution aware and covers Bash's default non-`inherit_errexit` behavior on focused regressions and `realworld/echo-args`, but nuanced rules around `!`, background jobs, and compound lists still are not perfectly modeled.
 
 For `set -o pipefail`, Monk injects a helper at the top of the output:
 
@@ -237,16 +248,21 @@ Pipelines are wrapped to call `__monk_pipefail $pipestatus`, which returns the f
 | Limitation | Status | Notes |
 |---|---|---|
 | Word splitting | [ ] manual review | Fish does not perform implicit word splitting. |
-| `set -e` / `pipefail` semantics | [ ] best-effort | Emulated via `cmd; or exit $status` and `__monk_pipefail $pipestatus`; see caveats above. |
+| `set -e` / `pipefail` semantics | [ ] best-effort | Emulated via `cmd; or exit $status` and `__monk_pipefail $pipestatus`; default non-`inherit_errexit` command substitutions are covered, but background jobs and compound-list edge cases still differ. |
+| Delimiter-heavy `read` | [ ] best-effort | `--delimiter` lowering exists, but bash and fish still diverge in some stdin cases. |
+| `>(...)` process substitution | [ ] best-effort | FIFO workaround has Linux CI coverage; local macOS runs still skip that runtime fixture. |
+| `trap` | [ ] best-effort | Simple `EXIT` lowering is covered; option-heavy forms still warn. |
 | Non-literal `source` paths | [ ] manual review | Recursive translation only follows literal paths (notes emitted). |
+| `shopt` | [ ] unsupported | Lowered to `true` with a warning; no semantic emulation. |
 | Coprocesses (`coproc`) | [ ] unsupported | Warnings in normal mode; failure in `--strict`. |
  
-Review warnings and test translated scripts in Fish.
+Review warnings and test translated scripts in Fish. The manual `.fish` fixtures under `test/fixtures/realworld/` are baseline comparisons, not evidence that Monk's generated output matches Bash. Use `docs/migration-guide.md` for the recommended cleanup patterns by warning class.
 
 ## 🛣️ Roadmap
 
 ### Near Term
-- [ ] Deeper parity for `read` (`-d`, delimiter/IFS behaviors) and errexit/pipefail edge cases
+- [ ] Background-job / `wait` parity under `set -e` and `pipefail`
+- [ ] Deeper parity for delimiter-heavy `read` and broader cross-platform evidence for `>(...)`
 - [ ] Expanded documentation with real-world translation examples
 
 ### Longer Term
