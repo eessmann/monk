@@ -21,6 +21,7 @@ import Language.Fish.Translator.Args
   )
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic
   ( arithArgsPlanM,
@@ -50,9 +51,10 @@ import ShellCheck.AST
 translateTokenToExprWith ::
   (Token -> FishExpr TStr) ->
   ([Token] -> FishExpr TStr) ->
+  (Token -> FishStatement) ->
   Token ->
   FishExpr TStr
-translateTokenToExprWith translateDollarBracedStr commandSubstExprStr = go
+translateTokenToExprWith translateDollarBracedStr commandSubstExprStr translateSubstToken = go
   where
     go = \case
       T_Literal _ s -> ExprLiteral (T.pack s)
@@ -86,32 +88,30 @@ translateTokenToExprWith translateDollarBracedStr commandSubstExprStr = go
       T_DollarBraceCommandExpansion _ _ stmts ->
         commandSubstExprStr stmts
       T_ProcSub _ dir stmts ->
-        case NE.nonEmpty (map translateStmt stmts) of
+        case NE.nonEmpty (map translateSubstToken stmts) of
           Just neBody -> procSubExpr dir neBody
           Nothing -> ExprLiteral ""
       -- Fallback: take literal interpretation where possible
       other -> ExprLiteral (tokenToLiteralText other)
 
-    translateStmt t = case t of
-      T_Script _ _ ts -> StmtList (map translateStmt ts)
-      _ -> Stmt (Command (tokenToLiteralText t) [])
-
 -- | Translate a token to a string expression, hoisting side-effecting expansions
 --   into statements that must run before the command.
 translateTokenToExprMWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
-  ([Token] -> FishExpr TStr) ->
+  ([Token] -> TranslateM (FishExpr TStr)) ->
+  (Token -> TranslateM FishStatement) ->
   Token ->
   HoistedM (FishExpr TStr)
-translateTokenToExprMWith translateDollarBracedWithPrelude commandSubstExprStr =
-  translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr
+translateTokenToExprMWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken =
+  translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken
 
 translateTokenToExprHoistedWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
-  ([Token] -> FishExpr TStr) ->
+  ([Token] -> TranslateM (FishExpr TStr)) ->
+  (Token -> TranslateM FishStatement) ->
   Token ->
   HoistedM (FishExpr TStr)
-translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr = go
+translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken = go
   where
     go = \case
       T_Literal _ s -> hoistM [] (ExprLiteral (T.pack s))
@@ -141,20 +141,24 @@ translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExp
         let cmd = mathCommandFromArgs True args
         hoistM pre (ExprJoinList (ExprCommandSubst (Stmt cmd NE.:| [])))
       T_Backticked _ stmts ->
-        hoistM [] (commandSubstExprStr stmts)
+        do
+          expr <- commandSubstExprStr stmts
+          hoistM [] expr
       T_DollarExpansion _ stmts ->
-        hoistM [] (commandSubstExprStr stmts)
+        do
+          expr <- commandSubstExprStr stmts
+          hoistM [] expr
       T_DollarBraceCommandExpansion _ _ stmts ->
-        hoistM [] (commandSubstExprStr stmts)
+        do
+          expr <- commandSubstExprStr stmts
+          hoistM [] expr
       T_ProcSub _ dir stmts ->
-        case NE.nonEmpty (map translateStmt stmts) of
-          Just neBody -> hoistM [] (procSubExpr dir neBody)
-          Nothing -> hoistM [] (ExprLiteral "")
+        do
+          body <- mapM translateSubstToken stmts
+          case NE.nonEmpty body of
+            Just neBody -> hoistM [] (procSubExpr dir neBody)
+            Nothing -> hoistM [] (ExprLiteral "")
       other -> hoistM [] (ExprLiteral (tokenToLiteralText other))
-
-    translateStmt t = case t of
-      T_Script _ _ ts -> StmtList (map translateStmt ts)
-      _ -> Stmt (Command (tokenToLiteralText t) [])
 
 translateTokenToExprOrRedirectWith ::
   (Token -> FishExpr (TList TStr)) ->

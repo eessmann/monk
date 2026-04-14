@@ -628,7 +628,9 @@ data ReadFlag
   | ReadGlobal
   | ReadUniversal
   | ReadExport
+  | ReadSilent
   | ReadArray
+  | ReadDelimiter Text
   | ReadNChars Text
   | ReadTimeout Text
   | ReadFD Text

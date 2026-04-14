@@ -6,6 +6,7 @@ module Language.Fish.Translator.Builtins.Trap
 where
 
 import Data.Text qualified as T
+import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (wrapStmtList)
 import Language.Fish.Translator.Monad (TranslateM, addWarning)
@@ -31,22 +32,50 @@ translateTrapCommand args =
           pure (Stmt (Command "trap" (map translateTokenToExprOrRedirect args)))
         else do
           let signals = if null rawSignals then ["EXIT"] else rawSignals
-              trapStmts = map (trapForSignal cmdExpr) signals
-          pure (wrapStmtList (map Stmt trapStmts))
+              trapStmts = concatMap (trapStatementsForSignal cmdExpr) signals
+          pure (wrapStmtList trapStmts)
   where
     isTrapOption sig = sig `elem` ["-p", "-l", "--"]
 
-    trapForSignal :: FishExpr TStr -> Text -> FishCommand TStatus
-    trapForSignal cmd sig
+    trapStatementsForSignal :: FishExpr TStr -> Text -> [FishStatement]
+    trapStatementsForSignal cmd sig =
+      [ Stmt (Set [SetGlobal] (trapBodyVar sig) (ExprListLiteral [cmd])),
+        Stmt (trapForSignal sig)
+      ]
+
+    trapForSignal :: Text -> FishCommand TUnit
+    trapForSignal sig
       | isExitSignal sig =
-          Command "trap" [ExprVal (ExprLiteral "--on-exit"), ExprVal cmd]
+          Function
+            FishFunction
+              { funcName = "__monk_trap_exit",
+                funcFlags = [FuncOnProcessExit "%self"],
+                funcParams = [],
+                funcBody = trapHandlerBody sig
+              }
       | otherwise =
-          Command
-            "trap"
-            [ ExprVal (ExprLiteral "--on-signal"),
-              ExprVal (ExprLiteral (normalizeSignal sig)),
-              ExprVal cmd
-            ]
+          Function
+            FishFunction
+              { funcName = "__monk_trap_sig_" <> normalizeSignal sig,
+                funcFlags =
+                  [ FuncUnknownFlag "--on-signal",
+                    FuncUnknownFlag (normalizeSignal sig)
+                  ],
+                funcParams = [],
+                funcBody = trapHandlerBody sig
+              }
+
+    trapHandlerBody :: Text -> NonEmpty FishStatement
+    trapHandlerBody sig =
+      Stmt (Eval (ExprVariable (VarScalar (trapBodyVar sig)))) NE.:| []
+
+    trapBodyVar :: Text -> Text
+    trapBodyVar sig = "__monk_trap_body_" <> signalKey sig
+
+    signalKey :: Text -> Text
+    signalKey sig
+      | isExitSignal sig = "exit"
+      | otherwise = T.toLower (normalizeSignal sig)
 
     isExitSignal sig =
       let upper = T.toUpper sig

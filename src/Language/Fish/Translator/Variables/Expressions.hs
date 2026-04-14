@@ -63,11 +63,11 @@ import ShellCheck.AST
 
 translateTokenToExpr :: Token -> FishExpr TStr
 translateTokenToExpr =
-  translateTokenToExprWith translateDollarBracedStr commandSubstExprStr
+  translateTokenToExprWith translateDollarBracedStr commandSubstExprStr translateSubstToken
 
 translateTokenToExprM :: Token -> HoistedM (FishExpr TStr)
 translateTokenToExprM =
-  translateTokenToExprMWith translateDollarBracedStrWithPrelude commandSubstExprStr
+  translateTokenToExprMWith translateDollarBracedStrWithPrelude commandSubstExprStrM translateSubstTokenM
 
 translateTokenToListExpr :: Token -> FishExpr (TList TStr)
 translateTokenToListExpr =
@@ -92,8 +92,8 @@ translateTokenToListExprM =
   translateTokenToListExprMWith
     translateTokenToExprM
     translateDollarBracedWithPrelude
-    commandSubstExprList
-    translateSubstToken
+    commandSubstExprListM
+    translateSubstTokenM
     True
 
 translateTokenToListExprMNoSplit :: Token -> HoistedM (FishExpr (TList TStr))
@@ -101,8 +101,8 @@ translateTokenToListExprMNoSplit =
   translateTokenToListExprMWith
     translateTokenToExprM
     translateDollarBracedWithPrelude
-    commandSubstExprList
-    translateSubstToken
+    commandSubstExprListM
+    translateSubstTokenM
     False
 
 translateTokenToExprOrRedirect :: Token -> ExprOrRedirect
@@ -207,9 +207,19 @@ translateArrayAssignmentM = translateArrayAssignmentMWith translateTokenToListEx
 commandSubstExprList :: [Token] -> FishExpr (TList TStr)
 commandSubstExprList = Subst.commandSubstExprList translateSubstToken
 
+commandSubstExprListM :: [Token] -> TranslateM (FishExpr (TList TStr))
+commandSubstExprListM = Subst.commandSubstExprListM translateSubstTokenM
+
 commandSubstExprStr :: [Token] -> FishExpr TStr
 commandSubstExprStr = Subst.commandSubstExprStr translateSubstToken
+
+commandSubstExprStrM :: [Token] -> TranslateM (FishExpr TStr)
+commandSubstExprStrM = Subst.commandSubstExprStrM translateSubstTokenM
 
 translateSubstToken :: Token -> FishStatement
 translateSubstToken =
   Subst.translateSubstTokenWith translateAssignmentWithFlags translateTokenToExpr translateTokenToExprOrRedirect
+
+translateSubstTokenM :: Token -> TranslateM FishStatement
+translateSubstTokenM =
+  Subst.translateSubstTokenMWith translateAssignmentWithFlagsM translateTokenToExprM translateTokenToExprOrRedirectM

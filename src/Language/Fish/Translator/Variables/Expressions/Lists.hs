@@ -14,6 +14,7 @@ import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic
   ( arithArgsPlanM,
@@ -131,8 +132,8 @@ translateTokenToListExprWith translateTokenToExpr translateDollarBraced commandS
 translateTokenToListExprMWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
   (Token -> HoistedM (FishExpr (TList TStr))) ->
-  ([Token] -> FishExpr (TList TStr)) ->
-  (Token -> FishStatement) ->
+  ([Token] -> TranslateM (FishExpr (TList TStr))) ->
+  (Token -> TranslateM FishStatement) ->
   Bool ->
   Token ->
   HoistedM (FishExpr (TList TStr))
@@ -199,30 +200,32 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
         let cmd = mathCommandFromArgs True args
         hoistM pre (ExprCommandSubst (Stmt cmd NE.:| []))
       T_Backticked _ stmts ->
-        hoistM
-          []
-          ( if splitEnabled
-              then splitOnIfsListExpr (commandSubstExprList stmts)
-              else commandSubstExprList stmts
-          )
+        do
+          expr <- commandSubstExprList stmts
+          hoistM [] $
+            if splitEnabled
+              then splitOnIfsListExpr expr
+              else expr
       T_DollarExpansion _ stmts ->
-        hoistM
-          []
-          ( if splitEnabled
-              then splitOnIfsListExpr (commandSubstExprList stmts)
-              else commandSubstExprList stmts
-          )
+        do
+          expr <- commandSubstExprList stmts
+          hoistM [] $
+            if splitEnabled
+              then splitOnIfsListExpr expr
+              else expr
       T_DollarBraceCommandExpansion _ _ stmts ->
-        hoistM
-          []
-          ( if splitEnabled
-              then splitOnIfsListExpr (commandSubstExprList stmts)
-              else commandSubstExprList stmts
-          )
+        do
+          expr <- commandSubstExprList stmts
+          hoistM [] $
+            if splitEnabled
+              then splitOnIfsListExpr expr
+              else expr
       T_ProcSub _ dir stmts ->
-        case NE.nonEmpty (map translateStmt stmts) of
-          Just neBody -> hoistM [] (procSubListExpr dir neBody)
-          Nothing -> hoistM [] (ExprListLiteral [])
+        do
+          body <- mapM translateStmt stmts
+          case NE.nonEmpty body of
+            Just neBody -> hoistM [] (procSubListExpr dir neBody)
+            Nothing -> hoistM [] (ExprListLiteral [])
       T_Array _ elems -> do
         Hoisted pre expr <- translateArrayElementsMWith go elems
         hoistM pre expr

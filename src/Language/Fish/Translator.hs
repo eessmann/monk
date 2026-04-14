@@ -50,6 +50,7 @@ import Language.Fish.Translator.Monad
 import Language.Fish.Translator.Pipeline
   ( pipelineOf,
     shouldWrapErrexit,
+    wrapErrexitStatusCommand,
     wrapErrexitIfEnabled,
   )
 import Language.Fish.Translator.Redirections
@@ -57,6 +58,7 @@ import Language.Fish.Translator.Redirections
     parseRedirectTokensM,
     translateRedirectTokenM,
   )
+import Language.Fish.Translator.Simplify (simplifyFishStatement)
 import Language.Fish.Translator.Variables
 import Polysemy.State (gets)
 import ShellCheck.AST
@@ -70,7 +72,7 @@ translateRoot :: Root -> TranslateM FishStatement
 translateRoot (Root topToken) = do
   stmt <- translateToken topToken
   pre <- gets preamble
-  pure (wrapStmtList (pre <> [stmt]))
+  pure (simplifyFishStatement (wrapStmtList (pre <> [stmt])))
 
 translateRootWithPositions ::
   TranslateConfig ->
@@ -153,8 +155,8 @@ translateToken token =
                           case Control.toNonEmptyStmtList (preRedirs <> fishAssignments <> [execStmt]) of
                             Just body -> pure (Stmt (Begin body []))
                             Nothing -> pure (Comment "Empty exec with assignments")
-                        else simplifyStatement <$> translateSimpleCommandM scopeFlags assignments cmdToks
-          _ -> simplifyStatement <$> translateSimpleCommandM scopeFlags assignments cmdToks
+                        else translateSimpleCommandM scopeFlags assignments cmdToks
+          _ -> translateSimpleCommandM scopeFlags assignments cmdToks
       T_Pipeline _ bang cmds ->
         case (bang, cmds) of
           ([], [single]) -> translateToken single
@@ -272,7 +274,8 @@ attachRedirs redirs stmt =
 wrapErrexitOnConjunction :: FishJobConjunction -> TranslateM FishJobConjunction
 wrapErrexitOnConjunction conj = do
   enabled <- isErrexitEnabled
-  if not enabled
+  inCmdSubst <- gets (inCommandSubst . context)
+  if not enabled || inCmdSubst
     then pure conj
     else do
       let conts = jcContinuations conj
@@ -301,21 +304,4 @@ wrapErrexitOnConjunction conj = do
 wrapErrexitInBegin :: FishCommand TStatus -> FishCommand TStatus
 wrapErrexitInBegin cmd
   | not (shouldWrapErrexit cmd) = cmd
-  | otherwise =
-      let exitCmd = Exit (Just (ExprSpecialVar SVStatus))
-          cmdPipe = pipelineOf cmd
-          exitPipe = pipelineOf exitCmd
-          body = Stmt (JobConj (FishJobConjunction Nothing cmdPipe [JCOr exitPipe])) NE.:| []
-       in Begin body []
-
-simplifyStatement :: FishStatement -> FishStatement
-simplifyStatement stmt =
-  case stmt of
-    Stmt (Begin body suffix)
-      | null suffix,
-        all isSetStmt (NE.toList body) ->
-          StmtList (NE.toList body)
-    _ -> stmt
-  where
-    isSetStmt (Stmt (Set {})) = True
-    isSetStmt _ = False
+  | otherwise = Begin (Stmt (wrapErrexitStatusCommand cmd) NE.:| []) []

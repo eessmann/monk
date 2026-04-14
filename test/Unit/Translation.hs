@@ -17,8 +17,10 @@ unitTranslationTests =
     "Translation"
     [ H.testCase "Process substitution output redirect uses FIFO workaround" $ do
         out <- translateScript "echo hi > >(cat)"
+        T.isInfixOf "mktemp '-d'" out H.@? "expected temporary directory for process substitution output"
         T.isInfixOf "mkfifo" out H.@? "expected mkfifo in translation"
-        T.isInfixOf "__monk_psub_fifo" out H.@? "expected fifo var name in translation",
+        T.isInfixOf "rm '-f' $__monk_psub_fifo" out H.@? "expected fifo cleanup in translation"
+        T.isInfixOf "rmdir $__monk_psub_dir" out H.@? "expected temp directory cleanup in translation",
       H.testCase "Echo -e lowers to printf %b" $ do
         out <- translateScript "echo -e \"hi\\nthere\""
         T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
@@ -100,6 +102,23 @@ unitTranslationTests =
         T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split in command substitution"
         T.isInfixOf "(echo" out H.@? "expected command substitution structure"
         T.isInfixOf "echo 'hi'" out H.@? "expected innermost echo",
+      H.testCase "Errexit guard is command-substitution aware" $ do
+        let script =
+              T.unlines
+                [ "set -e",
+                  "digitCount() {",
+                  "  local num=$1 count=0",
+                  "  while ((num != 0)); do",
+                  "    ((++count))",
+                  "    ((num = num / 10))",
+                  "  done",
+                  "  echo \"$count\"",
+                  "}",
+                  "echo $(digitCount 12)"
+                ]
+        out <- translateScript script
+        T.isInfixOf "status 'is-command-substitution'" out H.@? "expected runtime command-substitution guard"
+        H.assertBool "unexpected function-wide return workaround" (not (T.isInfixOf "or return $status" out)),
       H.testCase "Strict mode fails on unsupported coproc" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi"
         case translateParseResult strictConfig result of
@@ -200,6 +219,15 @@ unitTranslationTests =
         H.assertBool
           ("expected nested conjunctions, got: " <> T.unpack out)
           (T.isInfixOf "and " out && T.isInfixOf "or " out && T.isInfixOf "not " out),
+      H.testCase "Simplifier elides trivial begin wrapper in else branch" $ do
+        out <- translateScript "if [[ $x == foo ]]; then echo ok; else true; fi"
+        H.assertBool
+          ("unexpected trivial begin wrapper in else branch: " <> T.unpack out)
+          (not (T.isInfixOf "else\n  begin\n    true\n  end" out)),
+      H.testCase "Simplifier preserves redirected brace groups" $ do
+        out <- translateScript "{ echo hi; } > out"
+        T.isInfixOf "begin" out H.@? "expected redirected block wrapper to remain"
+        T.isInfixOf "> 'out'" out H.@? "expected redirected block suffix to remain",
       H.testCase "Env prefix uses local export block" $ do
         out <- translateScript "FOO=bar echo hi"
         T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected local export set"
@@ -232,6 +260,10 @@ unitTranslationTests =
         T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
         T.isInfixOf "switch (string join ' ' $X ; or printf '')" out H.@? "expected switch to use X",
       H.testCase "Read flags translate to fish equivalents" $ do
+        outD <- translateScript "read -d : field"
+        T.isInfixOf "read --delimiter ':' field" outD H.@? "expected delimiter flag"
+        outS <- translateScript "read -s secret"
+        T.isInfixOf "read --silent secret" outS H.@? "expected silent flag"
         outN <- translateScript "read -n 3 foo"
         T.isInfixOf "read --nchars 3 foo" outN H.@? "expected nchars flag"
         outT <- translateScript "read -t 5 bar"
@@ -245,5 +277,14 @@ unitTranslationTests =
         T.isInfixOf "source '/tmp/script.sh' 'a' 'b'" out H.@? "expected args passed to source",
       H.testCase "Trap translates to fish trap syntax" $ do
         out <- translateScript "trap 'echo bye' EXIT"
-        T.isInfixOf "trap '--on-exit' 'echo bye'" out H.@? "expected fish trap on exit"
+        T.isInfixOf "set --global __monk_trap_body_exit 'echo bye'" out H.@? "expected trap body capture"
+        T.isInfixOf "function __monk_trap_exit --on-process-exit %self" out H.@? "expected on-process-exit helper"
+        T.isInfixOf "eval $__monk_trap_body_exit" out H.@? "expected trap body via captured variable"
+        H.assertBool "unexpected direct eval of trap body" (not (T.isInfixOf "eval 'echo bye'" out)),
+      H.testCase "Trap uses distinct per-signal body variables" $ do
+        out <- translateScript "trap 'echo first' EXIT INT\ntrap 'echo second' EXIT"
+        T.isInfixOf "set --global __monk_trap_body_exit 'echo first'" out H.@? "expected EXIT body capture"
+        T.isInfixOf "set --global __monk_trap_body_int 'echo first'" out H.@? "expected INT body capture"
+        T.isInfixOf "set --global __monk_trap_body_exit 'echo second'" out H.@? "expected EXIT body overwrite"
+        H.assertBool "unexpected INT body overwrite" (not (T.isInfixOf "set --global __monk_trap_body_int 'echo second'" out))
     ]

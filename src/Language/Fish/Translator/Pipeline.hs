@@ -6,6 +6,7 @@ module Language.Fish.Translator.Pipeline
     jobPipelineFromList,
     jobPipelineFromListWithTime,
     wrapErrexitIfEnabled,
+    wrapErrexitStatusCommand,
     shouldWrapErrexit,
     applyPipefailIfEnabled,
   )
@@ -15,10 +16,13 @@ import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Translator.Monad
   ( TranslateM,
+    TranslationContext (..),
+    TranslateState (..),
     isErrexitEnabled,
     isPipefailEnabled,
   )
 import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
+import Polysemy.State qualified as State
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
@@ -41,13 +45,47 @@ jobPipelineFromListWithTime timed (c : cs) =
 wrapErrexitIfEnabled :: FishCommand TStatus -> TranslateM (FishCommand TStatus)
 wrapErrexitIfEnabled cmd = do
   enabled <- isErrexitEnabled
-  if not enabled || not (shouldWrapErrexit cmd)
+  inCmdSubst <- State.gets (inCommandSubst . context)
+  if not enabled || inCmdSubst || not (shouldWrapErrexit cmd)
     then pure cmd
-    else
-      let exitCmd = Exit (Just (ExprSpecialVar SVStatus))
-          cmdPipe = pipelineOf cmd
-          exitPipe = pipelineOf exitCmd
-       in pure (JobConj (FishJobConjunction Nothing cmdPipe [JCOr exitPipe]))
+    else pure (wrapErrexitStatusCommand cmd)
+
+wrapErrexitStatusCommand :: FishCommand TStatus -> FishCommand TStatus
+wrapErrexitStatusCommand cmd
+  | not (shouldWrapErrexit cmd) = cmd
+  | otherwise =
+      let cmdPipe = pipelineOf cmd
+          guardPipe = pipelineOf errexitGuard
+       in JobConj (FishJobConjunction Nothing cmdPipe [JCOr guardPipe])
+  where
+    errexitGuard =
+      let statusVar = "__monk_errexit_status"
+          saveStatus =
+            Stmt
+              ( Command
+                  "set"
+                  [ ExprVal (ExprLiteral "--local"),
+                    ExprVal (ExprLiteral statusVar),
+                    ExprVal (ExprSpecialVar SVStatus)
+                  ]
+              )
+          checkPipe =
+            pipelineOf
+              ( Command
+                  "status"
+                  [ExprVal (ExprLiteral "is-command-substitution")]
+              )
+          exitPipe =
+            pipelineOf
+              ( Exit
+                  (Just (ExprMath (ExprVariable (VarScalar statusVar) NE.:| [])))
+              )
+          checkOrExit =
+            Stmt
+              ( JobConj
+                  (FishJobConjunction Nothing checkPipe [JCOr exitPipe])
+              )
+       in Begin (saveStatus NE.:| [checkOrExit]) []
 
 shouldWrapErrexit :: FishCommand TStatus -> Bool
 shouldWrapErrexit = \case

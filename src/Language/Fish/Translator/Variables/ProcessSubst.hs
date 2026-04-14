@@ -26,33 +26,79 @@ procSubListExpr dir body =
 
 procSubOutList :: NonEmpty FishStatement -> FishExpr (TList TStr)
 procSubOutList body =
-  let fifoVar = "__monk_psub_fifo"
+  let dirVar = "__monk_psub_dir"
+      fifoVar = "__monk_psub_fifo"
       mktempStmt =
         Stmt
           ( Set
               [SetLocal]
-              fifoVar
+              dirVar
               ( ExprCommandSubst
                   ( Stmt
                       ( Command
                           "mktemp"
-                          [ ExprVal (ExprLiteral "-t"),
-                            ExprVal (ExprLiteral "monk_psub")
-                          ]
+                          [ExprVal (ExprLiteral "-d")]
                       )
                       NE.:| []
                   )
               )
           )
-      rmStmt = Stmt (Command "rm" [ExprVal (ExprVariable (VarAll fifoVar))])
-      mkfifoStmt = Stmt (Command "mkfifo" [ExprVal (ExprVariable (VarAll fifoVar))])
-      catStmt = Stmt (Command "cat" [ExprVal (ExprVariable (VarAll fifoVar))])
+      fifoPath =
+        ExprListLiteral
+          [ ExprStringConcat
+              (ExprVariable (VarScalar dirVar))
+              (ExprLiteral "/fifo")
+          ]
+      setFifoStmt =
+        Stmt
+          ( Set
+              [SetLocal]
+              fifoVar
+              fifoPath
+          )
+      rmFifoStmt =
+        Stmt
+          ( Command
+              "rm"
+              [ ExprVal (ExprLiteral "-f"),
+                ExprVal (ExprVariable (VarScalar fifoVar))
+              ]
+          )
+      rmdirStmt =
+        Stmt
+          ( Command
+              "rmdir"
+              [ExprVal (ExprVariable (VarScalar dirVar))]
+          )
+      mkfifoStmt =
+        Stmt
+          ( Command
+              "mkfifo"
+              [ExprVal (ExprVariable (VarScalar fifoVar))]
+          )
+      catStmt =
+        Stmt
+          ( Command
+              "cat"
+              [ExprVal (ExprVariable (VarScalar fifoVar))]
+          )
       rhsStmt = case NE.toList body of
         [s] -> s
         xs -> Stmt (Begin (NE.fromList xs) [])
       pipe = FishJobPipeline False [] catStmt [PipeTo [] rhsStmt] False
       pipeStmt = Stmt (Pipeline pipe)
-      bgBody = pipeStmt NE.:| [rmStmt]
-      bgStmt = Stmt (Background (Begin bgBody []))
-      echoStmt = Stmt (Command "echo" [ExprVal (ExprVariable (VarAll fifoVar))])
-   in ExprCommandSubst (mktempStmt NE.:| [rmStmt, mkfifoStmt, bgStmt, echoStmt])
+      consumerBody =
+        pipeStmt NE.:| [rmFifoStmt, rmdirStmt]
+      bgStmt =
+        Stmt
+          ( Background
+              ( Begin consumerBody []
+              )
+          )
+      echoStmt =
+        Stmt
+          ( Command
+              "echo"
+              [ExprVal (ExprVariable (VarScalar fifoVar))]
+          )
+   in ExprCommandSubst (mktempStmt NE.:| [setFifoStmt, mkfifoStmt, bgStmt, echoStmt])

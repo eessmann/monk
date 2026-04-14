@@ -62,7 +62,9 @@ prettyReadFlag = \case
   ReadGlobal -> "--global"
   ReadUniversal -> "--universal"
   ReadExport -> "--export"
+  ReadSilent -> "--silent"
   ReadArray -> "--array"
+  ReadDelimiter t -> "--delimiter" <+> escapeFishString t
   ReadNChars n -> "--nchars" <+> pretty n
   ReadTimeout t -> "--timeout" <+> pretty t
   ReadFD fd -> "--fd" <+> pretty fd

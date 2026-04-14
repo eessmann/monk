@@ -27,6 +27,7 @@ isSimpleListExpansion :: [Token] -> Bool
 isSimpleListExpansion parts =
   case parts of
     [T_DollarBraced _ _ word] -> isNoSplitParamExpansion word
+    [T_ProcSub {}] -> True
     _ -> False
 
 wordNeedsSplit :: [Token] -> Bool

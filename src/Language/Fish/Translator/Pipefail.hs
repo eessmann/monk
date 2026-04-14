@@ -46,7 +46,7 @@ pipefailHelper =
       setStatus =
         Stmt
           ( Set
-              [SetLocal]
+              []
               statusVar
               (ExprVariable (VarAll "s"))
           )
@@ -61,8 +61,9 @@ pipefailHelper =
           )
       returnStmt =
         Stmt
-          ( Return
-              (Just (ExprMath (ExprVariable (VarScalar statusVar) NE.:| [])))
+          ( Command
+              "return"
+              [ExprVal (ExprVariable (VarAll statusVar))]
           )
       body = statusInit NE.:| [forStmt, returnStmt]
    in Stmt

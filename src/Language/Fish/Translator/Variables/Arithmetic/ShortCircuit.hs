@@ -34,8 +34,9 @@ arithShortCircuitPlan arithArgsPlan tok opTxt l r = do
       resVar = arithTempNameWith tok "res"
       setCond = setLocalFromArgs condVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsL)))
       setRhs = setLocalFromArgs rhsVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsR)))
-      setResTrue = setLocalLiteral resVar "1"
-      setResFalse = setLocalLiteral resVar "0"
+      initRes = setLocalLiteral resVar "0"
+      setResTrue = setPlainLiteral resVar "1"
+      setResFalse = setPlainLiteral resVar "0"
       rhsCond = testNonZeroCond rhsVar
       rhsIf = Stmt (If rhsCond (setResTrue NE.:| []) [setResFalse] [])
       thenStmts =
@@ -55,7 +56,7 @@ arithShortCircuitPlan arithArgsPlan tok opTxt l r = do
               elseStmts
               []
           )
-  hoistM (preL <> [setCond, ifStmt]) [ExprVariable (VarScalar resVar)]
+  hoistM (preL <> [setCond, initRes, ifStmt]) [ExprVariable (VarScalar resVar)]
 
 arithTernaryPlan ::
   (Token -> HoistedM [FishExpr TStr]) ->
@@ -71,8 +72,9 @@ arithTernaryPlan arithArgsPlan tok condTok thenTok elseTok = do
   let condVar = arithTempNameWith tok "cond"
       resVar = arithTempNameWith tok "res"
       setCond = setLocalFromArgs condVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsCond)))
-      setThen = setLocalFromArgs resVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsThen)))
-      setElse = setLocalFromArgs resVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsElse)))
+      initRes = setLocalLiteral resVar "0"
+      setThen = setPlainFromArgs resVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsThen)))
+      setElse = setPlainFromArgs resVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsElse)))
       condJob = testNonZeroCond condVar
       ifStmt =
         Stmt
@@ -82,15 +84,23 @@ arithTernaryPlan arithArgsPlan tok condTok thenTok elseTok = do
               (preElse <> [setElse])
               []
           )
-  hoistM (preCond <> [setCond, ifStmt]) [ExprVariable (VarScalar resVar)]
+  hoistM (preCond <> [setCond, initRes, ifStmt]) [ExprVariable (VarScalar resVar)]
 
 setLocalFromArgs :: Text -> NonEmpty (FishExpr TStr) -> FishStatement
 setLocalFromArgs name args =
   Stmt (Set [SetLocal] name (mathSubstFromArgs args))
 
+setPlainFromArgs :: Text -> NonEmpty (FishExpr TStr) -> FishStatement
+setPlainFromArgs name args =
+  Stmt (Set [] name (mathSubstFromArgs args))
+
 setLocalLiteral :: Text -> Text -> FishStatement
 setLocalLiteral name val =
   Stmt (Set [SetLocal] name (ExprListLiteral [ExprLiteral val]))
+
+setPlainLiteral :: Text -> Text -> FishStatement
+setPlainLiteral name val =
+  Stmt (Set [] name (ExprListLiteral [ExprLiteral val]))
 
 testNonZeroCond :: Text -> FishJobList
 testNonZeroCond name =

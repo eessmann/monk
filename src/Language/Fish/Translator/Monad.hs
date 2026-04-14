@@ -22,6 +22,7 @@ module Language.Fish.Translator.Monad
     noteUnsupported,
     unsupportedStmt,
     withFunctionScope,
+    withCommandSubstScope,
     addLocalVars,
     isLocalVar,
     withTokenRange,
@@ -67,6 +68,7 @@ defaultConfig =
 -- | Context flags describing where we are in the script
 data TranslationContext = TranslationContext
   { inFunction :: Bool,
+    inCommandSubst :: Bool,
     inLoop :: Bool,
     localVars :: Set.Set Text
   }
@@ -127,7 +129,7 @@ runTranslateWithPositions cfg positions m =
         TranslateState
           { sourceMap = mempty,
             warnings = [],
-            context = TranslationContext False False Set.empty,
+            context = TranslationContext False False False Set.empty,
             config = cfg,
             tokenRanges = ranges,
             rangeStack = [],
@@ -191,6 +193,16 @@ withFunctionScope action = do
   st <- get
   let ctx = context st
       newCtx = ctx {inFunction = True, localVars = Set.empty}
+  modify (\s -> s {context = newCtx})
+  result <- action
+  modify (\s -> s {context = ctx})
+  pure result
+
+withCommandSubstScope :: TranslateM a -> TranslateM a
+withCommandSubstScope action = do
+  st <- get
+  let ctx = context st
+      newCtx = ctx {inCommandSubst = True}
   modify (\s -> s {context = newCtx})
   result <- action
   modify (\s -> s {context = ctx})
