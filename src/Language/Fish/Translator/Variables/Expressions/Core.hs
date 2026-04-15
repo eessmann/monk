@@ -44,7 +44,10 @@ import Language.Fish.Translator.Variables.Glob
     wordIsGlob,
     wordNeedsExtglobShim,
   )
-import Language.Fish.Translator.Variables.ParamExpansion (translateSimpleVar)
+import Language.Fish.Translator.Variables.ParamExpansion
+  ( translateSimpleVar,
+    translateSimpleVarM,
+  )
 import Language.Fish.Translator.Variables.ProcessSubst (procSubExpr)
 import ShellCheck.AST
 
@@ -129,7 +132,9 @@ translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExp
               then hoistM [] (ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts)))
               else hoistM [] (ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts))))
           else translateWordPartsToExprMWith go parts
-      tok@T_ParamSubSpecialChar {} -> hoistM [] (ExprJoinList (translateSimpleVar tok))
+      tok@T_ParamSubSpecialChar {} -> do
+        expr <- translateSimpleVarM tok
+        hoistM [] (ExprJoinList expr)
       T_DollarBraced _ _ word ->
         translateDollarBracedWithPrelude word
       T_DollarArithmetic _ exprTok -> do

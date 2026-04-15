@@ -28,7 +28,7 @@ specialVarName :: Text -> Text
 specialVarName = \case
   "?" -> "status"
   "$" -> "fish_pid"
-  "!" -> "last_pid"
+  "!" -> "__monk_last_job"
   "@" -> "argv"
   "*" -> "argv"
   n -> n

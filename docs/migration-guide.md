@@ -4,14 +4,16 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## `set -e` / `pipefail`
 
-- Treat Monk's `set -e` lowering as best-effort, especially around background jobs, nested pipelines, and compound-list edge cases.
+- Treat Monk's `set -e` lowering as best-effort, especially around nested pipelines and compound-list edge cases.
+- Translated background jobs / `$!` / `wait` now use Monk-managed job tokens and have focused parity coverage, but PID-specific follow-ons such as `kill $!` still deserve manual review.
 - If a translated script depends on Bash's exact errexit exceptions, replace `cmd; or exit $status` regions with hand-written Fish control flow.
 - Monk now targets Bash's default non-`inherit_errexit` behavior inside command substitutions, but if a translated substitution still needs bespoke control flow, prefer assigning through an explicit `if` or `begin ... end` block in Fish.
 
 ## `read`
 
 - Recheck scripts using `read -a`, multiple destination variables, or custom `IFS`.
-- Recheck delimiter-driven `read -d` flows against real stdin, because Bash and Fish do not split and terminate input the same way.
+- Simple single-variable non-empty `read -d` now has an exact helper path and focused runtime coverage.
+- Recheck delimiter-driven `read -d` flows against real stdin when they use empty delimiters, multiple destination variables, arrays, or mixed option clusters, because those cases still differ from Bash.
 - Prefer explicit `string split`, `string collect`, and `read --delimiter` logic in hand-edited Fish for non-trivial stdin parsing.
 
 ## Process Substitution

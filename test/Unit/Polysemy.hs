@@ -123,10 +123,12 @@ unitPolysemyTests =
         assertHasWarning "shopt has no fish equivalent; ignored" st
         H.assertBool "expected shopt note in output" (T.isInfixOf "shopt has no fish equivalent; ignored" out)
         H.assertBool "expected fallback true command" (T.isInfixOf "true '-s' 'nullglob'" out),
-      H.testCase "read -d lowers with semantic warning" $ do
+      H.testCase "read -d lowers to exact helper without semantic warning" $ do
         (out, st) <- translateWithState "read -d : field"
-        assertHasWarning "read delimiter semantics may differ between bash and fish" st
-        H.assertBool "expected lowered delimiter flag" (T.isInfixOf "read --delimiter ':' field" out),
+        H.assertBool
+          "unexpected warning for exact read delimiter helper"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool "expected exact delimiter helper" (T.isInfixOf "__monk_read_delim" out),
       H.testCase "read -s lowers without warning" $ do
         (out, st) <- translateWithState "read -s secret"
         H.assertBool "unexpected warning for read -s" (not (any ((== "Unsupported read flag: -s") . warnMessage) (warnings st)))

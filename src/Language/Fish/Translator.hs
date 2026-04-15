@@ -17,6 +17,9 @@ import Data.Text qualified as T
 import Data.Typeable (cast)
 import Language.Fish.AST
 import Language.Fish.Translator.Args (renderArgs)
+import Language.Fish.Translator.Background
+  ( instrumentBackgroundStatusCmd,
+  )
 import Language.Fish.Translator.Builtins
   ( translateDeclareCommand,
     translateExportCommand,
@@ -207,7 +210,7 @@ translateToken token =
         pure (Stmt (JobConj conj))
       T_Backgrounded _ bgToken -> do
         cmd <- translateTokenToStatusCmdM bgToken
-        pure (Stmt (Background cmd))
+        instrumentBackgroundStatusCmd cmd
       T_Annotation _ _ inner -> translateToken inner
       T_ForIn _ var tokens body -> do
         argParts <- mapM translateTokenToListExprM tokens

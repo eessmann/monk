@@ -12,6 +12,7 @@ module Language.Fish.Translator.Variables.ParamExpansion
     renderParamExpansionWithPrelude,
     noSplitParamExpansion,
     translateSimpleVar,
+    translateSimpleVarM,
     splitParamOperator,
     paramIndexFrom,
     translateDefaultExpansionWith,
@@ -35,6 +36,8 @@ import Language.Fish.Translator.Cond
   )
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Background (noteBackgroundTracking)
+import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Token (tokenRawText, tokenToLiteralText)
 import Language.Fish.Translator.Variables.Common (paramNameFrom, scopeFlagsForVarM, specialVarName)
 import Language.Fish.Translator.Variables.Index
@@ -217,6 +220,13 @@ renderSimpleVar (ParamSimple name idx) =
 
 translateSimpleVar :: Token -> FishExpr (TList TStr)
 translateSimpleVar = renderSimpleVar . parseSimpleVar
+
+translateSimpleVarM :: Token -> TranslateM (FishExpr (TList TStr))
+translateSimpleVarM tok = do
+  case simpleName (parseSimpleVar tok) of
+    Just "!" -> noteBackgroundTracking
+    _ -> pure ()
+  pure (translateSimpleVar tok)
 
 parseParamModifier :: Token -> Maybe (Text, ParamModifier)
 parseParamModifier word = do

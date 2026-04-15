@@ -14,7 +14,9 @@ where
 import Prelude hiding (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
+import Language.Fish.Pretty (renderFish)
 import Language.Fish.AST
+import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens (translateTokensToStatusCmd)
 import Language.Fish.Translator.Commands.Tests (translateConditionTokenM)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
@@ -26,6 +28,7 @@ import Language.Fish.Translator.Pipeline
     jobPipelineFromListWithTime,
     pipelineOf,
   )
+import Language.Fish.Translator.Redirections (translateRedirectTokenM)
 import Language.Fish.Translator.Statement (toNonEmptyStmtList)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables (translateArithmeticStatusM)
@@ -66,8 +69,15 @@ translateTokenToStatusCmdM tok =
       do
         Hoisted pre cmd <- translateConditionTokenM condTok
         pure (beginIfNeeded pre cmd)
-    T_Redirecting _ _ inner ->
-      translateTokenToStatusCmdM inner
+    T_Subshell _ tokens ->
+      translateSubshellStatusM tokens
+    T_BraceGroup _ tokens ->
+      translateStatusBlockM tokens
+    T_Redirecting _ redirs inner -> do
+      cmd <- translateTokenToStatusCmdM inner
+      parts <- mapM translateRedirectTokenM redirs
+      let Hoisted pre mRedirs = sequenceA parts
+      pure (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd))
     T_Arithmetic _ exprTok ->
       translateArithmeticStatusM exprTok
     T_AndIf _ l r -> do
@@ -99,7 +109,13 @@ translateTokenToMaybeStatusCmdM token =
       cmd <- translateTokenToStatusCmdM token
       pure (Just cmd)
     T_Condition {} -> Just <$> translateTokenToStatusCmdM token
-    T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmdM inner
+    T_BraceGroup _ tokens -> Just <$> translateStatusBlockM tokens
+    T_Subshell _ tokens -> Just <$> translateSubshellStatusM tokens
+    T_Redirecting _ redirs inner -> do
+      cmd <- translateTokenToStatusCmdM inner
+      parts <- mapM translateRedirectTokenM redirs
+      let Hoisted pre mRedirs = sequenceA parts
+      pure (Just (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd)))
     T_Pipeline _ bang cmds -> Just <$> translatePipelineToStatusM bang cmds
     T_AndIf _ l r -> do
       lp <- pipelineOf <$> translateTokenToStatusCmdM l
@@ -159,3 +175,42 @@ isSeparatorToken tok =
 
 hasBang :: [Token] -> Bool
 hasBang = any (\tok -> tokenToLiteralText tok == "!")
+
+translateStatusBlockM :: [Token] -> TranslateM (FishCommand TStatus)
+translateStatusBlockM tokens = do
+  cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
+  case cmds of
+    [] -> pure (Command "true" [])
+    (cmd : rest) ->
+      pure (Begin (Stmt cmd NE.:| map Stmt rest) [])
+
+translateSubshellStatusM :: [Token] -> TranslateM (FishCommand TStatus)
+translateSubshellStatusM tokens = do
+  cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
+  let script =
+        case cmds of
+          [] -> "true"
+          _ -> renderFish (map Stmt cmds)
+  pure
+    ( Command
+        "fish"
+        [ ExprVal (ExprLiteral "--no-config"),
+          ExprVal (ExprLiteral "-c"),
+          ExprVal (ExprLiteral script)
+        ]
+    )
+
+attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
+attachRedirsToStatus redirs cmd =
+  case cmd of
+    Command name args -> Command name (args ++ redirs)
+    Exec c args -> Exec c (args ++ redirs)
+    Begin body suffix -> Begin body (suffix ++ redirs)
+    If cond thn els suffix -> If cond thn els (suffix ++ redirs)
+    Switch expr cases suffix -> Switch expr cases (suffix ++ redirs)
+    While cond body suffix -> While cond body (suffix ++ redirs)
+    For var listExpr body suffix -> For var listExpr body (suffix ++ redirs)
+    other ->
+      case redirs of
+        [] -> other
+        _ -> Begin (Stmt other NE.:| []) redirs

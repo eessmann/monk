@@ -48,7 +48,10 @@ import Language.Fish.Translator.Variables.Glob
     wordIsGlob,
     wordNeedsExtglobShim,
   )
-import Language.Fish.Translator.Variables.ParamExpansion (translateSimpleVar)
+import Language.Fish.Translator.Variables.ParamExpansion
+  ( translateSimpleVar,
+    translateSimpleVarM,
+  )
 import Language.Fish.Translator.Variables.ProcessSubst
   ( procSubListExpr,
   )
@@ -184,7 +187,9 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
                         then splitOnIfsExpr expr
                         else ExprListLiteral [expr]
                 hoistM pre listExpr
-      tok@T_ParamSubSpecialChar {} -> hoistM [] (translateSimpleVar tok)
+      tok@T_ParamSubSpecialChar {} -> do
+        expr <- translateSimpleVarM tok
+        hoistM [] expr
       T_DollarBraced _ _ word -> do
         Hoisted pre expr <- translateDollarBracedWithPrelude word
         hoistM pre $

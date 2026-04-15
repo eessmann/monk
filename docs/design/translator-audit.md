@@ -1,4 +1,4 @@
-# Translator Audit (2026-03-22)
+# Translator Audit (2026-04-15)
 
 This audit reviews Monk against the goal of a principled Bash to Fish transpiler. The standard used here is strict:
 
@@ -51,7 +51,12 @@ This follow-up pass also added runtime integration coverage for:
 
 The same pass exposed a real lowering bug in `<(...)`: process-substitution bodies were being rendered as empty commands and simple proc-sub words were incorrectly fed through IFS splitting. That is now fixed.
 
-`read -d` remains best-effort because bash and fish diverge on some stdin-driven delimiter cases. `>(cmd)` now has a Linux-gated runtime fixture in CI; local macOS runs still skip that fixture because bash output redirection through `/dev/fd/*` is sandbox-restricted here.
+This follow-up pass also added runtime integration coverage for:
+
+- translated background jobs / `$!` / `wait` under `set -e` and `pipefail`
+- simple non-empty single-variable `read -d`
+
+Simple `read -d` is now exact on that covered slice via a generated `__monk_read_delim` helper. Delimiter-heavy array, multi-variable, empty-delimiter, and mixed-option forms remain best-effort. `>(cmd)` still has a Linux-gated runtime fixture in CI; local macOS runs skip that fixture because bash output redirection through `/dev/fd/*` is sandbox-restricted here.
 
 ### P2: Differential properties were too narrow
 
@@ -76,7 +81,7 @@ This materially broadens the semantic surface exercised on every parity run.
 
 The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines. They remain useful, but they should not be cited as proof that Monk's generated output is correct unless the generated output is also executed. The README and test naming now make that distinction more explicit.
 
-`neofetch` remains bake-off-only for Monk-generated output. It is too large and warning-heavy to count as normal automated evidence today.
+`neofetch` itself remains bake-off-only for Monk-generated output. It is still too large and warning-heavy to count as normal automated evidence today. A reduced `neofetch-mini` slice derived from `get_args()` now lives in the generated-output integration suite.
 
 `echo-args` is back in the generated-output integration set after making errexit lowering command-substitution aware by default. Monk now aims at Bash's default non-`inherit_errexit` behavior rather than exposing the old function-wide workaround.
 
@@ -84,7 +89,7 @@ The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines
 
 | Area | Status | Diagnostics | Current Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| `set -e` / `pipefail` | best-effort | documented caveats; `nounset` warns | runtime integration on focused fixtures plus `realworld/echo-args` | default non-`inherit_errexit` command-substitution behavior is covered; background jobs and some compound lists still diverge |
+| `set -e` / `pipefail` | best-effort | documented caveats; `nounset` warns | runtime integration on focused fixtures, background wait fixtures, and `realworld/echo-args` | default non-`inherit_errexit` command-substitution behavior and translated background wait paths are covered; some compound-list edge cases still diverge |
 | Subshells `(...)` | best-effort / unsupported | note in normal mode, failure in `--strict` | unit coverage only | environment isolation is not preserved |
 | Side-effecting parameter expansion in args / redirections / case | exact on covered cases | no warning on supported forms | focused runtime integration fixtures | command arguments, redirection targets, and `case` switch expressions now have parity coverage |
 | Arithmetic short-circuit / ternary side effects | exact on covered cases | no warning on supported forms | focused runtime integration fixture | edge cases still deserve expansion |
@@ -92,14 +97,14 @@ The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines
 | Arrays and 0-based to 1-based indexing | exact on covered cases | no warning | unit, property, and runtime evidence | one of the best-covered areas |
 | `read -n/-t/-u/-a` | best-effort | IFS note for lossy cases | unit plus runtime integration | typed lowering exists, but splitting semantics still differ |
 | `read -s` | exact on covered cases | no warning on supported forms | unit coverage | direct `--silent` lowering is in place |
-| `read -d` | best-effort | delimiter warning on lossy cases | unit and translation-shape coverage | typed lowering exists, but runtime parity still diverges on some delimiter cases |
+| `read -d` | exact on covered simple cases / best-effort otherwise | no warning on covered simple cases; delimiter warning on lossy cases | unit plus focused runtime integration | single-variable non-empty delimiter reads now use `__monk_read_delim`; array, multi-var, empty-delimiter, and mixed-option forms remain best-effort |
 | Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration plus real-world incidental use | simple cases are now exercised directly |
 | Process substitution `<(...)` | exact on covered cases | no dedicated warning | focused runtime integration fixture | a real body-lowering and no-split bug was fixed while adding coverage |
 | Process substitution `>(...)` | best-effort | no dedicated warning | Linux-gated runtime integration plus translation-shape assertions | FIFO workaround is exercised in CI; local macOS runs skip the fixture because of sandbox restrictions |
 | `readonly` / `declare -r` | best-effort | warning for missing readonly enforcement | unit diagnostics plus generated real-world parity | behavior is intentionally lossy |
 | `shopt` | unsupported | warning note | direct unit diagnostics | lowered to `true`; no semantic emulation |
 | `source` recursion with literal paths | exact on covered cases | warnings for recursive/non-literal variants | inline argv unit coverage plus runtime integration | simple literal recursive sourcing with argv/env effects is now exercised end to end |
-| Background jobs / `wait` under `set -e` / `pipefail` | best-effort | no dedicated warning | failing fixture drafted, not yet gated | current fish behavior still diverges from bash on the drafted parity case |
+| Background jobs / `wait` under `set -e` / `pipefail` | exact on covered translated wait cases / best-effort otherwise | warning on PID-specific `$!` follow-on uses | focused runtime integration fixtures | Monk-managed job tokens now back translated `$!` and `wait`; PID-specific uses such as `kill $!` remain manual-review territory |
 | Non-literal `source` paths | unsupported | warning | no dedicated runtime evidence | intentionally left for manual review |
 | `trap` | best-effort | warnings on unsupported option forms | unit diagnostics plus simple `EXIT` runtime integration | simple `EXIT` lowering now has end-to-end coverage; option-heavy behavior is not modeled |
 | `coproc` | unsupported | warning / strict failure | unit diagnostics | correctly treated as unsupported |
@@ -108,10 +113,9 @@ The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines
 
 The following gaps remain after the changes in this audit:
 
-- Fix background-job parity under `wait`, `set -e`, and `pipefail`, then promote the drafted fixture into the gated suite.
 - Expand exact-case runtime coverage for delimiter-heavy `read -d` combinations, or keep the remaining cases explicitly best-effort.
 - Decide whether `>(...)` needs broader cross-platform evidence beyond the current Linux-gated fixture.
-- Split out a reduced, automatable slice of `neofetch` if we want a generated-output regression target instead of bake-off-only coverage.
+- Keep option-heavy `trap` forms and non-literal `source` warning-driven unless a precise exact strategy is worth the complexity.
 
 ## Documentation Outcome
 

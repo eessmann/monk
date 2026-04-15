@@ -12,6 +12,10 @@ import Data.List (nub)
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Args (renderArgs)
+import Language.Fish.Translator.Background
+  ( translateWaitArgs,
+    translateWaitArgsM,
+  )
 import Language.Fish.Translator.Commands.Args (translateArgsM, translateEvalM)
 import Language.Fish.Translator.Commands.CommandTokens.Builtins
   ( translateEval,
@@ -25,6 +29,7 @@ import Language.Fish.Translator.Commands.Read
   ( ReadParseResult (..),
     parseReadArgsDetailed,
     translateRead,
+    translateReadM,
   )
 import Language.Fish.Translator.Commands.SetOptions (SetOptionParse (..), parseSetOptions)
 import Language.Fish.Translator.Commands.Tests
@@ -81,6 +86,7 @@ translateCommandTokensWithoutTime cmdTokens =
                             "." -> translateSource plainArgs
                             "eval" -> translateEval plainArgs
                             "exec" -> translateExec plainArgs
+                            "wait" -> translateWaitArgs argExprs
                             "read" -> translateRead plainArgs
                             "shopt" -> Command "true" renderedArgs
                             _ -> Command name (renderArgs argExprs)
@@ -138,6 +144,9 @@ translateCommandTokensWithoutTimeHoistedM cmdTokens =
                                 hoistM (preRedirs <> pre) (Just (Eval expr))
                               "exec" ->
                                 hoistM pre0 (Just (Command "exec" (renderArgs argExprs)))
+                              "wait" -> do
+                                waitCmd <- translateWaitArgsM argExprs
+                                hoistM pre0 (Just waitCmd)
                               "set" -> do
                                 let opts = parseSetOptions plainArgs
                                 forM_ (setErrexit opts) setErrexitEnabled
@@ -148,13 +157,12 @@ translateCommandTokensWithoutTimeHoistedM cmdTokens =
                                   then hoistM preAll Nothing
                                   else hoistM preAll (Just (Command "set" (renderArgs argExprs)))
                               "read" -> do
-                                let ReadParseResult {readFlags, readVars, readIssues, readUnsupported} =
-                                      parseReadArgsDetailed plainArgs [] [] [] False
+                                let ReadParseResult {readIssues} =
+                                      parseReadArgsDetailed plainArgs [] [] [] False False
                                 notes <- mapM noteUnsupported (nub readIssues)
                                 let preAll = pre0 <> notes
-                                if readUnsupported
-                                  then hoistM preAll (Just (Command "read" (renderArgs argExprs)))
-                                  else hoistM preAll (Just (Read readFlags readVars))
+                                readCmd <- translateReadM plainArgs
+                                hoistM preAll (Just readCmd)
                               "shopt" -> do
                                 note <- noteUnsupported "shopt has no fish equivalent; ignored"
                                 hoistM (pre0 <> [note]) (Just (Command "true" (renderArgs (argExprs ++ redirs))))

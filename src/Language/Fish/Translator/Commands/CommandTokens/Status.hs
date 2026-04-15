@@ -11,12 +11,16 @@ module Language.Fish.Translator.Commands.CommandTokens.Status
   )
 where
 
+import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
+import Language.Fish.Pretty (renderFish)
+import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTokensWithoutTime)
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
 import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
 import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime, pipelineOf)
+import Language.Fish.Translator.Redirections (translateRedirectToken)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables
   ( translateAssignmentWithFlags,
@@ -53,7 +57,12 @@ translateTokenToMaybeStatusCmd token =
   case token of
     T_SimpleCommand _ assignments rest -> Just (translateCommandTokensToStatus assignments rest)
     T_Condition _ _ condTok -> Just (translateConditionToken condTok)
-    T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmd inner
+    T_BraceGroup _ tokens -> Just (translateStatusBlock tokens)
+    T_Subshell _ tokens -> Just (translateSubshellStatus tokens)
+    T_Redirecting _ redirs inner ->
+      let cmd = translateTokenToStatusCmd inner
+          redirExprs = renderArgs (catMaybes (map translateRedirectToken redirs))
+       in Just (attachRedirsToStatus redirExprs cmd)
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
     T_AndIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
@@ -73,6 +82,8 @@ translateTokensToStatusCmd tokens =
     [T_Arithmetic _ exprTok] -> translateArithmetic exprTok
     [T_SimpleCommand _ a r] -> translateCommandTokensToStatus a r
     [T_Pipeline _ b c] -> translatePipelineToStatus b c
+    [T_BraceGroup _ innerTokens] -> translateStatusBlock innerTokens
+    [T_Subshell _ innerTokens] -> translateSubshellStatus innerTokens
     [T_AndIf _ l r] ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
@@ -112,3 +123,42 @@ translateTimeReserved name args
 
 hasBang :: [Token] -> Bool
 hasBang = any (\tok -> tokenToLiteralText tok == "!")
+
+translateStatusBlock :: [Token] -> FishCommand TStatus
+translateStatusBlock tokens =
+  case mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens) of
+    [] -> Command "true" []
+    (cmd : rest) -> Begin (Stmt cmd NE.:| map Stmt rest) []
+
+translateSubshellStatus :: [Token] -> FishCommand TStatus
+translateSubshellStatus tokens =
+  let script =
+        case mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens) of
+          [] -> "true"
+          cmds -> renderFish (map Stmt cmds)
+   in Command
+        "fish"
+        [ ExprVal (ExprLiteral "--no-config"),
+          ExprVal (ExprLiteral "-c"),
+          ExprVal (ExprLiteral script)
+        ]
+
+attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
+attachRedirsToStatus redirs cmd =
+  case cmd of
+    Command name args -> Command name (args ++ redirs)
+    Exec c args -> Exec c (args ++ redirs)
+    Begin body suffix -> Begin body (suffix ++ redirs)
+    If cond thn els suffix -> If cond thn els (suffix ++ redirs)
+    Switch expr cases suffix -> Switch expr cases (suffix ++ redirs)
+    While cond body suffix -> While cond body (suffix ++ redirs)
+    For var listExpr body suffix -> For var listExpr body (suffix ++ redirs)
+    other ->
+      case redirs of
+        [] -> other
+        _ -> Begin (Stmt other NE.:| []) redirs
+
+isSeparatorToken :: Token -> Bool
+isSeparatorToken tok =
+  let txt = tokenToLiteralText tok
+   in txt == ";" || txt == "\n"

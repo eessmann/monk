@@ -1,6 +1,6 @@
 # Bash to Fish Translator - TODO Checklist
 
-Audit note (2026-03-22): checked boxes in this file mean Monk has some implementation for the construct. Exactness now lives in `docs/design/translator-audit.md`, which classifies features as `exact`, `best-effort`, `unsupported`, or `unverified` and records the current test evidence.
+Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some implementation for the construct. Exactness lives in `docs/design/translator-audit.md`, which classifies features as `exact`, `best-effort`, `unsupported`, or `unverified` and records the current test evidence. A local `MONK_INTEGRATION=1 cabal test` run on 2026-04-15 now passes with the gated background-job fixtures, the simple `read -d` integration fixture, and the reduced `realworld/neofetch-mini` generated-output slice included.
 
 ## 🔴 Critical (Blocking Issues)
 
@@ -110,7 +110,7 @@ Audit note (2026-03-22): checked boxes in this file mean Monk has some implement
 
 ## 🔵 Nice to Have (Polish)
 
-### Optimizations
+### Optimizations (cleanup, not semantic blockers)
 - [x] Add an explicit post-translation simplification pass
 - [ ] Flatten safe consecutive `set` prelude wrappers without merging `set` commands that change overwrite/list semantics
 - [ ] Simplify remaining redundant subshell-like wrappers where scope/status behavior is unchanged
@@ -190,13 +190,15 @@ Audit note (2026-03-22): checked boxes in this file mean Monk has some implement
   - [x] Add gated runtime coverage for simple `<(...)`
   - [x] Add gated runtime coverage for recursive literal `source`
   - [x] Add Linux-gated runtime coverage for `>(...)`
-  - [ ] Add gated runtime coverage for background jobs under `set -e` / `pipefail`
+  - [x] Promote the drafted background-job fixtures (`background-success-wait`, `background-fail-wait`, `background-pipefail`, `background-jobs`) into the gated suite once parity is fixed
+  - [x] Add a reduced generated-output regression slice derived from `neofetch`
   - [x] Close the command-substitution `set -e` gap exposed by `realworld/echo-args`
 
-## ✅ Added Tests Scope (planned)
+## ✅ Added Tests Scope (current)
 
-- Unit: basic command translation (`echo`, `exit`), bracket test `[ ... ]`, pipelines, `if/then/else`, `for ... in`, function bodies, backgrounding.
-- Property: generated word lists in `echo` preserve arguments after translation (quoted rendering), pipeline continuation counts preserved.
+- Unit: translation shape plus warning-path coverage for arithmetic, `read`, `trap`, `source`, `set` options, and Polysemy effect behavior.
+- Property: pretty-printing and translation invariants, plus bash-vs-fish output equivalence on generated script families.
+- Integration: gated bash-vs-fish parity for focused semantic fixtures and curated generated-output real-world fixtures under `MONK_INTEGRATION=1`.
 
 ## 🐛 Known Semantic Differences to Document
 
@@ -210,9 +212,9 @@ Audit note (2026-03-22): checked boxes in this file mean Monk has some implement
 8. **Param expansions**: glob-to-regex conversion and `^`/`,` case mods are approximate
 9. **`read` semantics**: flag parity and IFS splitting differ from bash; warnings emitted for lossy cases
 10. **Arithmetic side effects**: short-circuit/ternary are emulated via temp vars; verify on edge cases
-11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`, but still diverges on background jobs, `wait`, and some compound-list edge cases
+11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`; translated background jobs / `wait` now have focused parity coverage, but some compound-list edge cases still diverge
 12. **`shopt`**: ignored with a warning; no fish emulation exists
-13. **Delimiter-heavy `read` forms**: `-d`/`-s` now lower directly, but bash and fish still diverge in some stdin-driven cases and combined short-flag clusters need more coverage
+13. **Delimiter-heavy `read` forms**: simple single-variable non-empty `read -d` now uses `__monk_read_delim` with runtime coverage; array, multi-variable, empty-delimiter, and mixed-option forms remain explicitly best-effort
 
 ## ✅ Quick Wins (Can do immediately)
 
@@ -231,14 +233,17 @@ Audit note (2026-03-22): checked boxes in this file mean Monk has some implement
 
 ## ▶ Next Up (Recommended Order)
 
-1. [ ] **Close the remaining gated semantic blockers**
-   - [ ] Fix background-job parity for `wait`, `set -e`, and `set -o pipefail`, then promote the drafted background fixtures into the gated suite.
-2. [ ] **Tighten the remaining best-effort areas**
-   - [ ] Expand runtime coverage for delimiter-heavy `read -d` cases and combined short-flag clusters, or explicitly keep them best-effort where exact lowering is not achievable.
-   - [ ] Keep option-heavy `trap` forms and non-literal `source` explicitly warning-driven unless a precise exact strategy emerges.
+1. [x] **Close the drafted background-job parity blocker**
+   - [x] Fix background-job parity for `wait`, `set -e`, and `set -o pipefail`.
+   - [x] Promote `background-success-wait`, `background-fail-wait`, `background-pipefail`, and `background-jobs` into `test/Integration.hs` once they match bash.
+   - [x] Add a scope-visibility regression so translated background blocks still see caller state.
+2. [ ] **Resolve or explicitly freeze the remaining best-effort areas**
+   - [x] Make simple single-variable non-empty `read -d` exact and gate it in integration.
+   - [ ] Expand runtime coverage for the remaining delimiter-heavy `read -d` cases; keep array, multi-variable, empty-delimiter, and mixed-option forms explicitly best-effort in `docs/design/translator-audit.md` and `docs/migration-guide.md`.
+   - [ ] Keep option-heavy `trap` forms and non-literal `source` warning-driven unless a precise exact strategy emerges.
    - [ ] Decide whether `>(...)` needs broader cross-platform evidence beyond the current Linux-gated fixture.
-   - [ ] Keep `docs/design/translator-audit.md` as the fidelity matrix and only check off TODO items when runtime evidence or explicit best-effort documentation exists.
-3. [ ] **Finish the post-audit polish work**
-   - [ ] Narrow the remaining unchecked optimization boxes into concrete simplifier rewrites with translation-shape and runtime coverage.
-   - [ ] Split any optimization into smaller TODO items if it proves semantically unsafe.
-   - [ ] Decide whether `neofetch` stays bake-off-only or gets a reduced automatable generated-output slice.
+   - [ ] Only check off TODO items when runtime evidence or explicit best-effort documentation exists.
+3. [ ] **Treat the remaining simplifier work as cleanup**
+   - [ ] Turn each unchecked optimization box into a narrowly scoped rewrite with translation-shape and runtime coverage.
+   - [ ] Only flatten or elide wrappers when scope, list semantics, and status propagation are provably unchanged.
+   - [x] Keep full `neofetch` bake-off-only, but gate a reduced automatable generated-output slice.

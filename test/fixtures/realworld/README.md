@@ -13,6 +13,7 @@ These fixtures are sourced from public repositories and curated for safe, non-de
 - `coat.bash`: https://github.com/oldratlee/useful-scripts/blob/dev-3.x/bin/coat
 - `taoc.bash`: https://github.com/oldratlee/useful-scripts/blob/dev-3.x/bin/taoc
 - `neofetch.bash`: https://github.com/dylanaraps/neofetch/blob/master/neofetch
+- `neofetch-mini.bash`: reduced slice derived from `neofetch`'s `get_args()` image backend handling
 
 ## Metadata
 
@@ -30,3 +31,4 @@ Example:
 - `echo-args.bash` is modified to use a `SCRIPT_NAME` default instead of `$0` for deterministic output under test harnesses.
 - `taoc.bash` depends on `tac` being available (coreutils on Linux).
 - `neofetch.bash` is a large real-world script used for bake-off and integration checks only; manual fish comparison is skipped.
+- `neofetch-mini.bash` is the small generated-output regression slice derived from `neofetch`; it stays in the normal integration suite while full `neofetch.bash` remains bake-off-only.

@@ -99,6 +99,9 @@ data TranslateState = TranslateState
     errexitEnabled :: Bool,
     pipefailEnabled :: Bool,
     pipefailHelperAdded :: Bool,
+    backgroundRuntimeAdded :: Bool,
+    backgroundTrackingWarned :: Bool,
+    readDelimHelperAdded :: Bool,
     preamble :: [FishStatement]
   }
   deriving stock (Show, Eq)
@@ -136,6 +139,9 @@ runTranslateWithPositions cfg positions m =
             errexitEnabled = False,
             pipefailEnabled = False,
             pipefailHelperAdded = False,
+            backgroundRuntimeAdded = False,
+            backgroundTrackingWarned = False,
+            readDelimHelperAdded = False,
             preamble = []
           }
       result =

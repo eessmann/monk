@@ -6,7 +6,16 @@ module Unit.Translation
 where
 
 import Data.Text qualified as T
-import Monk (parseBashScript, strictConfig, translateParseResult)
+import Monk
+  ( TranslateState (..),
+    TranslationResult (..),
+    Warning (..),
+    defaultConfig,
+    parseBashScript,
+    renderTranslation,
+    strictConfig,
+    translateParseResult,
+  )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import TestSupport
@@ -69,12 +78,12 @@ unitTranslationTests =
       H.testCase "Redirection expansion hoists side effects" $ do
         out <- translateScript "echo hi > ${OUT:=/tmp/out}"
         T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
-        T.isInfixOf "> (string join ' ' $OUT ; or printf '')" out H.@? "expected redirection to use OUT",
+        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected redirection to use OUT",
       H.testCase "Heredoc expansion hoists side effects" $ do
         let script = "cat <<EOF\n${VAL:=ok}\nEOF\n"
         out <- translateScript script
         T.isInfixOf "set --global VAL 'ok'" out H.@? "expected assignment before heredoc"
-        T.isInfixOf "string join ' ' $VAL ; or printf ''" out H.@? "expected heredoc to use VAL",
+        T.isInfixOf "string join ' ' -- $VAL ; or printf ''" out H.@? "expected heredoc to use VAL",
       H.testCase "Length expansion for argv uses count" $ do
         out <- translateScript "echo ${#@}"
         T.isInfixOf "count $argv" out H.@? "expected count for argv length",
@@ -90,7 +99,7 @@ unitTranslationTests =
       H.testCase "Hash in word is preserved" $ do
         out <- translateScript "a=nixpkgs\nnix run $a#hello"
         T.isInfixOf "set --global a 'nixpkgs'" out H.@? "expected assignment translation"
-        T.isInfixOf "string join ' ' $a ; or printf ''" out H.@? "expected variable join in word"
+        T.isInfixOf "string join ' ' -- $a ; or printf ''" out H.@? "expected variable join in word"
         T.isInfixOf "#hello" out H.@? "expected hash in word preserved",
       H.testCase "Pushd and popd pass through" $ do
         outPushd <- translateScript "pushd /tmp"
@@ -249,19 +258,22 @@ unitTranslationTests =
       H.testCase "Case patterns with expansion keep glob meta" $ do
         out <- translateScript "case $x in ${Y}* ) echo ok ;; esac"
         T.isInfixOf "printf '%s%s'" out H.@? "expected printf pattern builder"
-        T.isInfixOf "string join ' ' $Y ; or printf ''" out H.@? "expected expansion string join in pattern"
+        T.isInfixOf "string join ' ' -- $Y ; or printf ''" out H.@? "expected expansion string join in pattern"
         H.assertBool "expected case pattern to be computed" (T.isInfixOf "case (" out),
       H.testCase "Case pattern expansion hoists side effects" $ do
         out <- translateScript "case $x in ${Y:=1}) echo ok ;; esac"
         T.isInfixOf "set --global Y '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "string join ' ' $Y ; or printf ''" out H.@? "expected pattern to use Y",
+        T.isInfixOf "string join ' ' -- $Y ; or printf ''" out H.@? "expected pattern to use Y",
       H.testCase "Case switch expansion hoists side effects" $ do
         out <- translateScript "case ${X:=1} in 1) echo ok ;; esac"
         T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "switch (string join ' ' $X ; or printf '')" out H.@? "expected switch to use X",
+        T.isInfixOf "switch (string join ' ' -- $X ; or printf '')" out H.@? "expected switch to use X",
       H.testCase "Read flags translate to fish equivalents" $ do
         outD <- translateScript "read -d : field"
-        T.isInfixOf "read --delimiter ':' field" outD H.@? "expected delimiter flag"
+        T.isInfixOf "__monk_read_delim" outD H.@? "expected delimiter helper"
+        H.assertBool
+          ("unexpected delimiter warning comment in exact helper path: " <> T.unpack outD)
+          (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" outD))
         outS <- translateScript "read -s secret"
         T.isInfixOf "read --silent secret" outS H.@? "expected silent flag"
         outN <- translateScript "read -n 3 foo"
@@ -272,6 +284,37 @@ unitTranslationTests =
         T.isInfixOf "read --fd 9 baz" outU H.@? "expected fd flag"
         outA <- translateScript "read -a arr"
         T.isInfixOf "read --array arr" outA H.@? "expected array flag",
+      H.testCase "Background jobs use Monk tracking runtime" $ do
+        out <- translateScript "false &\nbg=$!\nwait \"$bg\""
+        T.isInfixOf "__monk_bg_status_path" out H.@? "expected background status helper"
+        T.isInfixOf "set --global __monk_last_job $__monk_bg_seq" out H.@? "expected Monk job token"
+        T.isInfixOf "__monk_wait" out H.@? "expected translated wait helper"
+        T.isInfixOf "printf '%s\\n' $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
+        H.assertBool "expected $! to lower to Monk job token" (not (T.isInfixOf "$last_pid" out)),
+      H.testCase "Exact read delimiter helper emits no delimiter warning" $ do
+        result <- parseBashScript "spec.sh" "read -rd: field"
+        case translateParseResult defaultConfig result of
+          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
+          Right translation -> do
+            let out = renderTranslation translation
+                warnMessages = map warnMessage (warnings (translationState translation))
+            T.isInfixOf "__monk_read_delim" out H.@? "expected exact helper in translation"
+            H.assertBool
+              ("unexpected delimiter warning in warnings: " <> show warnMessages)
+              ("read delimiter semantics may differ between bash and fish" `notElem` warnMessages),
+      H.testCase "Empty delimiter stays best effort" $ do
+        out <- translateScript "read -d '' field"
+        T.isInfixOf "read --delimiter '' field" out H.@? "expected fish read fallback"
+        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note",
+      H.testCase "Array delimiter read stays best effort" $ do
+        out <- translateScript "read -d : -a fields"
+        T.isInfixOf "read --delimiter ':' --array fields" out H.@? "expected fish read fallback with array flag"
+        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note"
+        T.isInfixOf "read IFS splitting semantics may differ between bash and fish" out H.@? "expected IFS warning note",
+      H.testCase "Mixed delimiter flag clusters stay best effort" $ do
+        out <- translateScript "read -rd: -s field"
+        T.isInfixOf "read --delimiter ':' --silent field" out H.@? "expected fish read fallback with mixed flags"
+        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note",
       H.testCase "Source passes args" $ do
         out <- translateScript "source /tmp/script.sh a b"
         T.isInfixOf "source '/tmp/script.sh' 'a' 'b'" out H.@? "expected args passed to source",

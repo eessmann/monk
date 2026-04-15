@@ -30,6 +30,7 @@ prettyFishExprWith prettyStmt = go
         parens
           ( "string join"
               <+> escapeFishString " "
+              <+> "--"
               <+> go e
               <+> ";"
               <+> "or"

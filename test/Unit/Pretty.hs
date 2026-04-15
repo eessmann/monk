@@ -150,7 +150,7 @@ unitPrettyTests =
       H.testCase "Join list fallback" $ do
         let script = [Stmt (Command "echo" [ExprVal (ExprJoinList (ExprVariable (VarAll "x")))])]
             actual = renderFish script
-            expected = "echo (string join ' ' $x ; or printf '')"
+            expected = "echo (string join ' ' -- $x ; or printf '')"
         actual @?= expected,
       H.testCase "Function printing (no params)" $ do
         let fn = FishFunction {funcName = "greet", funcFlags = [], funcParams = [], funcBody = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "hi")])]}

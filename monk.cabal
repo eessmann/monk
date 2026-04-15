@@ -87,6 +87,7 @@ library
                      , Language.Fish.Pretty.Statement
                      , Language.Fish.Translator
                      , Language.Fish.Translator.Builtins
+                     , Language.Fish.Translator.Background
                      , Language.Fish.Translator.Builtins.Common
                      , Language.Fish.Translator.Builtins.Declare
                      , Language.Fish.Translator.Builtins.Scope
