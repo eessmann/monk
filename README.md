@@ -20,8 +20,7 @@ Today it handles a lot of ordinary shell code:
 - redirections, here-strings, and a chunk of process substitution
 - recursive `source` translation for literal source paths
 
-It also has a long tail of best-effort behavior. That is part of the project,
-not something hidden in the fine print.
+It also has a long tail of best-effort behavior.
 
 ## What To Expect
 
