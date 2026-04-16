@@ -1,6 +1,6 @@
 # Monk
 
-Monk is a Haskell side project that tries to translate Bash scripts into fish.
+Monk is a Haskell project that tries to translate Bash scripts into fish.
 It started as a fun excuse to learn more about shell parsing, typed ASTs, and
 all the weird corners where Bash and fish do not line up cleanly.
 
