@@ -1,6 +1,6 @@
 # Bash to Fish Translator - TODO Checklist
 
-Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some implementation for the construct. Exactness lives in `docs/design/translator-audit.md`, which classifies features as `exact`, `best-effort`, `unsupported`, or `unverified` and records the current test evidence. A local `MONK_INTEGRATION=1 cabal test` run on 2026-04-15 now passes with the gated background-job fixtures, the simple `read -d` integration fixture, and the reduced `realworld/neofetch-mini` generated-output slice included.
+Audit note (refreshed 2026-04-16): checked boxes in this file mean Monk has some implementation for the construct. Exactness lives in `docs/design/translator-audit.md`, which classifies features as `exact`, `best-effort`, `unsupported`, or `unverified` and records the current test evidence. The current local baseline is a passing `MONK_INTEGRATION=1 cabal test` run with 220 tests, including the gated background-job fixtures, the generalized `read -d` integration surface (`read-delimiter`, `read-delimiter-null-array`, `read-delimiter-null-vars`, `read-delimiter-ifs`, `read-delimiter-flags`), the helper-backed `>(...)` fixtures, the reduced `realworld/neofetch-mini` generated-output slice, the curated real-world parity fixtures `argparse-mini`, `envfile-preview`, `path-filter`, and `semver-normalize`, the direct simplifier translation-shape coverage added in the cleanup pass, and the new public/source/harness/bake-off seam tests added in the architecture pass. The active execution focus is now cleanup and code quality; the remaining semantic-expansion items stay tracked below but are intentionally paused unless cleanup work exposes a concrete bug.
 
 ## 🔴 Critical (Blocking Issues)
 
@@ -112,9 +112,15 @@ Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some
 
 ### Optimizations (cleanup, not semantic blockers)
 - [x] Add an explicit post-translation simplification pass
-- [ ] Flatten safe consecutive `set` prelude wrappers without merging `set` commands that change overwrite/list semantics
-- [ ] Simplify remaining redundant subshell-like wrappers where scope/status behavior is unchanged
-- [ ] Optimize pipeline constructs only when wrapper elision is provably a no-op
+- [x] Flatten safe consecutive `set` prelude wrappers without merging `set` commands that change overwrite/list semantics
+- [x] Simplify remaining redundant subshell-like wrappers where scope/status behavior is unchanged
+- [x] Optimize pipeline constructs only when wrapper elision is provably a no-op
+
+### Architecture cleanup
+- [x] Split the public library surface into `Monk.Translation`, `Monk.AST`, `Monk.Source`, and a thin `Monk` convenience facade
+- [x] Move shared fixture metadata and shell helpers into a private internal support library used by tests and bake-off
+- [x] Split the bake-off into a separate private library and executable under `scripts/` so bake-off-only dependencies do not affect the main `monk` library
+- [x] Add focused seam coverage for source-graph behavior, shared harness helpers, and bake-off selection/report planning
 
 ### User Experience  
 - [x] Add `--strict` mode to fail on unsupported constructs
@@ -198,7 +204,9 @@ Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some
 
 - Unit: translation shape plus warning-path coverage for arithmetic, `read`, `trap`, `source`, `set` options, and Polysemy effect behavior.
 - Property: pretty-printing and translation invariants, plus bash-vs-fish output equivalence on generated script families.
-- Integration: gated bash-vs-fish parity for focused semantic fixtures and curated generated-output real-world fixtures under `MONK_INTEGRATION=1`.
+- Integration: gated bash-vs-fish parity for focused semantic fixtures, including the generalized `read -d` surface and helper-backed `>(...)` fixtures, plus curated generated-output real-world fixtures such as `neofetch-mini`, `argparse-mini`, `envfile-preview`, `path-filter`, and `semver-normalize` under `MONK_INTEGRATION=1`.
+- Translation-shape coverage: nested prelude flattening, nested trivial `begin` cleanup, pipeline-local wrapper elision, and scope-changing wrapper preservation now have focused unit coverage.
+- Architecture/seam coverage: `Monk.Source`, the shared harness layer, and the bake-off selection/report/benchmark seams now have direct unit tests so refactors fail faster than the full integration pass.
 
 ## 🐛 Known Semantic Differences to Document
 
@@ -208,13 +216,13 @@ Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some
 4. **Glob expansion**: Different glob syntax and behavior
 5. **Function scope**: Fish functions have different scoping rules
 6. **Background jobs**: Different job control semantics
-7. **Process substitution**: `>(cmd)` uses FIFO workaround; cleanup via background block
+7. **Process substitution**: `>(cmd)` now uses a generated FIFO helper and still remains Linux-gated for runtime evidence
 8. **Param expansions**: glob-to-regex conversion and `^`/`,` case mods are approximate
 9. **`read` semantics**: flag parity and IFS splitting differ from bash; warnings emitted for lossy cases
 10. **Arithmetic side effects**: short-circuit/ternary are emulated via temp vars; verify on edge cases
 11. **`set -e`/`pipefail`**: emulated via `or exit $status` and `__monk_pipefail`; translated background jobs / `wait` now have focused parity coverage, but some compound-list edge cases still diverge
 12. **`shopt`**: ignored with a warning; no fish emulation exists
-13. **Delimiter-heavy `read` forms**: simple single-variable non-empty `read -d` now uses `__monk_read_delim` with runtime coverage; array, multi-variable, empty-delimiter, and mixed-option forms remain explicitly best-effort
+13. **Residual `read` fallbacks**: the generalized helper path now covers covered `read -d` forms plus numeric `-u` helper-backed reads, but no-var delimiter reads, non-numeric fd values, and unsupported option clusters still remain warning-driven
 
 ## ✅ Quick Wins (Can do immediately)
 
@@ -223,7 +231,9 @@ Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some
 
 ## Bake-off notes
 
-- 2026-02-07: ran Monk vs babelfish on corpus + benchmark + integration + golden + real-world fixtures. Babelfish failed on `medium` (unsupported UnaryArithm), `large` (unsupported ForClause), `extglob-basic` (unsupported ExtGlob), and the real-world pyramid fixtures (unsupported C-style for loop). Monk succeeded on all, with warnings for `set -e/-u/pipefail`, IFS splitting, and subshell best-effort in `time-prefix`.
+- 2026-04-15: the Haskell `monk-bakeoff` runner is now the operative comparison surface. The current full-run summary lives in `docs/babelfish-comparison.md`, and the runner now respects fixture metadata instead of hanging on Linux-only cases during local macOS runs.
+- 2026-04-16: a focused `monk-bakeoff` run over the new `read` and `>(...)` fixtures (`/private/tmp/monk-bakeoff-read-procsub`) showed Monk succeeding on all 5 runnable fixtures with no translation failures or runtime failures. The 3 helper-backed `>(...)` fixtures were skipped on local macOS because their metadata still treats Linux as the semantic source of truth. On the overlapping runnable surface, Babelfish mismatched 4 delimiter fixtures and failed translation on `read-delimiter-null-array`.
+- 2026-04-16: the post-refactor full `monk-bakeoff` run (`/private/tmp/monk-bakeoff-architecture-full-final`) covered 62 fixtures, skipped 4 by metadata, and completed with Monk translating/running all 58 non-skipped fixtures successfully. Babelfish translated 35/58 non-skipped fixtures and the overlapping runtime surface differed on 13 fixtures.
 - Case patterns with expansions now build the full pattern via `printf` in a command substitution to avoid empty-string failures and glob expansion surprises.
 - Details recorded in `docs/babelfish-comparison.md`.
 - [x] Implement `T_HereString`: `<<<` → echo piping
@@ -233,17 +243,20 @@ Audit note (refreshed 2026-04-15): checked boxes in this file mean Monk has some
 
 ## ▶ Next Up (Recommended Order)
 
-1. [x] **Close the drafted background-job parity blocker**
-   - [x] Fix background-job parity for `wait`, `set -e`, and `set -o pipefail`.
-   - [x] Promote `background-success-wait`, `background-fail-wait`, `background-pipefail`, and `background-jobs` into `test/Integration.hs` once they match bash.
-   - [x] Add a scope-visibility regression so translated background blocks still see caller state.
-2. [ ] **Resolve or explicitly freeze the remaining best-effort areas**
-   - [x] Make simple single-variable non-empty `read -d` exact and gate it in integration.
-   - [ ] Expand runtime coverage for the remaining delimiter-heavy `read -d` cases; keep array, multi-variable, empty-delimiter, and mixed-option forms explicitly best-effort in `docs/design/translator-audit.md` and `docs/migration-guide.md`.
-   - [ ] Keep option-heavy `trap` forms and non-literal `source` warning-driven unless a precise exact strategy emerges.
-   - [ ] Decide whether `>(...)` needs broader cross-platform evidence beyond the current Linux-gated fixture.
-   - [ ] Only check off TODO items when runtime evidence or explicit best-effort documentation exists.
-3. [ ] **Treat the remaining simplifier work as cleanup**
-   - [ ] Turn each unchecked optimization box into a narrowly scoped rewrite with translation-shape and runtime coverage.
-   - [ ] Only flatten or elide wrappers when scope, list semantics, and status propagation are provably unchanged.
+1. [ ] **Keep the checklist, audit, and migration guide in lockstep**
+   - [ ] Refresh this file, `docs/design/translator-audit.md`, and `docs/migration-guide.md` together whenever a best-effort branch changes status.
+   - [ ] Treat `docs/design/translator-audit.md` as the fidelity source of truth and only check off TODO items once runtime evidence or explicit best-effort documentation exists.
+2. [x] **Cleanup-first pass: finish the conservative simplifier and helper refactors**
+   - [x] Turn each unchecked optimization box into a targeted simplifier rule with translation-shape coverage.
+   - [x] Keep hard exclusions around redirections, background jobs, pipelines, conjunctions, control-flow blocks, and scope-changing wrappers.
+   - [x] Refactor `Commands/Read.hs` into explicit exact-read phases without changing helper names, supported branches, or warning-driven fallbacks.
+   - [x] Refactor `Variables/ProcessSubst.hs` to share FIFO setup/cleanup builders between the inline and helper-backed `>(...)` paths.
    - [x] Keep full `neofetch` bake-off-only, but gate a reduced automatable generated-output slice.
+3. [ ] **Tracked semantic backlog: tighten the remaining `read` fallback surface**
+   - [x] Replace the old narrow helper path with a generalized exact branch for covered `read -d` cases, including empty delimiters, arrays, multi-variable assignment, supported mixed flag clusters, and numeric `-u` helper-backed reads.
+   - [ ] Keep no-var delimiter reads, non-numeric fd values, and unsupported flag clusters warning-driven unless they can be proven exact.
+   - [ ] Add more focused parity fixtures only if they cover branches that are still warning-driven today.
+4. [ ] **Tracked semantic backlog: record Linux-source-of-truth evidence for helper-backed `>(...)`**
+   - [x] Replace the inline FIFO expansion with a generated helper so the runtime path has one implementation surface.
+   - [x] Broaden the Linux-gated fixture surface beyond the current single output-process-substitution case.
+   - [ ] Record explicit Linux runtime evidence before upgrading the audit status or claiming stronger cross-platform parity.

@@ -105,17 +105,20 @@ Available options:
 
 ### Library API
 
-Monk exposes a small, focused API via the `Monk` module:
+Monk now exposes an explicit public module surface:
 
-- `translateBashFile` / `translateBashScript`: parse + translate
-- `translateParseResult`: translate an existing ShellCheck `ParseResult`
-- `TranslationResult`: contains the translated AST plus `TranslateState`
-- `renderTranslation` / `translationStatements`: render or inspect output
+- `Monk.Translation`: parse, translate, render, and inspect translation state
+- `Monk.AST`: public Fish AST types
+- `Monk.Source`: recursive source-graph construction and source-path rewriting helpers
+- `Monk.Diagnostics`: warning rendering, notes, and confidence scoring
+- `Monk`: thin convenience facade that re-exports `Monk.Translation` and `Monk.Diagnostics`
+
+For new code, prefer importing the explicit `Monk.*` modules you need.
 
 Example:
 
 ```haskell
-import Monk
+import Monk.Translation
 
 main :: IO ()
 main = do
@@ -167,9 +170,12 @@ Bash Script → ShellCheck AST → Fish AST → Fish Script
 ### Key Components
 
 - **`Language.Bash.Parser`**: ShellCheck integration for robust Bash parsing
-- **`Language.Fish.AST`**: Type-safe Fish shell abstract syntax tree
-- **`Language.Fish.Translator`**: Core translation logic with semantic analysis
+- **`Monk.Translation` / `Monk.AST` / `Monk.Source`**: public translation, AST, and recursive-source APIs
+- **`Language.Fish.AST`**: type-safe Fish shell abstract syntax tree and pretty-printing internals
+- **`Language.Fish.Translator`**: statement dispatch and orchestration over focused translator subsystems
 - **`Language.Fish.Pretty`**: Fish code generation with formatting preservation
+- **`Monk.Internal.Fixture` / `Monk.Internal.Shell`**: shared typed-path harness support for tests and bake-offs
+- **`scripts/Bakeoff/*`**: separate bake-off library and executable, isolated from the main `monk` library dependencies
 
 ## 🧪 Testing
 
@@ -190,13 +196,18 @@ cabal test --test-option="--quickcheck-tests=10000"
 
 # Run benchmarks (uses benchmark/fixtures)
 cabal bench
+
+# Run the dedicated Monk vs Babelfish bake-off
+cabal run monk-bakeoff -- --compatible --no-benchmark --out-dir /tmp/monk-bakeoff
 ```
 
 ## Docs
 
 - `docs/design/translator-todo.md`: translation semantics notes and open items
 - `docs/design/translator-audit.md`: exact vs best-effort audit, evidence matrix, and follow-up test backlog
+- `docs/design/architecture.md`: public module layout, translator subsystem boundaries, and bake-off/harness structure
 - `docs/migration-guide.md`: manual remediation patterns for warning-driven or best-effort translations
+- `docs/babelfish-comparison.md`: current bake-off workflow and Monk-vs-Babelfish results
 
 ### Test Categories
 
@@ -209,7 +220,7 @@ CI installs `fish` and runs the curated parity suite with `MONK_INTEGRATION=1`.
 
 ## 📊 Current Status
 
-Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We hoist side-effecting expansions across arguments, redirections, and case patterns, lower short-circuit arithmetic into conditional evaluation to preserve side effects, and exercise simple `<(...)`, Linux-gated `>(...)`, recursive literal `source`, simple `trap ... EXIT`, and `realworld/echo-args` in the bash-vs-fish integration suite. Recent additions also include an explicit post-translation simplification pass and broader `read` flag coverage.
+Monk covers most core Bash constructs and uses a semantic Fish IR to emit idiomatic Fish. The translator is conservative: it emits warnings and inline notes for constructs that need manual review and can fail fast in strict mode. We hoist side-effecting expansions across arguments, redirections, and case patterns, lower short-circuit arithmetic into conditional evaluation to preserve side effects, and exercise simple `<(...)`, Linux-gated `>(...)`, recursive literal `source`, simple `trap ... EXIT`, and `realworld/echo-args` in the bash-vs-fish integration suite. The current local baseline is a passing `MONK_INTEGRATION=1 cabal test` run with 220 tests, plus a passing `monk-bakeoff` smoke run and full local bake-off run on the refactored infrastructure.
 
 Use [`docs/design/translator-audit.md`](docs/design/translator-audit.md) as the source of truth for whether a feature is currently exact, best-effort, unsupported, or still under-verified.
 

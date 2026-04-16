@@ -1,4 +1,4 @@
-# Translator Audit (2026-04-15)
+# Translator Audit (2026-04-16)
 
 This audit reviews Monk against the goal of a principled Bash to Fish transpiler. The standard used here is strict:
 
@@ -14,6 +14,7 @@ The sources for this audit were:
 - the translator modules under `src/Language/Fish/Translator/`
 - the current unit, golden, property, integration, and real-world tests
 - the GitHub Actions workflow in `.github/workflows/ci.yml`
+- the current local 220-test `MONK_INTEGRATION=1 cabal test` baseline, which includes the curated real-world fixtures `argparse-mini`, `envfile-preview`, `path-filter`, and `semver-normalize`, plus direct source/harness/bake-off seam coverage
 
 ## Prioritized Findings
 
@@ -54,9 +55,11 @@ The same pass exposed a real lowering bug in `<(...)`: process-substitution bodi
 This follow-up pass also added runtime integration coverage for:
 
 - translated background jobs / `$!` / `wait` under `set -e` and `pipefail`
-- simple non-empty single-variable `read -d`
+- generalized covered `read -d` forms, including empty-delimiter, array, multi-variable, non-whitespace-IFS, and mixed-flag slices
 
-Simple `read -d` is now exact on that covered slice via a generated `__monk_read_delim` helper. Delimiter-heavy array, multi-variable, empty-delimiter, and mixed-option forms remain best-effort. `>(cmd)` still has a Linux-gated runtime fixture in CI; local macOS runs skip that fixture because bash output redirection through `/dev/fd/*` is sandbox-restricted here.
+The old narrow `read -d` helper has now been replaced with a generalized helper-backed exact path for covered delimiter-driven reads and numeric `-u` helper-backed reads. Remaining no-var delimiter reads, non-numeric fd values, and unsupported flag clusters stay best-effort. `>(cmd)` now also uses a generated helper and has a broadened Linux-gated fixture surface, but local macOS bake-off runs still skip those fixtures because Linux remains the semantic source of truth for acceptance.
+
+The architecture pass that followed also exposed a real recursive-source resolution bug in the new public `Monk.Source` layer: literal source discovery only tried the parent source file directory and missed working-directory-relative paths such as `source test/fixtures/...`. The source graph now tries cwd-relative resolution first and then falls back to the parent source file directory, with direct unit coverage and the existing runtime integration fixture keeping that path exercised.
 
 ### P2: Differential properties were too narrow
 
@@ -95,15 +98,15 @@ The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines
 | Arithmetic short-circuit / ternary side effects | exact on covered cases | no warning on supported forms | focused runtime integration fixture | edge cases still deserve expansion |
 | Arithmetic `for ((...))` fallback paths | best-effort | warning comments | direct unit warning coverage | unsupported init/increment forms still degrade to comments |
 | Arrays and 0-based to 1-based indexing | exact on covered cases | no warning | unit, property, and runtime evidence | one of the best-covered areas |
-| `read -n/-t/-u/-a` | best-effort | IFS note for lossy cases | unit plus runtime integration | typed lowering exists, but splitting semantics still differ |
+| `read -n/-t/-u/-a` | best-effort overall | IFS note for lossy cases | unit plus runtime integration | plain lowering still exists for lossy branches, but numeric `-u` reads on the helper-backed exact path now have focused parity coverage |
 | `read -s` | exact on covered cases | no warning on supported forms | unit coverage | direct `--silent` lowering is in place |
-| `read -d` | exact on covered simple cases / best-effort otherwise | no warning on covered simple cases; delimiter warning on lossy cases | unit plus focused runtime integration | single-variable non-empty delimiter reads now use `__monk_read_delim`; array, multi-var, empty-delimiter, and mixed-option forms remain best-effort |
+| `read -d` | exact on the covered helper path / best-effort otherwise | no warning on covered helper-backed forms; delimiter warning on lossy cases | unit plus focused runtime integration | covered forms now include empty delimiters, arrays, multi-variable assignment, non-whitespace IFS cases, and supported mixed flag clusters; no-var delimiter reads remain best-effort |
 | Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration plus real-world incidental use | simple cases are now exercised directly |
 | Process substitution `<(...)` | exact on covered cases | no dedicated warning | focused runtime integration fixture | a real body-lowering and no-split bug was fixed while adding coverage |
-| Process substitution `>(...)` | best-effort | no dedicated warning | Linux-gated runtime integration plus translation-shape assertions | FIFO workaround is exercised in CI; local macOS runs skip the fixture because of sandbox restrictions |
+| Process substitution `>(...)` | best-effort | no dedicated warning | generated helper plus broadened Linux-gated runtime surface and translation-shape assertions | the helper-backed FIFO path is landed, but Linux runtime evidence is still the source of truth before claiming stronger parity |
 | `readonly` / `declare -r` | best-effort | warning for missing readonly enforcement | unit diagnostics plus generated real-world parity | behavior is intentionally lossy |
 | `shopt` | unsupported | warning note | direct unit diagnostics | lowered to `true`; no semantic emulation |
-| `source` recursion with literal paths | exact on covered cases | warnings for recursive/non-literal variants | inline argv unit coverage plus runtime integration | simple literal recursive sourcing with argv/env effects is now exercised end to end |
+| `source` recursion with literal paths | exact on covered cases | warnings for recursive/non-literal variants | source-graph unit coverage plus runtime integration | simple literal recursive sourcing with argv/env effects is exercised end to end; resolution now tries cwd-relative paths first, then parent-source-directory fallback |
 | Background jobs / `wait` under `set -e` / `pipefail` | exact on covered translated wait cases / best-effort otherwise | warning on PID-specific `$!` follow-on uses | focused runtime integration fixtures | Monk-managed job tokens now back translated `$!` and `wait`; PID-specific uses such as `kill $!` remain manual-review territory |
 | Non-literal `source` paths | unsupported | warning | no dedicated runtime evidence | intentionally left for manual review |
 | `trap` | best-effort | warnings on unsupported option forms | unit diagnostics plus simple `EXIT` runtime integration | simple `EXIT` lowering now has end-to-end coverage; option-heavy behavior is not modeled |
@@ -113,9 +116,10 @@ The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines
 
 The following gaps remain after the changes in this audit:
 
-- Expand exact-case runtime coverage for delimiter-heavy `read -d` combinations, or keep the remaining cases explicitly best-effort.
-- Decide whether `>(...)` needs broader cross-platform evidence beyond the current Linux-gated fixture.
+- Keep the residual warning-driven `read` branches explicit: no-var delimiter reads, non-numeric fd values, and unsupported option clusters should either gain evidence or stay clearly best-effort.
+- Record explicit Linux runtime evidence for the helper-backed `>(...)` surface before upgrading it beyond best-effort in this audit.
 - Keep option-heavy `trap` forms and non-literal `source` warning-driven unless a precise exact strategy is worth the complexity.
+- Keep the new public-source and bake-off seam tests in lockstep with future refactors so architecture cleanup cannot silently regress recursive sourcing or bake-off selection/report behavior.
 
 ## Documentation Outcome
 
@@ -123,4 +127,5 @@ After this audit:
 
 - `translator-todo.md` is still the implementation checklist
 - this file is the fidelity matrix
-- the README links to this audit and now describes the CI parity setup and the status of manual fish baselines more precisely
+- the README links to this audit and now describes the CI parity setup, public module layout, and the status of manual fish baselines more precisely
+- `docs/design/architecture.md` now records the module and Cabal-component boundaries behind the current layout

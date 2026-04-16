@@ -11,15 +11,15 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## `read`
 
-- Recheck scripts using `read -a`, multiple destination variables, or custom `IFS`.
-- Simple single-variable non-empty `read -d` now has an exact helper path and focused runtime coverage.
-- Recheck delimiter-driven `read -d` flows against real stdin when they use empty delimiters, multiple destination variables, arrays, or mixed option clusters, because those cases still differ from Bash.
-- Prefer explicit `string split`, `string collect`, and `read --delimiter` logic in hand-edited Fish for non-trivial stdin parsing.
+- The helper-backed exact path now covers the current gated `read` surface for explicit `read -d` flows, including empty delimiters, arrays, multiple destination variables, non-whitespace `IFS` cases, supported mixed flag clusters, and numeric `-u` helper-backed reads.
+- Remaining warning-driven `read` cases still deserve manual review: no-var delimiter reads, non-numeric fd values, and unsupported flag clusters.
+- If a translated stdin parser still carries a `read` warning, recheck it against real Bash input instead of trusting the generated Fish blindly.
+- Prefer explicit `string split`, `string collect`, and small helper functions in hand-edited Fish when the parsing logic is critical and Monk still emits a `read` warning.
 
 ## Process Substitution
 
 - `<(...)` now has direct runtime coverage for simple cases, but larger pipelines should still be tested in Fish.
-- `>(...)` now has Linux-gated runtime coverage for a simple case, but it remains a manual-review area for non-trivial flows and for local macOS runs that skip the fixture.
+- `>(...)` now uses a generated FIFO helper and has a broadened Linux-gated fixture surface, but it remains a manual-review area until explicit Linux runtime evidence is recorded for the helper-backed path.
 - If the translated output feeds another command asynchronously, prefer rewriting it as `mktemp` plus explicit producer/consumer steps.
 
 ## `trap`
@@ -46,10 +46,11 @@ This guide covers the warning classes and best-effort areas that most often need
 ## Non-literal `source`
 
 - Recursive translation only inlines literal source paths.
+- Literal recursive source resolution now tries the working-directory-relative path first and then falls back to the parent source file directory.
 - For dynamic source paths, keep them as manual review points and convert them to explicit branching or path resolution in Fish.
 
 ## Warning-Driven Cleanup Workflow
 
 - Run Monk with warnings enabled.
-- Use `MONK_INTEGRATION=1 cabal test` and compare the translated script against Bash on representative inputs.
+- Use `MONK_INTEGRATION=1 cabal test` and compare the translated script against Bash on representative inputs; the current local baseline is a passing 220-test run including the generalized `read -d` fixtures, recursive source-graph seam coverage, and the curated real-world parity fixtures.
 - Treat warnings in `translator-audit.md` as semantic categories, not cosmetic notes.

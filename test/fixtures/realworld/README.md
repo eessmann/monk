@@ -2,6 +2,8 @@
 
 These fixtures are sourced from public repositories and curated for safe, non-destructive validation.
 
+The directory also contains a few curated fixtures built from common Bash script patterns when a full upstream script would be too noisy, too large, or too environment-dependent for automated parity testing.
+
 ## Sources
 
 - `hello-world.bash`: https://github.com/ruanyf/simple-bash-scripts/blob/master/scripts/hello-world.sh
@@ -14,6 +16,10 @@ These fixtures are sourced from public repositories and curated for safe, non-de
 - `taoc.bash`: https://github.com/oldratlee/useful-scripts/blob/dev-3.x/bin/taoc
 - `neofetch.bash`: https://github.com/dylanaraps/neofetch/blob/master/neofetch
 - `neofetch-mini.bash`: reduced slice derived from `neofetch`'s `get_args()` image backend handling
+- `argparse-mini.bash`: curated option-parser slice exercising long options, array accumulation, and `--` handling
+- `envfile-preview.bash`: curated dotenv-like reader slice exercising `while read`, `continue`, and parameter expansion cleanup
+- `path-filter.bash`: curated PATH-walker slice exercising pattern trimming, glob cases, and arithmetic counters
+- `semver-normalize.bash`: curated version-normalizer slice exercising here-strings, local variables, and default expansions
 
 ## Metadata
 
@@ -32,3 +38,4 @@ Example:
 - `taoc.bash` depends on `tac` being available (coreutils on Linux).
 - `neofetch.bash` is a large real-world script used for bake-off and integration checks only; manual fish comparison is skipped.
 - `neofetch-mini.bash` is the small generated-output regression slice derived from `neofetch`; it stays in the normal integration suite while full `neofetch.bash` remains bake-off-only.
+- The curated fixtures are intentionally self-contained and deterministic so they can stay in the normal integration suite without network, filesystem mutation, or terminal-only behavior.
