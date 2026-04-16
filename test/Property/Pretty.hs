@@ -24,13 +24,13 @@ propertyPrettyTests =
            in T.isInfixOf ("'" <> t <> "'") out,
       QC.testProperty "Pipeline renders N pipes for N continuations" $ \(QC.NonNegative n) ->
         let conts = replicate n (PipeTo [] (Stmt (Command "true" [])))
-            pipe = FishJobPipeline False [] (Stmt (Command "true" [])) conts False
+            pipe = MkFishJobPipeline False [] (Stmt (Command "true" [])) conts False
             out = renderFish [Stmt (Pipeline pipe)]
          in T.count " | " out == n,
       QC.testProperty "Job conjunction counts and/or tokens" $ \(xs :: [Bool]) ->
-        let mkPipe = FishJobPipeline False [] (Stmt (Command "true" [])) [] False
+        let mkPipe = MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False
             cont = map (\b -> if b then JCAnd mkPipe else JCOr mkPipe) xs
-            conj = FishJobConjunction Nothing mkPipe cont
+            conj = MkFishJobConjunction Nothing mkPipe cont
             out = renderFish [Stmt (JobConj conj)]
             ands = length (filter id xs)
             ors = length (filter not xs)
@@ -52,7 +52,7 @@ propertyPrettyTests =
         let genCase = do
               pat <- ExprLiteral <$> genTextNoQuote
               body <- genNonEmptyStmts
-              pure (CaseItem (pat NE.:| []) body)
+              pure (MkCaseItem (pat NE.:| []) body)
          in QC.forAll (QC.listOf1 genCase) $ \items ->
               let switchCmd = Stmt (Switch (ExprLiteral "x") (NE.fromList items) [])
                   out = renderFish [switchCmd]
@@ -63,7 +63,7 @@ propertyPrettyTests =
       QC.testProperty "Function pretty begins with function name and has one end" $
         QC.forAll (fmap T.pack (QC.listOf1 (QC.elements (['a' .. 'z'] <> ['A' .. 'Z'] <> "_")))) $ \nameTxt ->
           QC.forAll genNonEmptyStmts $ \body ->
-            let fn = FishFunction {funcName = nameTxt, funcFlags = [], funcParams = [], funcBody = body}
+            let fn = MkFishFunction {funcName = nameTxt, funcFlags = [], funcParams = [], funcBody = body}
                 out = renderFish [Stmt (Function fn)]
                 ls = T.lines out
                 headerOK = case ls of

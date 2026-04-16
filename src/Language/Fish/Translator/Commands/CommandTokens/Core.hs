@@ -43,7 +43,8 @@ import Language.Fish.Translator.Commands.Tests
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad
-  ( noteUnsupported,
+  ( WarningCode (..),
+    noteUnsupported,
     setErrexitEnabled,
     setPipefailEnabled,
   )
@@ -93,26 +94,26 @@ translateCommandTokensWithoutTime cmdTokens =
                       else fallback
 
 translateCommandTokensWithoutTimeM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
-translateCommandTokensWithoutTimeM = translateCommandTokensWithoutTimeHoistedM
+translateCommandTokensWithoutTimeM = translateCommandTokensWithoutTimePlanM
 
-translateCommandTokensWithoutTimeHoistedM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
-translateCommandTokensWithoutTimeHoistedM cmdTokens =
+translateCommandTokensWithoutTimePlanM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
+translateCommandTokensWithoutTimePlanM cmdTokens =
   case cmdTokens of
     [] -> hoistM [] Nothing
     (c : args) -> do
       let name = tokenToLiteralText c
-      Hoisted preRedirs (redirs, plainArgs) <- parseRedirectTokensM args
+      MkHoisted preRedirs (redirs, plainArgs) <- parseRedirectTokensM args
       if T.null name
         then do
-          Hoisted preArgs _ <- translateArgsM plainArgs
+          MkHoisted preArgs _ <- translateArgsM plainArgs
           hoistM (preRedirs <> preArgs) Nothing
         else
           case T.unpack name of
             "echo" -> do
-              Hoisted pre cmd <- translateEchoM plainArgs redirs
+              MkHoisted pre cmd <- translateEchoM plainArgs redirs
               hoistM (preRedirs <> pre) (Just cmd)
             _ -> do
-              Hoisted preArgs argExprs <- translateArgsM plainArgs
+              MkHoisted preArgs argExprs <- translateArgsM plainArgs
               let renderedArgs = renderArgs (argExprs ++ redirs)
                   testArgs = normalizeTestExprs renderedArgs
                   fallback = Command name renderedArgs
@@ -124,12 +125,12 @@ translateCommandTokensWithoutTimeHoistedM cmdTokens =
                   if null redirs
                     then case isSingleBracketTokens c plainArgs of
                       Just middle -> do
-                        Hoisted pre bracketArgs <- translateArgsM middle
+                        MkHoisted pre bracketArgs <- translateArgsM middle
                         hoistM (preRedirs <> pre) (Just (Command "test" (normalizeTestExprs (renderArgs bracketArgs))))
                       Nothing ->
                         case isDoubleBracketTokens c plainArgs of
                           Just middle -> do
-                            Hoisted pre cmd <- translateDoubleBracketArgsM middle
+                            MkHoisted pre cmd <- translateDoubleBracketArgsM middle
                             hoistM (preRedirs <> pre) (Just cmd)
                           Nothing ->
                             case T.unpack name of
@@ -140,7 +141,7 @@ translateCommandTokensWithoutTimeHoistedM cmdTokens =
                               "." ->
                                 hoistM pre0 (Just (Command "source" (renderArgs argExprs)))
                               "eval" -> do
-                                Hoisted pre expr <- translateEvalM plainArgs
+                                MkHoisted pre expr <- translateEvalM plainArgs
                                 hoistM (preRedirs <> pre) (Just (Eval expr))
                               "exec" ->
                                 hoistM pre0 (Just (Command "exec" (renderArgs argExprs)))
@@ -151,20 +152,20 @@ translateCommandTokensWithoutTimeHoistedM cmdTokens =
                                 let opts = parseSetOptions plainArgs
                                 forM_ (setErrexit opts) setErrexitEnabled
                                 forM_ (setPipefail opts) setPipefailEnabled
-                                notes <- mapM noteUnsupported (setIssues opts)
+                                notes <- mapM (noteUnsupported SetOptionIssue . Just) (setIssues opts)
                                 let preAll = pre0 <> notes
                                 if setSawOptions opts || not (null (setIssues opts))
                                   then hoistM preAll Nothing
                                   else hoistM preAll (Just (Command "set" (renderArgs argExprs)))
                               "read" -> do
-                                let ReadParseResult {readIssues} =
+                                let MkReadParseResult {readIssues} =
                                       parseReadArgsDetailed plainArgs [] [] [] False False
-                                notes <- mapM noteUnsupported (nub readIssues)
+                                notes <- mapM (noteUnsupported ReadIssue . Just) (nub readIssues)
                                 let preAll = pre0 <> notes
                                 readCmd <- translateReadM plainArgs
                                 hoistM preAll (Just readCmd)
                               "shopt" -> do
-                                note <- noteUnsupported "shopt has no fish equivalent; ignored"
+                                note <- noteUnsupported ShoptIgnored Nothing
                                 hoistM (pre0 <> [note]) (Just (Command "true" (renderArgs (argExprs ++ redirs))))
                               _ ->
                                 hoistM pre0 (Just (Command name (renderArgs argExprs)))

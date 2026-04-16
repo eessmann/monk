@@ -40,7 +40,7 @@ parseParamCore word =
 
 parseSimpleVar :: Token -> ParamSimple
 parseSimpleVar word =
-  ParamSimple
+  MkParamSimple
     { simpleName = paramNameFrom word,
       simpleIndex = paramIndexFrom word
     }
@@ -54,14 +54,14 @@ parseParamOperator word = do
   where
     parseParamOperatorText opTxt rest =
       case opTxt of
-        ":-" -> Just (ParamOperator OpDefault CondNonEmpty rest)
-        "-" -> Just (ParamOperator OpDefault CondSet rest)
-        ":=" -> Just (ParamOperator OpAssign CondNonEmpty rest)
-        "=" -> Just (ParamOperator OpAssign CondSet rest)
-        ":?" -> Just (ParamOperator OpError CondNonEmpty rest)
-        "?" -> Just (ParamOperator OpError CondSet rest)
-        ":+" -> Just (ParamOperator OpAlt CondNonEmpty rest)
-        "+" -> Just (ParamOperator OpAlt CondSet rest)
+        ":-" -> Just (MkParamOperator OpDefault CondNonEmpty rest)
+        "-" -> Just (MkParamOperator OpDefault CondSet rest)
+        ":=" -> Just (MkParamOperator OpAssign CondNonEmpty rest)
+        "=" -> Just (MkParamOperator OpAssign CondSet rest)
+        ":?" -> Just (MkParamOperator OpError CondNonEmpty rest)
+        "?" -> Just (MkParamOperator OpError CondSet rest)
+        ":+" -> Just (MkParamOperator OpAlt CondNonEmpty rest)
+        "+" -> Just (MkParamOperator OpAlt CondSet rest)
         _ -> Nothing
 
 parseParamModifier :: Token -> Maybe (Text, ParamModifier)

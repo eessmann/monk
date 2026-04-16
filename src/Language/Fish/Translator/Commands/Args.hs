@@ -21,7 +21,7 @@ translateArgsM = translateArgsHoistedM
 translateArgsHoistedM :: [Token] -> HoistedM [Arg]
 translateArgsHoistedM toks = do
   parts <- mapM translateTokenToArgM toks
-  let Hoisted pre exprs = sequenceA parts
+  let MkHoisted pre exprs = sequenceA parts
   hoistM pre exprs
 
 translateEvalM :: [Token] -> HoistedM (FishExpr TStr)
@@ -30,7 +30,7 @@ translateEvalM = translateEvalHoistedM
 translateEvalHoistedM :: [Token] -> HoistedM (FishExpr TStr)
 translateEvalHoistedM toks = do
   parts <- mapM translateTokenToExprM toks
-  let Hoisted pre exprs = sequenceA parts
+  let MkHoisted pre exprs = sequenceA parts
   hoistM pre (concatWithSpaces exprs)
 
 concatWithSpaces :: [FishExpr TStr] -> FishExpr TStr

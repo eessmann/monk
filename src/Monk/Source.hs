@@ -46,7 +46,7 @@ data SourceMode
   | SourceSeparate
   deriving stock (Show, Eq)
 
-data SourceGraph = SourceGraph
+data SourceGraph = MkSourceGraph
   { sgOrder :: [FilePath],
     sgParseComments :: M.Map FilePath [PositionedComment],
     sgTranslations :: M.Map FilePath Translation
@@ -69,7 +69,7 @@ translateSourceGraph cfg recursive rootPath =
     go _ order comments translations [] =
       pure
         ( Right
-            SourceGraph
+            MkSourceGraph
               { sgOrder = order,
                 sgParseComments = comments,
                 sgTranslations = translations
@@ -92,7 +92,7 @@ translateSourceGraph cfg recursive rootPath =
                       then collectSourceMap path (prRoot parseRes)
                       else pure mempty
                   let translation =
-                        Translation
+                        MkTranslation
                           { trPath = path,
                             trStatements = translationStatements result,
                             trState = translationState result,
@@ -255,12 +255,12 @@ rewriteSourceListExpr f = \case
   other -> other
 
 rewriteCaseItem :: (Text -> Text) -> CaseItem -> CaseItem
-rewriteCaseItem f (CaseItem pats body) =
-  CaseItem pats (NE.map (rewriteStatement f) body)
+rewriteCaseItem f (MkCaseItem pats body) =
+  MkCaseItem pats (NE.map (rewriteStatement f) body)
 
 rewriteJobList :: (Text -> Text) -> FishJobList -> FishJobList
-rewriteJobList f (FishJobList conj) =
-  FishJobList (NE.map (rewriteConjunction f) conj)
+rewriteJobList f (MkFishJobList conj) =
+  MkFishJobList (NE.map (rewriteConjunction f) conj)
 
 rewriteConjunction :: (Text -> Text) -> FishJobConjunction -> FishJobConjunction
 rewriteConjunction f jc =

@@ -47,7 +47,7 @@ data ShellRunMode
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
-data RunResult = RunResult
+data RunResult = MkRunResult
   { rrExit :: ExitCode,
     rrStdout :: Text,
     rrStderr :: Text,
@@ -55,7 +55,7 @@ data RunResult = RunResult
   }
   deriving stock (Eq, Show)
 
-data EnvDelta = EnvDelta
+data EnvDelta = MkEnvDelta
   { envAddedOrChanged :: Map.Map Text Text,
     envRemoved :: Set.Set Text
   }
@@ -110,7 +110,7 @@ runShellFileWithMode' runMode shell env0 scriptPath args stdinInput = do
   (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
   let (stdoutPart, envPart) = splitEnv marker (T.pack out)
   pure
-    RunResult
+    MkRunResult
       { rrExit = exitCode,
         rrStdout = stdoutPart,
         rrStderr = T.pack err,
@@ -211,7 +211,7 @@ diffEnv baseEnv newEnv =
       stripIgnored = Map.filterWithKey (\k _ -> not (Set.member k ignored))
       baseFiltered = stripIgnored baseEnv
       newFiltered = stripIgnored newEnv
-   in EnvDelta
+   in MkEnvDelta
         { envAddedOrChanged =
             Map.differenceWith
               (\newVal oldVal -> if newVal == oldVal then Nothing else Just newVal)

@@ -65,11 +65,11 @@ translateTokenToMaybeStatusCmd token =
     T_AndIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+       in Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
     T_OrIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+       in Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
     _ -> Nothing
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus

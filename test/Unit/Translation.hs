@@ -7,14 +7,15 @@ where
 
 import Data.Text qualified as T
 import Monk.Translation
-  ( TranslateState (..),
-    TranslationResult (..),
-    Warning (..),
+  ( TranslationResult (..),
     defaultConfig,
     parseBashScript,
     renderTranslation,
+    stateWarnings,
     strictConfig,
+    translationState,
     translateParseResult,
+    warnMessage,
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -32,6 +33,9 @@ unitTranslationTests =
         T.isInfixOf "eval $body" out H.@? "expected helper to evaluate rendered fish body"
         T.isInfixOf "rm '-f' $__monk_psub_fifo" out H.@? "expected fifo cleanup in helper"
         T.isInfixOf "rmdir $__monk_psub_dir" out H.@? "expected temp directory cleanup in helper",
+      H.testCase "Process substitution helper is registered once" $ do
+        out <- translateScript "echo hi > >(cat)\necho bye > >(cat)"
+        T.count "function __monk_procsub_out" out @?= 1,
       H.testCase "Echo -e lowers to printf %b" $ do
         out <- translateScript "echo -e \"hi\\nthere\""
         T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
@@ -140,6 +144,22 @@ unitTranslationTests =
         case translateParseResult strictConfig result of
           Left _ -> pure ()
           Right _ -> H.assertFailure "expected translation failure in strict mode",
+      H.testCase "Strict mode fails on status-context subshell" $ do
+        result <- parseBashScript "spec.sh" "if (echo hi); then echo ok; fi"
+        case translateParseResult strictConfig result of
+          Left _ -> pure ()
+          Right _ -> H.assertFailure "expected translation failure in strict mode",
+      H.testCase "Strict mode fails on command-substitution subshell" $ do
+        result <- parseBashScript "spec.sh" "echo $( (echo hi) )"
+        case translateParseResult strictConfig result of
+          Left _ -> pure ()
+          Right _ -> H.assertFailure "expected translation failure in strict mode",
+      H.testCase "Command-substitution subshell keeps its body in non-strict mode" $ do
+        out <- translateScript "echo $( (echo hi) )"
+        T.isInfixOf "echo 'hi'" out H.@? "expected translated subshell body in command substitution"
+        H.assertBool
+          ("unexpected subshell collapse in command substitution: " <> T.unpack out)
+          (not (T.isInfixOf "(true)" out)),
       H.testCase "Array index assignment is 1-based" $ do
         out <- translateScript "arr[0]=foo"
         out @?= "set --global arr[1] 'foo'",
@@ -309,7 +329,7 @@ unitTranslationTests =
       H.testCase "Read flags translate to fish equivalents" $ do
         outD <- translateScript "read -d : first second"
         T.isInfixOf "__monk_read_capture_delim" outD H.@? "expected delimiter capture helper"
-        T.isInfixOf "__monk_read_assign_vars" outD H.@? "expected Bash-style assignment helper"
+        T.isInfixOf "__monk_read_assign" outD H.@? "expected Bash-style assignment helper"
         H.assertBool
           ("unexpected delimiter warning comment in exact helper path: " <> T.unpack outD)
           (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" outD))
@@ -324,6 +344,10 @@ unitTranslationTests =
         T.isInfixOf "<&9" outU H.@? "expected numeric fd redirection in helper path"
         outA <- translateScript "read -a arr"
         T.isInfixOf "read --array arr" outA H.@? "expected array flag",
+      H.testCase "Read helpers are registered once" $ do
+        out <- translateScript "read -d : a b\nread -d : c d"
+        T.count "function __monk_read_capture_delim" out @?= 1
+        T.count "function __monk_read_assign" out @?= 1,
       H.testCase "Background jobs use Monk tracking runtime" $ do
         out <- translateScript "false &\nbg=$!\nwait \"$bg\""
         T.isInfixOf "__monk_bg_status_path" out H.@? "expected background status helper"
@@ -331,14 +355,21 @@ unitTranslationTests =
         T.isInfixOf "__monk_wait" out H.@? "expected translated wait helper"
         T.isInfixOf "printf '%s\\n' $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
         H.assertBool "expected $! to lower to Monk job token" (not (T.isInfixOf "$last_pid" out)),
+      H.testCase "Background runtime is registered once" $ do
+        out <- translateScript "false &\nwait \"$!\"\ntrue &\nwait \"$!\""
+        T.count "function __monk_bg_status_path" out @?= 1
+        T.count "function __monk_wait" out @?= 1,
+      H.testCase "Pipefail helper is registered once" $ do
+        out <- translateScript "set -o pipefail\nfalse | true\ntrue | false"
+        T.count "function __monk_pipefail" out @?= 1,
       H.testCase "Exact read delimiter array helper emits no semantic warnings" $ do
         result <- parseBashScript "spec.sh" "read -d '' -ra fields"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (warnings (translationState translation))
-            T.isInfixOf "__monk_read_assign_array" out H.@? "expected exact array assignment helper"
+                warnMessages = map warnMessage (stateWarnings (translationState translation))
+            T.isInfixOf "__monk_read_assign" out H.@? "expected exact array assignment helper"
             T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited capture helper"
             H.assertBool
               ("unexpected warnings in exact array path: " <> show warnMessages)
@@ -351,8 +382,8 @@ unitTranslationTests =
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (warnings (translationState translation))
-            T.isInfixOf "__monk_read_assign_vars" out H.@? "expected exact variable assignment helper"
+                warnMessages = map warnMessage (stateWarnings (translationState translation))
+            T.isInfixOf "__monk_read_assign" out H.@? "expected exact variable assignment helper"
             H.assertBool
               ("unexpected warnings in exact multi-var path: " <> show warnMessages)
               ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
@@ -364,7 +395,7 @@ unitTranslationTests =
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (warnings (translationState translation))
+                warnMessages = map warnMessage (stateWarnings (translationState translation))
             T.isInfixOf "__monk_read_capture_delim" out H.@? "expected exact capture helper"
             H.assertBool
               ("unexpected delimiter warning in mixed exact path: " <> show warnMessages)

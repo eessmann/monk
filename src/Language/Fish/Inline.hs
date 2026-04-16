@@ -19,7 +19,7 @@ import Language.Fish.AST
 import Language.Fish.Translator.Monad (TranslateState)
 
 -- | Translation artifacts for one source file.
-data Translation = Translation
+data Translation = MkTranslation
   { -- | Source path used for this translation.
     trPath :: FilePath,
     -- | Translated fish statements.
@@ -214,6 +214,6 @@ inlineCaseItem ::
   Translation ->
   CaseItem ->
   IO CaseItem
-inlineCaseItem warn translations stack tr (CaseItem pats body) = do
+inlineCaseItem warn translations stack tr (MkCaseItem pats body) = do
   body' <- inlineBody warn translations stack tr body
-  pure (CaseItem pats body')
+  pure (MkCaseItem pats body')

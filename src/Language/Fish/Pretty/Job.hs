@@ -15,7 +15,7 @@ import Prettyprinter
 import Prelude hiding (group)
 
 prettyJobPipelineWith :: (FishStatement -> Doc ann) -> (forall t. FishExpr t -> Doc ann) -> FishJobPipeline -> Doc ann
-prettyJobPipelineWith prettyStmt prettyExpr (FishJobPipeline time vars stmt conts bg) =
+prettyJobPipelineWith prettyStmt prettyExpr (MkFishJobPipeline time vars stmt conts bg) =
   let timeDoc = if time then "command time" <> space else mempty
       varsDoc = if null vars then mempty else hsep (map (prettyVarAssign prettyExpr) vars) <> space
       headDoc = group (timeDoc <> varsDoc <> prettyStmt stmt)
@@ -32,7 +32,7 @@ prettyJobPipelineWith prettyStmt prettyExpr (FishJobPipeline time vars stmt cont
    in group (headDoc <> pipesDoc <> if bg then space <> "&" else mempty)
 
 prettyVarAssign :: (forall t. FishExpr t -> Doc ann) -> VariableAssignment -> Doc ann
-prettyVarAssign prettyExpr (VariableAssignment name mval) =
+prettyVarAssign prettyExpr (MkVariableAssignment name mval) =
   case mval of
     Nothing -> pretty name <> "="
     Just v -> pretty name <> "=" <> prettyExpr v
@@ -42,7 +42,7 @@ prettyJobConjunctionWith ::
   (forall t. FishExpr t -> Doc ann) ->
   FishJobConjunction ->
   Doc ann
-prettyJobConjunctionWith prettyStmt prettyExpr (FishJobConjunction mdec job conts) =
+prettyJobConjunctionWith prettyStmt prettyExpr (MkFishJobConjunction mdec job conts) =
   let headDoc = case mdec of
         Nothing -> prettyJobPipelineWith prettyStmt prettyExpr job
         Just d -> prettyConjunction d <+> prettyJobPipelineWith prettyStmt prettyExpr job
@@ -54,7 +54,7 @@ prettyJobConjunctionWith prettyStmt prettyExpr (FishJobConjunction mdec job cont
       JCOr jp -> space <> hardline <> prettyConjunction ConjOr <+> prettyJobPipelineWith prettyStmt prettyExpr jp
 
 prettyJobListWith :: (FishStatement -> Doc ann) -> (forall t. FishExpr t -> Doc ann) -> FishJobList -> Doc ann
-prettyJobListWith prettyStmt prettyExpr (FishJobList jobs) =
+prettyJobListWith prettyStmt prettyExpr (MkFishJobList jobs) =
   vsep (map (prettyJobConjunctionWith prettyStmt prettyExpr) (NE.toList jobs))
 
 prettyConjunction :: Conjunction -> Doc ann

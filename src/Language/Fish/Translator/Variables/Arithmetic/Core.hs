@@ -56,13 +56,13 @@ translateArithmeticStatusM exprTok =
   case stripArithWrappers exprTok of
     TA_Binary _ op lhs rhs
       | Just testOp <- arithCompareOp (toText op) -> do
-          Hoisted preL lhsExpr <- arithStatementPlanM lhs
-          Hoisted preR rhsExpr <- arithStatementPlanM rhs
+          MkHoisted preL lhsExpr <- arithStatementPlanM lhs
+          MkHoisted preR rhsExpr <- arithStatementPlanM rhs
           let testCmd = testBinaryCommand testOp lhsExpr rhsExpr
               pre = preL <> preR
           pure (beginIfNeeded pre testCmd)
     _ -> do
-      Hoisted pre valueExpr <- arithStatementPlanM exprTok
+      MkHoisted pre valueExpr <- arithStatementPlanM exprTok
       let testCmd = testNonZeroCommand valueExpr
       pure (beginIfNeeded pre testCmd)
 
@@ -72,12 +72,12 @@ arithArgsFromToken exprToken =
 
 arithArgsPlanM :: Token -> HoistedM (NonEmpty (FishExpr TStr))
 arithArgsPlanM exprTok = do
-  Hoisted pre args <- arithArgsPlan exprTok
+  MkHoisted pre args <- arithArgsPlan exprTok
   hoistM pre (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty args))
 
 arithStatementPlanM :: Token -> HoistedM (FishExpr TInt)
 arithStatementPlanM exprTok = do
-  Hoisted pre args <- arithArgsPlanM exprTok
+  MkHoisted pre args <- arithArgsPlanM exprTok
   hoistM pre (ExprMath args)
 
 mathCommandFromToken :: Bool -> Token -> FishCommand TStatus
@@ -88,6 +88,6 @@ mathCommandFromArgs :: Bool -> NonEmpty (FishExpr TStr) -> FishCommand TStatus
 mathCommandFromArgs suppressOutput args =
   let scaleArgs = [ExprVal (ExprLiteral "--scale"), ExprVal (ExprLiteral "0")]
       mathArgs = scaleArgs <> map ExprVal (NE.toList args)
-      mathRedir = RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
+      mathRedir = RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
       allArgs = if suppressOutput then mathArgs <> [mathRedir] else mathArgs
    in Command "math" allArgs

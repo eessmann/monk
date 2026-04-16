@@ -12,14 +12,14 @@ exampleAST =
     Stmt (Command "echo" [ExprVal (ExprLiteral "Hello Fish!")]),
     Stmt
       ( If
-          (FishJobList (FishJobConjunction Nothing (FishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] :| []))
+          (MkFishJobList (MkFishJobConjunction Nothing (MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] :| []))
           (Stmt (Command "echo" [ExprVal (ExprLiteral "In the if!")]) :| [])
           [Stmt (Command "echo" [ExprVal (ExprLiteral "In the else!")])]
           []
       ),
     Stmt
       ( Function
-          FishFunction
+          MkFishFunction
             { funcName = "greet",
               funcFlags = [],
               funcParams = ["name"],
@@ -69,7 +69,7 @@ exampleAST =
       ),
     Stmt
       ( Pipeline
-          FishJobPipeline
+          MkFishJobPipeline
             { jpTime = False,
               jpVariables = [],
               jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "something")]),
@@ -80,11 +80,11 @@ exampleAST =
     Stmt
       ( Switch
           (ExprJoinList (ExprVariable (VarAll "myvar")))
-          ( CaseItem
+          ( MkCaseItem
               { casePatterns = ExprLiteral "foo" :| [],
                 caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was foo")]) :| []
               }
-              :| [ CaseItem
+              :| [ MkCaseItem
                      { casePatterns = ExprLiteral "bar" :| [ExprLiteral "baz"],
                        caseBody = Stmt (Command "echo" [ExprVal (ExprLiteral "It was bar or baz")]) :| []
                      }
@@ -95,6 +95,6 @@ exampleAST =
     Stmt
       ( Begin
           (Stmt (Command "echo" [ExprVal (ExprLiteral "brace body")]) :| [])
-          [RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))]
+          [RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))]
       )
   ]

@@ -155,13 +155,13 @@ translateAssignmentWithFlagsM baseFlags tok =
           indexedVar = indexedVarText fishVar indices
       case indexedVar of
         Just varTxt -> do
-          Hoisted pre expr <- translateTokenToListExprMNoSplit val
+          MkHoisted pre expr <- translateTokenToListExprMNoSplit val
           pure (pre <> [Stmt (Set flags varTxt expr)])
         Nothing ->
           case val of
             T_Array _ elems -> translateArrayAssignmentM fishVar flags elems
             _ -> do
-              Hoisted pre expr <- translateTokenToListExprMNoSplit val
+              MkHoisted pre expr <- translateTokenToListExprMNoSplit val
               pure (pre <> [Stmt (Set flags fishVar expr)])
     _ -> pure []
 

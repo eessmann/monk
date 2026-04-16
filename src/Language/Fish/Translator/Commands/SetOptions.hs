@@ -9,7 +9,7 @@ import Language.Fish.Translator.Token (tokenHasExpansion, tokenToLiteralText)
 import ShellCheck.AST
 
 -- | Parsed `set` flags that we care about.
-data SetOptionParse = SetOptionParse
+data SetOptionParse = MkSetOptionParse
   { setErrexit :: Maybe Bool,
     setPipefail :: Maybe Bool,
     setIssues :: [Text],
@@ -20,7 +20,7 @@ data SetOptionParse = SetOptionParse
 
 defaultSetOptionParse :: SetOptionParse
 defaultSetOptionParse =
-  SetOptionParse
+  MkSetOptionParse
     { setErrexit = Nothing,
       setPipefail = Nothing,
       setIssues = [],

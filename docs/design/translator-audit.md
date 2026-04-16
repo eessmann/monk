@@ -1,131 +1,81 @@
 # Translator Audit (2026-04-16)
 
-This audit reviews Monk against the goal of a principled Bash to Fish transpiler. The standard used here is strict:
+This audit evaluates Monk as a conservative Bash-to-Fish migrator.
 
-- `exact`: direct lowering plus runtime evidence on the current suite
-- `best-effort`: warnings, shims, raw pass-through, or documented semantic approximation
-- `unsupported`: warning-only or strict-mode failure with no semantic lowering
-- `unverified`: implementation exists, but current evidence is mostly syntax-level or too narrow
+Status labels used here:
 
-The sources for this audit were:
+- `exact`: direct lowering plus focused runtime evidence on the current suite
+- `best-effort`: lowering exists, but semantics are intentionally approximate or warning-driven
+- `unsupported`: warning-only or strict-mode failure with no meaningful lowering
+- `unverified`: implementation exists, but evidence is still too thin to promote confidence
 
-- `docs/design/translator-todo.md`
-- `README.md`
-- the translator modules under `src/Language/Fish/Translator/`
+Current evidence used for this audit:
+
+- the translator implementation under `src/Language/Fish/Translator/`
+- the public API and diagnostics layers under `src/Monk/`
 - the current unit, golden, property, integration, and real-world tests
-- the GitHub Actions workflow in `.github/workflows/ci.yml`
-- the current local 220-test `MONK_INTEGRATION=1 cabal test` baseline, which includes the curated real-world fixtures `argparse-mini`, `envfile-preview`, `path-filter`, and `semver-normalize`, plus direct source/harness/bake-off seam coverage
+- the bake-off runner under `scripts/`
+- a passing local `MONK_INTEGRATION=1 cabal test` run with 232 tests
+- a passing `--compatible --no-benchmark` bake-off smoke run over 18 fixtures with 0 Monk translation/runtime failures
+- the current bake-off workflow and documentation
 
-## Prioritized Findings
+## Current Assessment
 
-### P0: Semantic parity was not previously exercised in CI
+Monk is now in a better place to be judged as a correctness-first migrator rather than a sprawling feature checklist.
 
-Before this audit, CI ran `cabal test all` without `fish` installation or `MONK_INTEGRATION=1`, so the bash-vs-fish integration fixtures, output-equivalence properties, and generated real-world parity checks were skipped. That meant the most important semantic evidence existed only in local runs.
+The biggest correctness issue in the previous phase was subshell drift across contexts. Statement lowering already used a best-effort `begin ... end` strategy, but status-context subshells were still being rendered through `fish -c`, which lost parent variables and generated helpers. That bug is now fixed.
 
-This is now fixed in `.github/workflows/ci.yml`.
+The current subshell policy is consistent:
 
-### P1: Warning-only branches had little or no direct test coverage
+- normal mode emits the stable `BestEffortSubshell` warning and lowers to non-isolating `begin ... end`
+- `--strict` fails on subshells in statement, status, and command-substitution contexts
+- focused runtime fixtures now cover parent-variable access, exact `read -d`, and pipefail inside status-context subshells
 
-The following paths existed in the translator but were not directly asserted before this audit:
+The diagnostics model is also materially stronger than before:
 
-- `shopt` ignored with a note
-- delimiter/silent `read` handling and its diagnostics
-- dynamic `set -o` / expanded `set` options
-- malformed or unsupported `trap`, `shift`, `unset`, `declare`, `local`, and `export`
-- unsupported arithmetic `for ((...))` init and increment fallbacks
+- warnings are typed (`WarningCode`, `WarningSeverity`, optional detail, optional range)
+- CLI and reporting layers render user-facing text from those typed diagnostics
+- tests now assert stable warning codes/severities directly instead of relying on string heuristics
 
-These are now covered by direct unit tests for diagnostics and output shape.
+Helper emission is likewise in better shape:
 
-### P1: Best-effort I/O shims had thin runtime evidence
-
-Here-strings are non-trivial lowerings. Before this audit they were largely covered by translation-shape tests or incidental use in large fixtures. The suite now includes a focused runtime fixture for:
-
-- simple here-string behavior
-
-This follow-up pass also added runtime integration coverage for:
-
-- side-effecting parameter expansion in command arguments
-- side-effecting parameter expansion in redirection targets
-- side-effecting parameter expansion in `case` switch expressions
-- simple `<(...)` process substitution
-- recursive literal `source` with argv and environment effects
-
-The same pass exposed a real lowering bug in `<(...)`: process-substitution bodies were being rendered as empty commands and simple proc-sub words were incorrectly fed through IFS splitting. That is now fixed.
-
-This follow-up pass also added runtime integration coverage for:
-
-- translated background jobs / `$!` / `wait` under `set -e` and `pipefail`
-- generalized covered `read -d` forms, including empty-delimiter, array, multi-variable, non-whitespace-IFS, and mixed-flag slices
-
-The old narrow `read -d` helper has now been replaced with a generalized helper-backed exact path for covered delimiter-driven reads and numeric `-u` helper-backed reads. Remaining no-var delimiter reads, non-numeric fd values, and unsupported flag clusters stay best-effort. `>(cmd)` now also uses a generated helper and has a broadened Linux-gated fixture surface, but local macOS bake-off runs still skip those fixtures because Linux remains the semantic source of truth for acceptance.
-
-The architecture pass that followed also exposed a real recursive-source resolution bug in the new public `Monk.Source` layer: literal source discovery only tried the parent source file directory and missed working-directory-relative paths such as `source test/fixtures/...`. The source graph now tries cwd-relative resolution first and then falls back to the parent source file directory, with direct unit coverage and the existing runtime integration fixture keeping that path exercised.
-
-### P2: Differential properties were too narrow
-
-The old output-equivalence property generator only covered four script families:
-
-- simple variable echo
-- simple arithmetic
-- array indexing
-- uppercasing through a pipeline
-
-The generator now also covers:
-
-- argv round-tripping
-- stdin-driven `read`
-- temporary environment prefixes
-- case/glob matching
-- here-strings
-
-This materially broadens the semantic surface exercised on every parity run.
-
-### P2: Manual fish baselines are useful, but not evidence for Monk
-
-The `test/fixtures/realworld/*.fish` files are hand-written comparison baselines. They remain useful, but they should not be cited as proof that Monk's generated output is correct unless the generated output is also executed. The README and test naming now make that distinction more explicit.
-
-`neofetch` itself remains bake-off-only for Monk-generated output. It is still too large and warning-heavy to count as normal automated evidence today. A reduced `neofetch-mini` slice derived from `get_args()` now lives in the generated-output integration suite.
-
-`echo-args` is back in the generated-output integration set after making errexit lowering command-substitution aware by default. Monk now aims at Bash's default non-`inherit_errexit` behavior rather than exposing the old function-wide workaround.
+- pipefail, background runtime, exact `read`, and helper-backed `>(...)` now go through one helper registry keyed by helper ID
+- helper deduplication has direct unit coverage
 
 ## Capability Matrix
 
 | Area | Status | Diagnostics | Current Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| `set -e` / `pipefail` | best-effort | documented caveats; `nounset` warns | runtime integration on focused fixtures, background wait fixtures, and `realworld/echo-args` | default non-`inherit_errexit` command-substitution behavior and translated background wait paths are covered; some compound-list edge cases still diverge |
-| Subshells `(...)` | best-effort / unsupported | note in normal mode, failure in `--strict` | unit coverage only | environment isolation is not preserved |
-| Side-effecting parameter expansion in args / redirections / case | exact on covered cases | no warning on supported forms | focused runtime integration fixtures | command arguments, redirection targets, and `case` switch expressions now have parity coverage |
-| Arithmetic short-circuit / ternary side effects | exact on covered cases | no warning on supported forms | focused runtime integration fixture | edge cases still deserve expansion |
-| Arithmetic `for ((...))` fallback paths | best-effort | warning comments | direct unit warning coverage | unsupported init/increment forms still degrade to comments |
-| Arrays and 0-based to 1-based indexing | exact on covered cases | no warning | unit, property, and runtime evidence | one of the best-covered areas |
-| `read -n/-t/-u/-a` | best-effort overall | IFS note for lossy cases | unit plus runtime integration | plain lowering still exists for lossy branches, but numeric `-u` reads on the helper-backed exact path now have focused parity coverage |
-| `read -s` | exact on covered cases | no warning on supported forms | unit coverage | direct `--silent` lowering is in place |
-| `read -d` | exact on the covered helper path / best-effort otherwise | no warning on covered helper-backed forms; delimiter warning on lossy cases | unit plus focused runtime integration | covered forms now include empty delimiters, arrays, multi-variable assignment, non-whitespace IFS cases, and supported mixed flag clusters; no-var delimiter reads remain best-effort |
-| Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration plus real-world incidental use | simple cases are now exercised directly |
-| Process substitution `<(...)` | exact on covered cases | no dedicated warning | focused runtime integration fixture | a real body-lowering and no-split bug was fixed while adding coverage |
-| Process substitution `>(...)` | best-effort | no dedicated warning | generated helper plus broadened Linux-gated runtime surface and translation-shape assertions | the helper-backed FIFO path is landed, but Linux runtime evidence is still the source of truth before claiming stronger parity |
-| `readonly` / `declare -r` | best-effort | warning for missing readonly enforcement | unit diagnostics plus generated real-world parity | behavior is intentionally lossy |
-| `shopt` | unsupported | warning note | direct unit diagnostics | lowered to `true`; no semantic emulation |
-| `source` recursion with literal paths | exact on covered cases | warnings for recursive/non-literal variants | source-graph unit coverage plus runtime integration | simple literal recursive sourcing with argv/env effects is exercised end to end; resolution now tries cwd-relative paths first, then parent-source-directory fallback |
-| Background jobs / `wait` under `set -e` / `pipefail` | exact on covered translated wait cases / best-effort otherwise | warning on PID-specific `$!` follow-on uses | focused runtime integration fixtures | Monk-managed job tokens now back translated `$!` and `wait`; PID-specific uses such as `kill $!` remain manual-review territory |
-| Non-literal `source` paths | unsupported | warning | no dedicated runtime evidence | intentionally left for manual review |
-| `trap` | best-effort | warnings on unsupported option forms | unit diagnostics plus simple `EXIT` runtime integration | simple `EXIT` lowering now has end-to-end coverage; option-heavy behavior is not modeled |
-| `coproc` | unsupported | warning / strict failure | unit diagnostics | correctly treated as unsupported |
+| `set -e` / `pipefail` | best-effort | warnings on unsupported option surfaces; no warning on covered helper paths | focused runtime integration, background wait fixtures, properties, and real-world `echo-args` coverage | still conservative around compound-list edge cases |
+| Subshells `(...)` | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit plus focused runtime integration on status-context regressions | environment isolation is still not preserved |
+| Command-substitution subshells | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit coverage | no longer silently collapse to `true` |
+| Side-effecting parameter expansion in args / redirections / `case` | exact on covered forms | no warning on covered forms | focused runtime integration plus unit coverage | one of the strongest semantic areas now |
+| Arrays and 0-based to 1-based indexing | exact on covered forms | no warning | unit, property, and runtime evidence | stable area |
+| `read -d` covered helper path | exact on covered forms | no warning on covered helper-backed forms | focused runtime integration plus unit coverage | covered surface includes empty delimiters, arrays, multi-variable assignment, supported mixed flag clusters, and numeric `-u` helper-backed reads |
+| Residual `read` fallback surface | best-effort | `ReadIssue` warnings | unit coverage | no-var delimiter reads, non-numeric `-u`, and unsupported clusters remain warning-driven |
+| Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration | simple cases are covered directly |
+| Process substitution `<(...)` | exact on covered forms | no dedicated warning | focused runtime integration | current simple surface is in good shape |
+| Process substitution `>(...)` | best-effort | no dedicated warning | helper-backed lowering, unit coverage, Linux-gated fixtures | explicit Linux runtime evidence is still the promotion gate |
+| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph unit coverage plus runtime integration | cwd-relative and parent-relative resolution are both exercised |
+| Background jobs / translated `wait` | exact on covered translated-wait surface / best-effort otherwise | warning on PID-specific `$!` follow-ons | focused runtime integration | `kill $!`-style PID assumptions remain manual-review territory |
+| `trap` | best-effort | typed warnings for unsupported forms | unit diagnostics plus simple `EXIT` runtime integration | option-heavy behavior is still conservative |
+| `readonly` / `declare -r` | best-effort | stable readonly warning | unit coverage plus incidental runtime evidence | fish has no readonly enforcement |
+| `shopt` | unsupported | stable warning | direct unit coverage | lowered to `true` |
+| `coproc` | unsupported | stable warning / strict failure | direct unit coverage | intentionally unsupported |
 
-## Concrete Test Backlog
+## Highest-Priority Remaining Gaps
 
-The following gaps remain after the changes in this audit:
+1. Residual warning-driven `read` branches should stay narrow and explicit until they gain exact evidence.
+2. Helper-backed `>(...)` still needs explicit Linux runtime evidence before it should be upgraded beyond best-effort.
+3. `set -e` / `pipefail` should continue to be treated as conservative around compound-list edge cases, even though the covered runtime surface is much better than before.
+4. Non-literal `source`, option-heavy `trap`, `shopt`, and `coproc` should remain warning-driven unless a clearly exact strategy is worth the complexity.
 
-- Keep the residual warning-driven `read` branches explicit: no-var delimiter reads, non-numeric fd values, and unsupported option clusters should either gain evidence or stay clearly best-effort.
-- Record explicit Linux runtime evidence for the helper-backed `>(...)` surface before upgrading it beyond best-effort in this audit.
-- Keep option-heavy `trap` forms and non-literal `source` warning-driven unless a precise exact strategy is worth the complexity.
-- Keep the new public-source and bake-off seam tests in lockstep with future refactors so architecture cleanup cannot silently regress recursive sourcing or bake-off selection/report behavior.
+## Documentation Contract
 
-## Documentation Outcome
+The project now has a cleaner documentation split:
 
-After this audit:
+- `docs/design/translator-todo.md`: active engineering backlog
+- `docs/design/translator-audit.md`: fidelity source of truth
+- `docs/migration-guide.md`: user-facing cleanup guide for warning-driven areas
 
-- `translator-todo.md` is still the implementation checklist
-- this file is the fidelity matrix
-- the README links to this audit and now describes the CI parity setup, public module layout, and the status of manual fish baselines more precisely
-- `docs/design/architecture.md` now records the module and Cabal-component boundaries behind the current layout
+Those three documents should move together whenever a best-effort branch changes status.

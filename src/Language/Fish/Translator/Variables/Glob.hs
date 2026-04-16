@@ -85,7 +85,7 @@ extglobShimScript pat =
   "shopt -s extglob; shopt -u nullglob dotglob failglob; printf '%s\\n' " <> pat
 
 parseGlobPattern :: Text -> GlobPattern
-parseGlobPattern txt = GlobPattern (finishLiteral (go txt) [])
+parseGlobPattern txt = MkGlobPattern (finishLiteral (go txt) [])
   where
     go t =
       case T.uncons t of

@@ -9,40 +9,25 @@ module Language.Fish.Translator.Background
   )
 where
 
-import Prelude hiding (get, modify)
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Translator.Args (Arg, renderArgs)
 import Language.Fish.Translator.Monad
   ( TranslateM,
-    TranslateState (..),
-    addWarning,
+    HelperId (..),
+    WarningCode (..),
+    addWarningOnce,
+    ensureHelper,
   )
-import Polysemy.State (get, modify)
 
 ensureBackgroundRuntime :: TranslateM ()
-ensureBackgroundRuntime = do
-  st <- get
-  if backgroundRuntimeAdded st
-    then pure ()
-    else
-      modify
-        ( \s ->
-            s
-              { backgroundRuntimeAdded = True,
-                preamble = preamble s <> backgroundRuntimeStatements
-              }
-        )
+ensureBackgroundRuntime =
+  ensureHelper HelperBackground backgroundRuntimeStatements
 
 noteBackgroundTracking :: TranslateM ()
 noteBackgroundTracking = do
   ensureBackgroundRuntime
-  st <- get
-  if backgroundTrackingWarned st
-    then pure ()
-    else do
-      addWarning "Monk-managed background job IDs are only guaranteed for translated wait; PID-specific uses such as kill $! require manual review"
-      modify (\s -> s {backgroundTrackingWarned = True})
+  addWarningOnce BackgroundTracking Nothing
 
 instrumentBackgroundStatusCmd :: FishCommand TStatus -> TranslateM FishStatement
 instrumentBackgroundStatusCmd cmd = do
@@ -113,7 +98,7 @@ statusPathHelperStmt :: FishStatement
 statusPathHelperStmt =
   Stmt
     ( Function
-        FishFunction
+        MkFishFunction
           { funcName = "__monk_bg_status_path",
             funcFlags = [],
             funcParams = ["token"],
@@ -131,7 +116,7 @@ waitHelperStmt :: FishStatement
 waitHelperStmt =
   Stmt
     ( Function
-        FishFunction
+        MkFishFunction
           { funcName = "__monk_wait",
             funcFlags = [],
             funcParams = [],
@@ -363,10 +348,8 @@ waitHelperStmt =
 
 jobListFromCommand :: FishCommand TStatus -> FishJobList
 jobListFromCommand cmd =
-  FishJobList
-    ( FishJobConjunction
-        Nothing
-        (FishJobPipeline False [] (Stmt cmd) [] False)
+  MkFishJobList ( MkFishJobConjunction Nothing
+        (MkFishJobPipeline False [] (Stmt cmd) [] False)
         []
         NE.:| []
     )
@@ -460,7 +443,7 @@ writeStatusStmt =
         [ ExprVal (ExprLiteral "%s\\n"),
           ExprVal (ExprVariable (VarScalar "__monk_bg_status")),
           RedirectVal
-            ( Redirect
+            ( MkRedirect
                 RedirectStdout
                 RedirectOut
                 (RedirectFile (ExprVariable (VarScalar "__monk_bg_status_file")))

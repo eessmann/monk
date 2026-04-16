@@ -1,10 +1,12 @@
 cabal-version:       3.14
 name:                monk
 version:             0.3.0
-synopsis:            Translate Bash scripts to Fish shell scripts.
+synopsis:            Side-project Bash-to-fish translator.
 description:
-    Monk translates shell scripts (Bash, etc.) into fish-shell code.
-    See [README.md](https://github.com/eessmann/monk#monk) for more details.
+    Monk is a Haskell project for translating Bash scripts into fish.
+    It is conservative by design, emits warnings for lossy cases, and still
+    expects manual review. See [README.md](https://github.com/eessmann/monk#monk)
+    for more details.
 homepage:            https://github.com/eessmann/monk
 bug-reports:         https://github.com/eessmann/monk/issues
 license:             MIT

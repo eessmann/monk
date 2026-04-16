@@ -23,7 +23,7 @@ unitPrettyTests =
                   ( Command
                       "echo"
                       [ ExprVal (ExprLiteral "Hello"),
-                        RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
+                        RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
                       ]
                   )
               ]
@@ -36,7 +36,7 @@ unitPrettyTests =
                   ( Command
                       "echo"
                       [ ExprVal (ExprLiteral "Hello"),
-                        RedirectVal (Redirect RedirectBoth RedirectOut (RedirectFile (ExprLiteral "/tmp/out")))
+                        RedirectVal (MkRedirect RedirectBoth RedirectOut (RedirectFile (ExprLiteral "/tmp/out")))
                       ]
                   )
               ]
@@ -57,7 +57,7 @@ unitPrettyTests =
             expected = "read --prompt 'Name:' --local name"
         actual @?= expected,
       H.testCase "Glob brace pattern" $ do
-        let script = [Stmt (Command "ls" [ExprVal (ExprGlob (GlobPattern [GlobBraces ("a" NE.:| ["b"])]))])]
+        let script = [Stmt (Command "ls" [ExprVal (ExprGlob (MkGlobPattern [GlobBraces ("a" NE.:| ["b"])]))])]
             actual = renderFish script
         T.isInfixOf "ls {" actual H.@? "must contain brace glob",
       H.testCase "Process substitution" $ do
@@ -68,7 +68,7 @@ unitPrettyTests =
         T.isInfixOf "| psub)" actual H.@? "must pipe to psub",
       H.testCase "Simple pipeline" $ do
         let pipe =
-              FishJobPipeline
+              MkFishJobPipeline
                 { jpTime = False,
                   jpVariables = [],
                   jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "foo")]),
@@ -85,9 +85,9 @@ unitPrettyTests =
             expected = "grep 'foo' | wc '-l'"
         actual @?= expected,
       H.testCase "Job conjunction (or)" $ do
-        let job1 = FishJobPipeline False [] (Stmt (Command "false" [])) [] False
-            job2 = FishJobPipeline False [] (Stmt (Command "echo" [ExprVal (ExprLiteral "ok")])) [] False
-            conj = FishJobConjunction Nothing job1 [JCOr job2]
+        let job1 = MkFishJobPipeline False [] (Stmt (Command "false" [])) [] False
+            job2 = MkFishJobPipeline False [] (Stmt (Command "echo" [ExprVal (ExprLiteral "ok")])) [] False
+            conj = MkFishJobConjunction Nothing job1 [JCOr job2]
             script = [Stmt (JobConj conj)]
             actual = renderFish script
             expected = "false \nor echo 'ok'"
@@ -107,7 +107,7 @@ unitPrettyTests =
       H.testCase "Begin block with redirect" $ do
         let body = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "B")])]
             script =
-              [Stmt (Begin body [RedirectVal (Redirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))])]
+              [Stmt (Begin body [RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))])]
             actual = renderFish script
             expected =
               T.intercalate
@@ -133,8 +133,8 @@ unitPrettyTests =
                 ]
         actual @?= expected,
       H.testCase "Switch with two cases" $ do
-        let case1 = CaseItem (ExprLiteral "foo" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "a")])])
-            case2 = CaseItem (ExprLiteral "bar" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "b")])])
+        let case1 = MkCaseItem (ExprLiteral "foo" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "a")])])
+            case2 = MkCaseItem (ExprLiteral "bar" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "b")])])
             script = [Stmt (Switch (ExprLiteral "x") (case1 NE.:| [case2]) [])]
             actual = renderFish script
             expected =
@@ -154,7 +154,7 @@ unitPrettyTests =
             expected = "echo (string join ' ' -- $x ; or printf '')"
         actual @?= expected,
       H.testCase "Function printing (no params)" $ do
-        let fn = FishFunction {funcName = "greet", funcFlags = [], funcParams = [], funcBody = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "hi")])]}
+        let fn = MkFishFunction {funcName = "greet", funcFlags = [], funcParams = [], funcBody = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "hi")])]}
             script = [Stmt (Function fn)]
             actual = renderFish script
             expected =

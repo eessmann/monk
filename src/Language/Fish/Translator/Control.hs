@@ -21,7 +21,11 @@ import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM, toPairM)
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)
 import Language.Fish.Translator.Pipeline (pipelineOf)
-import Language.Fish.Translator.Statement (isEmptyStatement, toNonEmptyStmtList)
+import Language.Fish.Translator.Statement
+  ( isEmptyStatement,
+    noteBestEffortSubshell,
+    toNonEmptyStmtList,
+  )
 import Language.Fish.Translator.Token (tokenHasExpansion, wordHasExpansion)
 import Language.Fish.Translator.Variables
   ( patternExprFromToken,
@@ -58,17 +62,19 @@ translateFunction :: (Token -> TranslateM FishStatement) -> String -> Token -> T
 translateFunction translateStmt funcName bodyToken = withFunctionScope $ do
   bodyStmts <- case bodyToken of
     T_BraceGroup _ stmts -> mapM translateStmt stmts
-    T_Subshell _ stmts -> mapM translateStmt stmts
+    T_Subshell _ stmts -> do
+      noteBestEffortSubshell
+      mapM translateStmt stmts
     _ -> (: []) <$> translateStmt bodyToken
   let funcNameT = toText funcName
   pure $ case toNonEmptyStmtList bodyStmts of
     Just neBody ->
-      Stmt (Function FishFunction {funcName = funcNameT, funcFlags = [], funcParams = [], funcBody = neBody})
+      Stmt (Function MkFishFunction {funcName = funcNameT, funcFlags = [], funcParams = [], funcBody = neBody})
     Nothing -> Comment ("Skipped function with empty body: " <> funcNameT)
 
 translateCaseExpression :: (Token -> TranslateM FishStatement) -> Token -> [(CaseType, [Token], [Token])] -> TranslateM FishStatement
 translateCaseExpression translateStmt switchExpr cases = do
-  Hoisted preSwitch switchArg <- translateTokenToExprM switchExpr
+  MkHoisted preSwitch switchArg <- translateTokenToExprM switchExpr
   caseItems <- mapM (translateCaseItem translateStmt) cases
   let prePatterns = concatMap fst caseItems
       filtered = catMaybes (map snd caseItems)
@@ -90,11 +96,11 @@ translateCaseItem translateStmt = toPairM . translateCaseItemHoisted translateSt
 translateCaseItemHoisted :: (Token -> TranslateM FishStatement) -> (CaseType, [Token], [Token]) -> HoistedM (Maybe CaseItem)
 translateCaseItemHoisted translateStmt (_, patterns, body) = do
   patternPlans <- mapM translateCasePatternHoisted patterns
-  let Hoisted prePatterns patternExprs = sequenceA patternPlans
+  let MkHoisted prePatterns patternExprs = sequenceA patternPlans
   bodyStmts <- mapM translateStmt body
   let item =
         case (NE.nonEmpty patternExprs, toNonEmptyStmtList bodyStmts) of
-          (Just nePatterns, Just neBody) -> Just CaseItem {casePatterns = nePatterns, caseBody = neBody}
+          (Just nePatterns, Just neBody) -> Just MkCaseItem {casePatterns = nePatterns, caseBody = neBody}
           _ -> Nothing
   hoistM prePatterns item
 
@@ -109,7 +115,7 @@ translateCasePatternHoisted tok =
 translateCasePatternPartsHoisted :: [Token] -> HoistedM (FishExpr TStr)
 translateCasePatternPartsHoisted parts = do
   translated <- mapM translateCasePatternPartHoisted parts
-  let Hoisted pre exprs = sequenceA translated
+  let MkHoisted pre exprs = sequenceA translated
   case NE.nonEmpty exprs of
     Nothing -> hoistM pre (ExprLiteral "")
     Just neExprs ->
@@ -162,7 +168,7 @@ translateSelectExpression translateStmt var items body = do
       loopBody = menuLoop : readChoice : setReply : setVar : bodyStmts
   case toNonEmptyStmtList loopBody of
     Just neBody ->
-      let cond = FishJobList (FishJobConjunction Nothing (FishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] NE.:| [])
+      let cond = MkFishJobList (MkFishJobConjunction Nothing (MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False) [] NE.:| [])
           whileStmt = Stmt (While cond neBody [])
           initBlock = [setItems, whileStmt]
        in pure $ case toNonEmptyStmtList initBlock of
@@ -222,14 +228,14 @@ findArithmeticToken = goList
       _ -> Nothing
 
 negateJobList :: FishJobList -> FishJobList
-negateJobList (FishJobList conjs) =
+negateJobList (MkFishJobList conjs) =
   let body = NE.map (Stmt . JobConj) conjs
       negCmd = Not (Begin body [])
-   in FishJobList (FishJobConjunction Nothing (pipelineOf negCmd) [] NE.:| [])
+   in MkFishJobList (MkFishJobConjunction Nothing (pipelineOf negCmd) [] NE.:| [])
 
 jobListFromStatus :: FishCommand TStatus -> FishJobList
 jobListFromStatus cmd =
   case cmd of
-    JobConj jc -> FishJobList (jc NE.:| [])
-    Pipeline jp -> FishJobList (FishJobConjunction Nothing jp [] NE.:| [])
-    _ -> FishJobList (FishJobConjunction Nothing (pipelineOf cmd) [] NE.:| [])
+    JobConj jc -> MkFishJobList (jc NE.:| [])
+    Pipeline jp -> MkFishJobList (MkFishJobConjunction Nothing jp [] NE.:| [])
+    _ -> MkFishJobList (MkFishJobConjunction Nothing (pipelineOf cmd) [] NE.:| [])

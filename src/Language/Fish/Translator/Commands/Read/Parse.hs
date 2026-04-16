@@ -16,13 +16,13 @@ import ShellCheck.AST
 
 parseReadArgs :: [Token] -> [ReadFlag] -> [Text] -> Bool -> ([ReadFlag], [Text], Bool)
 parseReadArgs ts fs vs unsupported =
-  let ReadParseResult {readFlags, readVars, readUnsupported} =
+  let MkReadParseResult {readFlags, readVars, readUnsupported} =
         parseReadArgsDetailed ts fs vs [] unsupported False
    in (readFlags, readVars, readUnsupported)
 
 parseReadArgsDetailed :: [Token] -> [ReadFlag] -> [Text] -> [Text] -> Bool -> Bool -> ReadParseResult
 parseReadArgsDetailed [] fs vs issues unsupported raw =
-  let parsed = ReadParseResult fs vs [] unsupported raw
+  let parsed = MkReadParseResult fs vs [] unsupported raw
       exact = isJust (exactReadDelim parsed)
       needsSplitNote = not exact && (ReadArray `elem` fs || length vs > 1)
       delimiterNote =
@@ -153,7 +153,7 @@ delimiterFlagFromValue val
   | otherwise = ReadDelimiter (T.take 1 val)
 
 exactReadDelim :: ReadParseResult -> Maybe ExactReadDelim
-exactReadDelim ReadParseResult {readFlags, readVars, readUnsupported, readRaw}
+exactReadDelim MkReadParseResult {readFlags, readVars, readUnsupported, readRaw}
   | readUnsupported = Nothing
   | otherwise = do
       guard (all exactSupportedFlag readFlags)
@@ -167,7 +167,7 @@ exactReadDelim ReadParseResult {readFlags, readVars, readUnsupported, readRaw}
       guard (countFlags isSilentFlag readFlags <= 1)
       target <- exactReadTarget readFlags readVars
       pure
-        ExactReadDelim
+        MkExactReadDelim
           { erdDelimiter = delimiter,
             erdPrompt = prompt,
             erdSilent = any isSilentFlag readFlags,

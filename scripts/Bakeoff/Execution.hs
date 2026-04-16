@@ -43,12 +43,12 @@ import Monk.Source
     translateSourceGraph,
   )
 import Monk.Translation
-  ( TranslateState (..),
-    Translation (..),
+  ( Translation (..),
     Warning,
     defaultConfig,
     inlineStatements,
     renderFish,
+    stateWarnings,
   )
 import Path
   ( Abs,
@@ -61,7 +61,7 @@ import System.Exit (ExitCode (..))
 import System.Process (CreateProcess (env), proc)
 import System.Timeout (timeout)
 
-data MonkTranslationArtifact = MonkTranslationArtifact
+data MonkTranslationArtifact = MkMonkTranslationArtifact
   { mtaOutput :: Text,
     mtaWarnings :: [Warning],
     mtaNoteCount :: Int,
@@ -71,7 +71,7 @@ data MonkTranslationArtifact = MonkTranslationArtifact
 defineFixtureRules :: BakeoffConfig -> ResolvedTools -> [(String, String)] -> FixtureSpec -> FixtureArtifacts -> Rules ()
 defineFixtureRules cfg tools processEnv fixture artifacts = do
   toFilePath (faMonkTranslateJson artifacts) %> \_ -> do
-    need [toFilePath (fsPath fixture)]
+    need [toFilePath (specPath fixture)]
     liftIO (PathIO.ensureDir (faDir artifacts))
     report <- liftIO $ buildMonkTranslationReport cfg fixture artifacts
     liftIO $ do
@@ -79,7 +79,7 @@ defineFixtureRules cfg tools processEnv fixture artifacts = do
       writeJsonFile (faMonkTranslateJson artifacts) report
 
   toFilePath (faBabelfishTranslateJson artifacts) %> \_ -> do
-    need [toFilePath (fsPath fixture)]
+    need [toFilePath (specPath fixture)]
     liftIO (PathIO.ensureDir (faDir artifacts))
     report <- liftIO $ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv
     liftIO $ do
@@ -128,19 +128,19 @@ defineFixtureRules cfg tools processEnv fixture artifacts = do
     babelfishRuntime <- liftIO $ readJsonFile (faBabelfishRuntimeJson artifacts)
     diffReport <- liftIO $ readJsonFile (faDiffJson artifacts)
     let fixtureReport =
-          FixtureReport
-            { frPath = fsPath fixture,
-              frRelativePath = fsRelativePath fixture,
-              frArtifactDir = fsArtifactDir fixture,
-              frGroup = fsGroup fixture,
-              frSelectionSources = fsSelectionSources fixture,
-              frMetadata = summarizeFixtureMetadata (fsMetadata fixture),
-              frSkipReason = fsSkipReason fixture,
-              frMonkTranslation = Just monkTranslation,
-              frBabelfishTranslation = Just babelfishTranslation,
-              frMonkRuntime = Just monkRuntime,
-              frBabelfishRuntime = Just babelfishRuntime,
-              frDiff = Just diffReport
+          MkFixtureReport
+            { fixtureReportPath = specPath fixture,
+              fixtureReportRelativePath = specRelativePath fixture,
+              fixtureReportArtifactDir = specArtifactDir fixture,
+              fixtureReportGroup = specGroup fixture,
+              fixtureReportSelectionSources = specSelectionSources fixture,
+              fixtureReportMetadata = summarizeFixtureMetadata (specMetadata fixture),
+              fixtureReportSkipReason = specSkipReason fixture,
+              fixtureReportMonkTranslation = Just monkTranslation,
+              fixtureReportBabelfishTranslation = Just babelfishTranslation,
+              fixtureReportMonkRuntime = Just monkRuntime,
+              fixtureReportBabelfishRuntime = Just babelfishRuntime,
+              fixtureReportDiff = Just diffReport
             }
     liftIO $ do
       ensureParentDirectory (faResultJson artifacts)
@@ -148,7 +148,7 @@ defineFixtureRules cfg tools processEnv fixture artifacts = do
 
 defineBenchmarkRules :: BakeoffConfig -> ResolvedTools -> BakeoffOutputs -> Rules ()
 defineBenchmarkRules cfg tools outputs =
-  case rtHyperfinePath tools of
+  case toolsHyperfinePath tools of
     Nothing -> pure ()
     Just hyperfinePath -> do
       toFilePath (boHyperfineAllJsonPath outputs) %> \_ -> do
@@ -175,65 +175,65 @@ defineBenchmarkRules cfg tools outputs =
 
 buildMonkTranslationReport :: BakeoffConfig -> FixtureSpec -> FixtureArtifacts -> IO TranslationReport
 buildMonkTranslationReport cfg fixture artifacts =
-  case fsSkipReason fixture of
+  case specSkipReason fixture of
     Just reason -> pure (skippedTranslationReport ToolMonk reason)
     Nothing -> do
-      result <- timeoutIO (bcTranslationTimeoutSeconds cfg) (translateFixtureWithMonk fixture)
+      result <- timeoutIO (bakeoffTranslationTimeoutSeconds cfg) (translateFixtureWithMonk fixture)
       case result of
         Nothing -> do
           writeTextFile (faMonkTranslateStderr artifacts) "translation timed out\n"
           pure
-            TranslationReport
-              { trTool = ToolMonk,
-                trStatus = CommandTimedOut,
-                trExitCode = Nothing,
-                trWarnings = 0,
-                trNotes = 0,
-                trWarningHigh = 0,
-                trWarningMedium = 0,
-                trWarningLow = 0,
-                trConfidenceScore = Nothing,
-                trOutputPath = Nothing,
-                trStderrPath = Just (faMonkTranslateStderr artifacts),
-                trErrorMessage = Just "translation timed out"
+            MkTranslationReport
+              { translationTool = ToolMonk,
+                translationStatus = CommandTimedOut,
+                translationExitCode = Nothing,
+                translationWarningCount = 0,
+                translationNotesCount = 0,
+                translationHighWarnings = 0,
+                translationMediumWarnings = 0,
+                translationLowWarnings = 0,
+                translationConfidenceScore = Nothing,
+                translationOutputPath = Nothing,
+                translationStderrPath = Just (faMonkTranslateStderr artifacts),
+                translationErrorMessage = Just "translation timed out"
               }
         Just (Left errText) -> do
           writeTextFile (faMonkTranslateStderr artifacts) (errText <> "\n")
           pure
-            TranslationReport
-              { trTool = ToolMonk,
-                trStatus = CommandFailed,
-                trExitCode = Just 1,
-                trWarnings = 0,
-                trNotes = 0,
-                trWarningHigh = 0,
-                trWarningMedium = 0,
-                trWarningLow = 0,
-                trConfidenceScore = Nothing,
-                trOutputPath = Nothing,
-                trStderrPath = Just (faMonkTranslateStderr artifacts),
-                trErrorMessage = Just errText
+            MkTranslationReport
+              { translationTool = ToolMonk,
+                translationStatus = CommandFailed,
+                translationExitCode = Just 1,
+                translationWarningCount = 0,
+                translationNotesCount = 0,
+                translationHighWarnings = 0,
+                translationMediumWarnings = 0,
+                translationLowWarnings = 0,
+                translationConfidenceScore = Nothing,
+                translationOutputPath = Nothing,
+                translationStderrPath = Just (faMonkTranslateStderr artifacts),
+                translationErrorMessage = Just errText
               }
         Just (Right artifact) -> do
-          let WarningCounts {wcHigh, wcMedium, wcLow} = summarizeWarnings (mtaWarnings artifact)
+          let MkWarningCounts {wcHigh, wcMedium, wcLow} = summarizeWarnings (mtaWarnings artifact)
               warnCount = length (mtaWarnings artifact)
               confidence = confidenceScore (mtaWarnings artifact)
           writeTextFile (faMonkFish artifacts) (mtaOutput artifact)
           writeTextFile (faMonkTranslateStderr artifacts) (T.unlines (mtaStderrLines artifact))
           pure
-            TranslationReport
-              { trTool = ToolMonk,
-                trStatus = CommandSucceeded,
-                trExitCode = Just 0,
-                trWarnings = warnCount,
-                trNotes = mtaNoteCount artifact,
-                trWarningHigh = wcHigh,
-                trWarningMedium = wcMedium,
-                trWarningLow = wcLow,
-                trConfidenceScore = Just confidence,
-                trOutputPath = Just (faMonkFish artifacts),
-                trStderrPath = Just (faMonkTranslateStderr artifacts),
-                trErrorMessage = Nothing
+            MkTranslationReport
+              { translationTool = ToolMonk,
+                translationStatus = CommandSucceeded,
+                translationExitCode = Just 0,
+                translationWarningCount = warnCount,
+                translationNotesCount = mtaNoteCount artifact,
+                translationHighWarnings = wcHigh,
+                translationMediumWarnings = wcMedium,
+                translationLowWarnings = wcLow,
+                translationConfidenceScore = Just confidence,
+                translationOutputPath = Just (faMonkFish artifacts),
+                translationStderrPath = Just (faMonkTranslateStderr artifacts),
+                translationErrorMessage = Nothing
               }
 
 buildBabelfishTranslationReport ::
@@ -244,66 +244,66 @@ buildBabelfishTranslationReport ::
   [(String, String)] ->
   IO TranslationReport
 buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
-  case fsSkipReason fixture of
+  case specSkipReason fixture of
     Just reason -> pure (skippedTranslationReport ToolBabelfish reason)
     Nothing -> do
-      bashSource <- TIO.readFile (toFilePath (fsPath fixture))
-      let process = (proc (toFilePath (rtBabelfishPath tools)) []) {env = Just processEnv}
-      result <- runProcessText (Just (bcTranslationTimeoutSeconds cfg)) process bashSource
+      bashSource <- TIO.readFile (toFilePath (specPath fixture))
+      let process = (proc (toFilePath (toolsBabelfishPath tools)) []) {env = Just processEnv}
+      result <- runProcessText (Just (bakeoffTranslationTimeoutSeconds cfg)) process bashSource
       case result of
         Nothing -> do
           writeTextFile (faBabelfishTranslateStderr artifacts) "translation timed out\n"
           pure
-            TranslationReport
-              { trTool = ToolBabelfish,
-                trStatus = CommandTimedOut,
-                trExitCode = Nothing,
-                trWarnings = 0,
-                trNotes = 0,
-                trWarningHigh = 0,
-                trWarningMedium = 0,
-                trWarningLow = 0,
-                trConfidenceScore = Nothing,
-                trOutputPath = Nothing,
-                trStderrPath = Just (faBabelfishTranslateStderr artifacts),
-                trErrorMessage = Just "translation timed out"
+            MkTranslationReport
+              { translationTool = ToolBabelfish,
+                translationStatus = CommandTimedOut,
+                translationExitCode = Nothing,
+                translationWarningCount = 0,
+                translationNotesCount = 0,
+                translationHighWarnings = 0,
+                translationMediumWarnings = 0,
+                translationLowWarnings = 0,
+                translationConfidenceScore = Nothing,
+                translationOutputPath = Nothing,
+                translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
+                translationErrorMessage = Just "translation timed out"
               }
-        Just ProcessOutput {..} -> do
+        Just MkProcessOutput {..} -> do
           writeTextFile (faBabelfishTranslateStderr artifacts) poStderr
           let exitCodeInt = exitCodeToInt poExitCode
           if poExitCode == ExitSuccess
             then do
               writeTextFile (faBabelfishFish artifacts) poStdout
               pure
-                TranslationReport
-                  { trTool = ToolBabelfish,
-                    trStatus = CommandSucceeded,
-                    trExitCode = Just exitCodeInt,
-                    trWarnings = 0,
-                    trNotes = 0,
-                    trWarningHigh = 0,
-                    trWarningMedium = 0,
-                    trWarningLow = 0,
-                    trConfidenceScore = Nothing,
-                    trOutputPath = Just (faBabelfishFish artifacts),
-                    trStderrPath = Just (faBabelfishTranslateStderr artifacts),
-                    trErrorMessage = Nothing
+                MkTranslationReport
+                  { translationTool = ToolBabelfish,
+                    translationStatus = CommandSucceeded,
+                    translationExitCode = Just exitCodeInt,
+                    translationWarningCount = 0,
+                    translationNotesCount = 0,
+                    translationHighWarnings = 0,
+                    translationMediumWarnings = 0,
+                    translationLowWarnings = 0,
+                    translationConfidenceScore = Nothing,
+                    translationOutputPath = Just (faBabelfishFish artifacts),
+                    translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
+                    translationErrorMessage = Nothing
                   }
             else
               pure
-                TranslationReport
-                  { trTool = ToolBabelfish,
-                    trStatus = CommandFailed,
-                    trExitCode = Just exitCodeInt,
-                    trWarnings = 0,
-                    trNotes = 0,
-                    trWarningHigh = 0,
-                    trWarningMedium = 0,
-                    trWarningLow = 0,
-                    trConfidenceScore = Nothing,
-                    trOutputPath = Nothing,
-                    trStderrPath = Just (faBabelfishTranslateStderr artifacts),
-                    trErrorMessage = Just (translationFailureMessage poExitCode poStderr)
+                MkTranslationReport
+                  { translationTool = ToolBabelfish,
+                    translationStatus = CommandFailed,
+                    translationExitCode = Just exitCodeInt,
+                    translationWarningCount = 0,
+                    translationNotesCount = 0,
+                    translationHighWarnings = 0,
+                    translationMediumWarnings = 0,
+                    translationLowWarnings = 0,
+                    translationConfidenceScore = Nothing,
+                    translationOutputPath = Nothing,
+                    translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
+                    translationErrorMessage = Just (translationFailureMessage poExitCode poStderr)
                   }
 
 buildRuntimeReport ::
@@ -316,7 +316,7 @@ buildRuntimeReport ::
   [(String, String)] ->
   IO RuntimeReport
 buildRuntimeReport cfg tools fixture artifacts tool translationReport processEnv =
-  case trStatus translationReport of
+  case translationStatus translationReport of
     CommandSucceeded -> do
       let scriptPath =
             case tool of
@@ -334,72 +334,72 @@ buildRuntimeReport cfg tools fixture artifacts tool translationReport processEnv
             case tool of
               ToolMonk -> faMonkExitCode artifacts
               ToolBabelfish -> faBabelfishExitCode artifacts
-          metadata = fsMetadata fixture
+          metadata = specMetadata fixture
       result <-
         runProcessText
-          (Just (bcRuntimeTimeoutSeconds cfg))
+          (Just (bakeoffRuntimeTimeoutSeconds cfg))
           (runtimeProcess tools processEnv (fmMode metadata) scriptPath (fmArgs metadata))
           (fmStdin metadata)
       case result of
         Nothing -> do
           writeTextFile stderrPath "runtime timed out\n"
           pure
-            RuntimeReport
-              { rrTool = tool,
-                rrStatus = CommandTimedOut,
-                rrExitCodeValue = Nothing,
-                rrStdoutPath = Nothing,
-                rrStderrPath = Just stderrPath,
-                rrErrorMessage = Just "runtime timed out"
+            MkRuntimeReport
+              { runtimeTool = tool,
+                runtimeStatus = CommandTimedOut,
+                runtimeExitCode = Nothing,
+                runtimeStdoutPath = Nothing,
+                runtimeStderrPath = Just stderrPath,
+                runtimeErrorMessage = Just "runtime timed out"
               }
-        Just ProcessOutput {..} -> do
+        Just MkProcessOutput {..} -> do
           let exitCodeInt = exitCodeToInt poExitCode
           writeTextFile stdoutPath poStdout
           writeTextFile stderrPath poStderr
           writeTextFile exitCodePath (show exitCodeInt <> "\n")
           pure
-            RuntimeReport
-              { rrTool = tool,
-                rrStatus = CommandSucceeded,
-                rrExitCodeValue = Just exitCodeInt,
-                rrStdoutPath = Just stdoutPath,
-                rrStderrPath = Just stderrPath,
-                rrErrorMessage = Nothing
+            MkRuntimeReport
+              { runtimeTool = tool,
+                runtimeStatus = CommandSucceeded,
+                runtimeExitCode = Just exitCodeInt,
+                runtimeStdoutPath = Just stdoutPath,
+                runtimeStderrPath = Just stderrPath,
+                runtimeErrorMessage = Nothing
               }
     _ ->
       pure
-        RuntimeReport
-          { rrTool = tool,
-            rrStatus = CommandSkipped,
-            rrExitCodeValue = Nothing,
-            rrStdoutPath = Nothing,
-            rrStderrPath = Nothing,
-            rrErrorMessage = Just "translation did not succeed"
+        MkRuntimeReport
+          { runtimeTool = tool,
+            runtimeStatus = CommandSkipped,
+            runtimeExitCode = Nothing,
+            runtimeStdoutPath = Nothing,
+            runtimeStderrPath = Nothing,
+            runtimeErrorMessage = Just "translation did not succeed"
           }
 
 buildDiffReport :: BakeoffConfig -> FixtureArtifacts -> RuntimeReport -> RuntimeReport -> IO DiffReport
 buildDiffReport cfg artifacts monkRuntime babelfishRuntime = do
-  stdoutDiff <- comparePlainArtifacts (rrStdoutPath babelfishRuntime) (rrStdoutPath monkRuntime) (faStdoutDiff artifacts) "babelfish stdout" "monk stdout"
+  stdoutDiff <- comparePlainArtifacts (runtimeStdoutPath babelfishRuntime) (runtimeStdoutPath monkRuntime) (faStdoutDiff artifacts) "babelfish stdout" "monk stdout"
   stderrDiff <-
     compareNormalizedArtifacts
-      (rrStderrPath babelfishRuntime)
-      (rrStderrPath monkRuntime)
+      (runtimeStderrPath babelfishRuntime)
+      (runtimeStderrPath monkRuntime)
       (faBabelfishRuntimeStderrNorm artifacts)
       (faMonkRuntimeStderrNorm artifacts)
       (faStderrDiff artifacts)
-      (normalizeRuntimeStderr (bcOutputDir cfg))
+      (normalizeRuntimeStderr (bakeoffOutputDir cfg))
       "babelfish stderr"
       "monk stderr"
   exitDiff <-
     compareExitCodes
-      (rrExitCodeValue babelfishRuntime)
-      (rrExitCodeValue monkRuntime)
+      (runtimeExitCode babelfishRuntime)
+      (runtimeExitCode monkRuntime)
       (faExitCodeDiff artifacts)
   pure
-    DiffReport
-      { drStdout = stdoutDiff,
-        drStderr = stderrDiff,
-        drExitCode = exitDiff
+    MkDiffReport
+      { diffStdout = stdoutDiff,
+        diffStderr = stderrDiff,
+        diffExitCode = exitDiff
       }
 
 comparePlainArtifacts ::
@@ -415,11 +415,11 @@ comparePlainArtifacts leftPath rightPath diffPath leftLabel rightLabel =
       leftText <- TIO.readFile (toFilePath left)
       rightText <- TIO.readFile (toFilePath right)
       if leftText == rightText
-        then pure (DiffArtifact DiffNone Nothing)
+        then pure (MkDiffArtifact DiffNone Nothing)
         else do
           writeComparisonFile diffPath leftLabel leftText rightLabel rightText
-          pure (DiffArtifact DiffDifferent (Just diffPath))
-    _ -> pure (DiffArtifact DiffUnavailable Nothing)
+          pure (MkDiffArtifact DiffDifferent (Just diffPath))
+    _ -> pure (MkDiffArtifact DiffUnavailable Nothing)
 
 compareNormalizedArtifacts ::
   Maybe (Path Abs File) ->
@@ -439,26 +439,26 @@ compareNormalizedArtifacts leftPath rightPath leftNormPath rightNormPath diffPat
       writeTextFile leftNormPath leftText
       writeTextFile rightNormPath rightText
       if leftText == rightText
-        then pure (DiffArtifact DiffNone Nothing)
+        then pure (MkDiffArtifact DiffNone Nothing)
         else do
           writeComparisonFile diffPath leftLabel leftText rightLabel rightText
-          pure (DiffArtifact DiffDifferent (Just diffPath))
-    _ -> pure (DiffArtifact DiffUnavailable Nothing)
+          pure (MkDiffArtifact DiffDifferent (Just diffPath))
+    _ -> pure (MkDiffArtifact DiffUnavailable Nothing)
 
 compareExitCodes :: Maybe Int -> Maybe Int -> Path Abs File -> IO DiffArtifact
 compareExitCodes leftExit rightExit diffPath =
   case (leftExit, rightExit) of
     (Just left, Just right)
-      | left == right -> pure (DiffArtifact DiffNone Nothing)
+      | left == right -> pure (MkDiffArtifact DiffNone Nothing)
       | otherwise -> do
           writeComparisonFile diffPath "babelfish exit" (show right <> "\n") "monk exit" (show left <> "\n")
-          pure (DiffArtifact DiffDifferent (Just diffPath))
-    _ -> pure (DiffArtifact DiffUnavailable Nothing)
+          pure (MkDiffArtifact DiffDifferent (Just diffPath))
+    _ -> pure (MkDiffArtifact DiffUnavailable Nothing)
 
 translateFixtureWithMonk :: FixtureSpec -> IO (Either Text MonkTranslationArtifact)
 translateFixtureWithMonk fixture
-  | fmRecursive (fsMetadata fixture) = translateRecursiveFixture (fsPath fixture)
-  | otherwise = translateSingleFixture (fsPath fixture)
+  | fmRecursive (specMetadata fixture) = translateRecursiveFixture (specPath fixture)
+  | otherwise = translateSingleFixture (specPath fixture)
 
 translateSingleFixture :: Path Abs File -> IO (Either Text MonkTranslationArtifact)
 translateSingleFixture = translateFixtureViaGraph False
@@ -478,7 +478,7 @@ buildMonkArtifactFromGraph recursive path graph = do
   let rootPath = toFilePath path
       orderedTranslations =
         mapMaybe (`M.lookup` sgTranslations graph) (sgOrder graph)
-      translationWarnings = map (warnings . trState) orderedTranslations
+      translationWarnings = map (stateWarnings . trState) orderedTranslations
       allWarnings = concat translationWarnings
       totalNotes = sum (map translationNoteCount translationWarnings)
       stderrLines = concatMap (stderrLinesForPath graph) (sgOrder graph)
@@ -502,7 +502,7 @@ buildMonkArtifactFromGraph recursive path graph = do
             pure ("", [])
   let (renderedOutput, inlineWarns) = output
   pure
-    MonkTranslationArtifact
+    MkMonkTranslationArtifact
       { mtaOutput = renderedOutput,
         mtaWarnings = allWarnings,
         mtaNoteCount = totalNotes,
@@ -515,7 +515,7 @@ stderrLinesForPath graph path =
     <> case M.lookup path (sgTranslations graph) of
       Nothing -> []
       Just translation ->
-        let warns = warnings (trState translation)
+        let warns = stateWarnings (trState translation)
          in map renderWarning warns <> renderTranslationNotes path warns
 
 renderTranslationSingle :: Translation -> Text
@@ -531,11 +531,11 @@ runtimeProcess :: ResolvedTools -> [(String, String)] -> ShellRunMode -> Path Ab
 runtimeProcess tools processEnv runMode scriptPath args =
   case runMode of
     ShellRunExec ->
-      (proc (toFilePath (rtFishPath tools)) ("--no-config" : toFilePath scriptPath : map toString args)) {env = Just processEnv}
+      (proc (toFilePath (toolsFishPath tools)) ("--no-config" : toFilePath scriptPath : map toString args)) {env = Just processEnv}
     ShellRunAuto ->
       runtimeProcess tools processEnv ShellRunSource scriptPath args
     _ ->
-      (proc (toFilePath (rtFishPath tools)) ["--no-config", "-c", T.unpack sourceCommand]) {env = Just processEnv}
+      (proc (toFilePath (toolsFishPath tools)) ["--no-config", "-c", T.unpack sourceCommand]) {env = Just processEnv}
   where
     quotedArgs = T.intercalate " " (map quoteArg args)
     sourceCommand =
@@ -554,19 +554,19 @@ translationFailureMessage exitCode stderrText
 
 skippedTranslationReport :: ToolName -> SkipReason -> TranslationReport
 skippedTranslationReport tool reason =
-  TranslationReport
-    { trTool = tool,
-      trStatus = CommandSkipped,
-      trExitCode = Nothing,
-      trWarnings = 0,
-      trNotes = 0,
-      trWarningHigh = 0,
-      trWarningMedium = 0,
-      trWarningLow = 0,
-      trConfidenceScore = Nothing,
-      trOutputPath = Nothing,
-      trStderrPath = Nothing,
-      trErrorMessage = Just (renderSkipReasonText reason)
+  MkTranslationReport
+    { translationTool = tool,
+      translationStatus = CommandSkipped,
+      translationExitCode = Nothing,
+      translationWarningCount = 0,
+      translationNotesCount = 0,
+      translationHighWarnings = 0,
+      translationMediumWarnings = 0,
+      translationLowWarnings = 0,
+      translationConfidenceScore = Nothing,
+      translationOutputPath = Nothing,
+      translationStderrPath = Nothing,
+      translationErrorMessage = Just (renderSkipReasonText reason)
     }
 
 renderSkipReasonText :: SkipReason -> Text
@@ -596,7 +596,7 @@ runWorkerFixture tool babelfishPath path =
       result <- runProcessText Nothing (proc (toFilePath babelfishPath) []) source
       pure $
         case result of
-          Just ProcessOutput {poExitCode = ExitSuccess} -> Nothing
+          Just MkProcessOutput {poExitCode = ExitSuccess} -> Nothing
           _ -> Just tool
 
 exitCodeToInt :: ExitCode -> Int

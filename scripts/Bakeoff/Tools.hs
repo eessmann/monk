@@ -16,21 +16,21 @@ import System.Process (proc)
 
 resolveTools :: Path Abs File -> BakeoffConfig -> IO ResolvedTools
 resolveTools monkExecutable cfg = do
-  babelfishPath <- resolveRequiredTool (bcBabelfishPathHint cfg) "babelfish"
-  fishPath <- resolveRequiredTool (bcFishPathHint cfg) "fish"
-  hyperfinePath <- resolveOptionalTool (bcHyperfinePathHint cfg) "hyperfine"
-  babelfishVersion <- resolveBabelfishVersion babelfishPath (bcBabelfishVersionOverride cfg)
+  babelfishPath <- resolveRequiredTool (bakeoffBabelfishPathHint cfg) "babelfish"
+  fishPath <- resolveRequiredTool (bakeoffFishPathHint cfg) "fish"
+  hyperfinePath <- resolveOptionalTool (bakeoffHyperfinePathHint cfg) "hyperfine"
+  babelfishVersion <- resolveBabelfishVersion babelfishPath (bakeoffBabelfishVersionOverride cfg)
   fishVersion <- toolVersion fishPath ["--version"] "unknown"
   hyperfineVersion <- traverse (\path -> toolVersion path ["--version"] "unknown") hyperfinePath
   pure
-    ResolvedTools
-      { rtMonkExecutable = monkExecutable,
-        rtBabelfishPath = babelfishPath,
-        rtFishPath = fishPath,
-        rtHyperfinePath = hyperfinePath,
-        rtBabelfishVersion = babelfishVersion,
-        rtFishVersion = fishVersion,
-        rtHyperfineVersion = hyperfineVersion
+    MkResolvedTools
+      { toolsMonkExecutable = monkExecutable,
+        toolsBabelfishPath = babelfishPath,
+        toolsFishPath = fishPath,
+        toolsHyperfinePath = hyperfinePath,
+        toolsBabelfishVersion = babelfishVersion,
+        toolsFishVersion = fishVersion,
+        toolsHyperfineVersion = hyperfineVersion
       }
 
 resolveRequiredTool :: Maybe (Path Abs File) -> String -> IO (Path Abs File)
@@ -78,7 +78,7 @@ toolVersionMaybe path args = do
   result <- runProcessText (Just 5) (proc (toFilePath path) args) ""
   pure $
     case result of
-      Just ProcessOutput {poExitCode = ExitSuccess, poStdout, poStderr} ->
+      Just MkProcessOutput {poExitCode = ExitSuccess, poStdout, poStderr} ->
         firstNonEmptyLine [poStdout, poStderr]
       _ -> Nothing
 
@@ -101,13 +101,13 @@ collectGitMetadata cwd = do
   dirtyOutput <- runProcessText (Just 5) (proc "git" ["-C", toFilePath cwd, "diff", "--quiet", "--ignore-submodules", "--"]) ""
   let dirty =
         case dirtyOutput of
-          Just ProcessOutput {poExitCode = ExitSuccess} -> False
-          Just ProcessOutput {poExitCode = ExitFailure 1} -> True
+          Just MkProcessOutput {poExitCode = ExitSuccess} -> False
+          Just MkProcessOutput {poExitCode = ExitFailure 1} -> True
           _ -> False
   pure
-    GitMetadata
-      { gmSha = sha,
-        gmDirty = dirty
+    MkGitMetadata
+      { gitSha = sha,
+        gitDirty = dirty
       }
 
 gitOutput :: Path Abs Dir -> [String] -> IO (Maybe Text)
@@ -115,23 +115,23 @@ gitOutput cwd args = do
   result <- runProcessText (Just 5) (proc "git" ("-C" : toFilePath cwd : args)) ""
   pure $
     case result of
-      Just ProcessOutput {poExitCode = ExitSuccess, poStdout} ->
+      Just MkProcessOutput {poExitCode = ExitSuccess, poStdout} ->
         firstNonEmptyLine [poStdout]
       _ -> Nothing
 
 configReport :: BakeoffConfig -> ConfigReport
 configReport cfg =
-  ConfigReport
-    { crTranslationTimeoutSeconds = bcTranslationTimeoutSeconds cfg,
-      crRuntimeTimeoutSeconds = bcRuntimeTimeoutSeconds cfg,
-      crBenchmarksEnabled = bcBenchmarksEnabled cfg,
-      crHyperfineRuns = bcHyperfineRuns cfg,
-      crHyperfineWarmup = bcHyperfineWarmup cfg,
-      crJobs = bcJobs cfg,
-      crGroups = if null (bcGroups cfg) then defaultGroups else bcGroups cfg,
-      crFiles = bcFiles cfg,
-      crFileLists = bcFileLists cfg,
-      crCompatibleFileLists = bcCompatibleFileLists cfg
+  MkConfigReport
+    { configTranslationTimeoutSeconds = bakeoffTranslationTimeoutSeconds cfg,
+      configRuntimeTimeoutSeconds = bakeoffRuntimeTimeoutSeconds cfg,
+      configBenchmarksEnabled = bakeoffBenchmarksEnabled cfg,
+      configHyperfineRuns = bakeoffHyperfineRuns cfg,
+      configHyperfineWarmup = bakeoffHyperfineWarmup cfg,
+      configJobs = bakeoffJobs cfg,
+      configGroups = if null (bakeoffGroups cfg) then defaultGroups else bakeoffGroups cfg,
+      configFiles = bakeoffFiles cfg,
+      configFileLists = bakeoffFileLists cfg,
+      configCompatibleFileLists = bakeoffCompatibleFileLists cfg
     }
 
 findExecutablePath :: FilePath -> IO (Maybe (Path Abs File))

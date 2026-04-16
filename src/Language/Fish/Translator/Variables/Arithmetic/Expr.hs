@@ -42,7 +42,7 @@ arithArgsPlan = go
         TA_Sequence _ ts -> concatPlans ts
         TA_Expansion _ ts -> concatPlans ts
         TA_Parenthesis _ t -> do
-          Hoisted pre args <- go t
+          MkHoisted pre args <- go t
           hoistM pre (wrapParens (ensureArithArgs args))
         TA_Unary _ op inner -> planUnaryOp go tok op inner
         TA_Binary _ op l r -> do
@@ -50,8 +50,8 @@ arithArgsPlan = go
           if (opTxt == "&&" || opTxt == "||") && arithHasSideEffects r
             then arithShortCircuitPlan go tok opTxt l r
             else do
-              Hoisted preL argsL <- go l
-              Hoisted preR argsR <- go r
+              MkHoisted preL argsL <- go l
+              MkHoisted preR argsR <- go r
               hoistM
                 (preL <> preR)
                 ( wrapParens
@@ -64,9 +64,9 @@ arithArgsPlan = go
           if arithHasSideEffects b || arithHasSideEffects c
             then arithTernaryPlan go tok a b c
             else do
-              Hoisted preA argsA <- go a
-              Hoisted preB argsB <- go b
-              Hoisted preC argsC <- go c
+              MkHoisted preA argsA <- go a
+              MkHoisted preB argsB <- go b
+              MkHoisted preC argsC <- go c
               hoistM
                 (preA <> preB <> preC)
                 ( wrapParens
@@ -121,7 +121,7 @@ arithArgsPlan = go
 
     concatPlans ts = do
       parts <- mapM go ts
-      let Hoisted pre argLists = sequenceA parts
+      let MkHoisted pre argLists = sequenceA parts
       hoistM pre (concat argLists)
 
 arithArgsFromTokenList :: Token -> [FishExpr TStr]

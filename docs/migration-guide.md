@@ -2,36 +2,51 @@
 
 This guide covers the warning classes and best-effort areas that most often need manual cleanup after translating Bash to Fish.
 
+## Reading Diagnostics
+
+- Monk warnings are now structured. Treat the warning code and severity as the stable contract; rendered message text is for humans.
+- High-severity warnings mean the generated Fish should be reviewed before use.
+- If the translator is run with `--strict`, unsupported best-effort branches fail instead of emitting output.
+
 ## `set -e` / `pipefail`
 
-- Treat Monk's `set -e` lowering as best-effort, especially around nested pipelines and compound-list edge cases.
+- Treat Monk's `set -e` and `pipefail` lowering as conservative, especially around compound-list edge cases.
 - Translated background jobs / `$!` / `wait` now use Monk-managed job tokens and have focused parity coverage, but PID-specific follow-ons such as `kill $!` still deserve manual review.
-- If a translated script depends on Bash's exact errexit exceptions, replace `cmd; or exit $status` regions with hand-written Fish control flow.
-- Monk now targets Bash's default non-`inherit_errexit` behavior inside command substitutions, but if a translated substitution still needs bespoke control flow, prefer assigning through an explicit `if` or `begin ... end` block in Fish.
+- Monk targets Bash's default non-`inherit_errexit` behavior inside command substitutions. If a translated substitution still needs bespoke control flow, rewrite it as explicit Fish `if` / `begin ... end` logic.
 
 ## `read`
 
-- The helper-backed exact path now covers the current gated `read` surface for explicit `read -d` flows, including empty delimiters, arrays, multiple destination variables, non-whitespace `IFS` cases, supported mixed flag clusters, and numeric `-u` helper-backed reads.
-- Remaining warning-driven `read` cases still deserve manual review: no-var delimiter reads, non-numeric fd values, and unsupported flag clusters.
-- If a translated stdin parser still carries a `read` warning, recheck it against real Bash input instead of trusting the generated Fish blindly.
-- Prefer explicit `string split`, `string collect`, and small helper functions in hand-edited Fish when the parsing logic is critical and Monk still emits a `read` warning.
+- The exact helper-backed path covers the currently accepted `read -d` surface:
+  - empty delimiters
+  - arrays
+  - multiple destination variables
+  - supported mixed flag clusters
+  - numeric `-u` helper-backed reads
+- Remaining warning-driven `read` cases still need manual review:
+  - no-variable delimiter reads
+  - non-numeric fd values
+  - unsupported flag clusters
+- If Monk still emits a `ReadIssue` warning, validate the translated parser against real Bash input instead of trusting the generated Fish blindly.
 
 ## Process Substitution
 
-- `<(...)` now has direct runtime coverage for simple cases, but larger pipelines should still be tested in Fish.
-- `>(...)` now uses a generated FIFO helper and has a broadened Linux-gated fixture surface, but it remains a manual-review area until explicit Linux runtime evidence is recorded for the helper-backed path.
-- If the translated output feeds another command asynchronously, prefer rewriting it as `mktemp` plus explicit producer/consumer steps.
+- `<(...)` has direct runtime coverage for simple cases, but larger pipelines should still be exercised in Fish.
+- `>(...)` now uses a generated FIFO helper, but it remains a manual-review surface until explicit Linux runtime evidence is recorded for the helper-backed path.
+- If the translated output feeds another command asynchronously, prefer rewriting it as explicit `mktemp` / producer / consumer steps in hand-edited Fish.
 
 ## `trap`
 
-- Simple `trap '...' EXIT` lowers to a Fish process-exit handler and now has runtime coverage.
+- Simple `trap '...' EXIT` lowers to a Fish process-exit handler and has focused runtime coverage.
 - Unsupported trap options and more complex signal forms still warn for manual review.
 - When cleanup ordering matters, prefer an explicit helper function and `--on-process-exit %self` in hand-edited Fish.
 
 ## Subshell Isolation
 
-- Bash subshells isolate variable and directory changes. Fish `begin ... end` does not.
-- When Monk warns about subshell best-effort translation, manually convert the block to an explicit helper function or separate script if isolation matters.
+- Bash subshells isolate variable, directory, and function-local side effects. Fish `begin ... end` does not.
+- Monk now applies the same best-effort subshell policy in statement, status, and command-substitution contexts:
+  - normal mode emits `BestEffortSubshell`
+  - `--strict` fails
+- If isolation matters, rewrite the block as an explicit helper function, separate script, or another structure that restores the required boundary.
 
 ## `shopt`
 
@@ -41,16 +56,17 @@ This guide covers the warning classes and best-effort areas that most often need
 ## `readonly` / `declare -r`
 
 - Fish has no direct readonly variable enforcement.
-- If immutability matters, keep the value local to a small scope or move it into a function argument instead of relying on the translated `set`.
+- If immutability matters, keep the value local to a narrow scope or move it into a function argument instead of relying on the translated `set`.
 
 ## Non-literal `source`
 
 - Recursive translation only inlines literal source paths.
 - Literal recursive source resolution now tries the working-directory-relative path first and then falls back to the parent source file directory.
-- For dynamic source paths, keep them as manual review points and convert them to explicit branching or path resolution in Fish.
+- Dynamic source paths remain manual-review territory.
 
-## Warning-Driven Cleanup Workflow
+## Cleanup Workflow
 
-- Run Monk with warnings enabled.
-- Use `MONK_INTEGRATION=1 cabal test` and compare the translated script against Bash on representative inputs; the current local baseline is a passing 220-test run including the generalized `read -d` fixtures, recursive source-graph seam coverage, and the curated real-world parity fixtures.
-- Treat warnings in `translator-audit.md` as semantic categories, not cosmetic notes.
+- Run Monk and review the typed warnings, not only the rendered script.
+- Re-run the translated script against representative Bash inputs.
+- Use `MONK_INTEGRATION=1 cabal test` as the current project-level regression gate; the current local baseline is a passing 232-test run that includes the focused subshell-status fixtures, generalized covered `read -d` fixtures, recursive source coverage, and curated real-world parity fixtures.
+- Treat `docs/design/translator-audit.md` as the fidelity source of truth when deciding whether a warning can be ignored.

@@ -40,23 +40,23 @@ translateCommandTokens cmdTokens =
 
 translateCommandTokensM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
 translateCommandTokensM =
-  translateCommandTokensHoistedM
+  translateCommandTokensPlanM
 
-translateCommandTokensHoistedM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
-translateCommandTokensHoistedM cmdTokens =
+translateCommandTokensPlanM :: [Token] -> HoistedM (Maybe (FishCommand TStatus))
+translateCommandTokensPlanM cmdTokens =
   case cmdTokens of
     [] -> hoistM [] Nothing
     (c : args) -> do
       let name = tokenToLiteralText c
-      Hoisted preRedirs (_redirs, plainArgs) <- parseRedirectTokensM args
+      MkHoisted preRedirs (_redirs, plainArgs) <- parseRedirectTokensM args
       if T.null name
         then do
-          Hoisted preArgs _ <- translateArgsM plainArgs
+          MkHoisted preArgs _ <- translateArgsM plainArgs
           hoistM (preRedirs <> preArgs) Nothing
         else case translateTimeReserved name plainArgs of
           Just timedCmd -> do
             timedCmd' <- applyPipefailIfEnabled timedCmd
             hoistM preRedirs (Just timedCmd')
           Nothing -> do
-            Hoisted pre cmd <- translateCommandTokensWithoutTimeM (c : args)
+            MkHoisted pre cmd <- translateCommandTokensWithoutTimeM (c : args)
             hoistM (preRedirs <> pre) cmd

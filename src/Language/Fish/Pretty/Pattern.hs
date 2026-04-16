@@ -13,7 +13,7 @@ import Language.Fish.Pretty.Expr (escapeFishString)
 import Prettyprinter
 
 prettyCaseItemWith :: (FishStatement -> Doc ann) -> (forall t. FishExpr t -> Doc ann) -> CaseItem -> Doc ann
-prettyCaseItemWith prettyStmt prettyExpr (CaseItem pats body) =
+prettyCaseItemWith prettyStmt prettyExpr (MkCaseItem pats body) =
   "case"
     <+> hsep (map (prettyCasePatternWith prettyExpr) (NE.toList pats))
     <> hardline

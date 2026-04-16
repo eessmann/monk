@@ -25,7 +25,7 @@ import Path
   )
 import Path.IO qualified as PathIO
 
-data BakeoffOutputs = BakeoffOutputs
+data BakeoffOutputs = MkBakeoffOutputs
   { boShakeDir :: Path Abs Dir,
     boMetaPath :: Path Abs File,
     boBenchmarkPlanPath :: Path Abs File,
@@ -37,7 +37,7 @@ data BakeoffOutputs = BakeoffOutputs
     boHyperfineBenchmarkMarkdownPath :: Path Abs File
   }
 
-data FixtureArtifacts = FixtureArtifacts
+data FixtureArtifacts = MkFixtureArtifacts
   { faDir :: Path Abs Dir,
     faBase :: String,
     faMonkFish :: Path Abs File,
@@ -92,7 +92,7 @@ bakeoffOutputs outputDir = do
   hyperfineBenchmarkJsonPath <- (outputDir </>) <$> parseRelFile "hyperfine-benchmark.json"
   hyperfineBenchmarkMarkdownPath <- (outputDir </>) <$> parseRelFile "hyperfine-benchmark.md"
   pure
-    BakeoffOutputs
+    MkBakeoffOutputs
       { boShakeDir = shakeDir,
         boMetaPath = metaPath,
         boBenchmarkPlanPath = benchmarkPlanPath,
@@ -106,8 +106,8 @@ bakeoffOutputs outputDir = do
 
 fixtureArtifacts :: BakeoffConfig -> FixtureSpec -> IO FixtureArtifacts
 fixtureArtifacts cfg fixture = do
-  let dir = bcOutputDir cfg </> fsArtifactDir fixture
-  base <- fixtureBaseStem (fsPath fixture)
+  let dir = bakeoffOutputDir cfg </> specArtifactDir fixture
+  base <- fixtureBaseStem (specPath fixture)
   monkFish <- artifactFile dir (base <> ".monk.fish")
   monkTranslateJson <- artifactFile dir "monk.translate.json"
   monkTranslateStderr <- artifactFile dir (base <> ".monk.err")
@@ -130,7 +130,7 @@ fixtureArtifacts cfg fixture = do
   diffJson <- artifactFile dir "diff.json"
   resultJson <- artifactFile dir "result.json"
   pure
-    FixtureArtifacts
+    MkFixtureArtifacts
       { faDir = dir,
         faBase = base,
         faMonkFish = monkFish,

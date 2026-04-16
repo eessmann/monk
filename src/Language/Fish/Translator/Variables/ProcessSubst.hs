@@ -9,15 +9,14 @@ module Language.Fish.Translator.Variables.ProcessSubst
   )
 where
 
-import Prelude hiding (get, modify)
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator.Monad
-  ( TranslateM,
-    TranslateState (..),
+  ( HelperId (..),
+    TranslateM,
+    ensureHelper,
   )
-import Polysemy.State (get, modify)
 
 procSubExpr :: String -> NonEmpty FishStatement -> FishExpr TStr
 procSubExpr dir body =
@@ -79,28 +78,14 @@ procSubOutHelperList body =
     )
 
 ensureProcSubOutHelper :: TranslateM ()
-ensureProcSubOutHelper = do
-  st <- get
-  if any isProcSubOutHelper (preamble st)
-    then pure ()
-    else
-      modify
-        ( \s ->
-            s
-              { preamble = preamble s <> [procSubOutHelperStmt]
-              }
-        )
-
-isProcSubOutHelper :: FishStatement -> Bool
-isProcSubOutHelper = \case
-  Stmt (Function FishFunction {funcName = "__monk_procsub_out"}) -> True
-  _ -> False
+ensureProcSubOutHelper =
+  ensureHelper HelperProcSubOut [procSubOutHelperStmt]
 
 procSubOutHelperStmt :: FishStatement
 procSubOutHelperStmt =
   Stmt
     ( Function
-        FishFunction
+        MkFishFunction
           { funcName = "__monk_procsub_out",
             funcFlags = [],
             funcParams = ["body"],
@@ -191,8 +176,7 @@ procSubConsumerPipeStmt :: FishStatement -> FishStatement
 procSubConsumerPipeStmt rhsStmt =
   Stmt
     ( Pipeline
-        ( FishJobPipeline
-            False
+        ( MkFishJobPipeline False
             []
             procSubCatFifoStmt
             [PipeTo [] rhsStmt]

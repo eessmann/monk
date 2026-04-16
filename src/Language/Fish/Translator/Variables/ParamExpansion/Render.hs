@@ -52,7 +52,7 @@ renderParamExpansionWithPrelude ::
 renderParamExpansionWithPrelude tokensToListExpr tokensToListExprM = \case
   ParamExpansionList core -> renderParamCoreWithPrelude tokensToListExpr tokensToListExprM core
   ParamExpansionStr core -> do
-    Hoisted pre listExpr <- renderParamCoreWithPrelude tokensToListExpr tokensToListExprM core
+    MkHoisted pre listExpr <- renderParamCoreWithPrelude tokensToListExpr tokensToListExprM core
     hoistM pre (ExprJoinList listExpr)
 
 renderParamCore :: ([Token] -> FishExpr (TList TStr)) -> ParamCore -> FishExpr (TList TStr)
@@ -67,14 +67,14 @@ renderParamCoreWithPrelude ::
   ParamCore ->
   HoistedM (FishExpr (TList TStr))
 renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
-  ParamCoreOperator name (ParamOperator kind cond rest) ->
+  ParamCoreOperator name (MkParamOperator kind cond rest) ->
     case kind of
       OpAssign -> renderAssignDefault tokensToListExprM name cond rest
       OpError -> renderErrorDefault tokensToListExprM name cond rest
       _ ->
         hoistM
           []
-          (renderParamOperator tokensToListExpr name (ParamOperator kind cond rest))
+          (renderParamOperator tokensToListExpr name (MkParamOperator kind cond rest))
   ParamCoreModifier name modifier -> hoistM [] (renderModifierExpansion name modifier)
   ParamCoreSimple simple -> hoistM [] (renderSimpleVar simple)
   where
@@ -85,7 +85,7 @@ renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
       let condFn = condFrom cond
           varName = specialVarName name
       flags <- scopeFlagsForVarM varName
-      Hoisted pre defaultExpr <- tokensToListExprM' rest
+      MkHoisted pre defaultExpr <- tokensToListExprM' rest
       let setStmt = Stmt (Set flags varName defaultExpr)
           thenStmt = Stmt (Command "true" [])
           elseStmts = pre <> [setStmt]
@@ -94,14 +94,14 @@ renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
     renderErrorDefault tokensToListExprM' name cond rest = do
       let condFn = condFrom cond
           varName = specialVarName name
-      Hoisted pre errExpr <- tokensToListExprM' rest
+      MkHoisted pre errExpr <- tokensToListExprM' rest
       let errStmt =
             Stmt
               ( Command
                   "printf"
                   [ ExprVal (ExprLiteral "%s\\n"),
                     ExprVal (ExprJoinList errExpr),
-                    RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
+                    RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))
                   ]
               )
           elseStmts = pre <> [errStmt, Stmt (Exit (Just (ExprNumLiteral 1)))]
@@ -110,7 +110,7 @@ renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
       hoistM [ifStmt] (ExprVariable (VarAll varName))
 
 renderParamOperator :: ([Token] -> FishExpr (TList TStr)) -> Text -> ParamOperator -> FishExpr (TList TStr)
-renderParamOperator tokensToListExpr name (ParamOperator kind cond rest) =
+renderParamOperator tokensToListExpr name (MkParamOperator kind cond rest) =
   let condFn = case cond of
         CondNonEmpty -> varNonEmptyCond
         CondSet -> varSetCond
@@ -125,7 +125,7 @@ renderParamOperator tokensToListExpr name (ParamOperator kind cond rest) =
           translateAltExpansionWith condFn name (tokensToListExpr rest)
 
 renderSimpleVar :: ParamSimple -> FishExpr (TList TStr)
-renderSimpleVar (ParamSimple name idx) =
+renderSimpleVar (MkParamSimple name idx) =
   case (name, idx) of
     (Just name', _)
       | name' == "#" ->
@@ -195,7 +195,7 @@ translateErrorExpansionWith condFn name errExpr =
               "printf"
               [ ExprVal (ExprLiteral "%s\\n"),
                 ExprVal (ExprJoinList errExpr),
-                RedirectVal (Redirect RedirectStdout RedirectOut (RedirectTargetFD 2))
+                RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))
               ]
           )
       elseStmt = StmtList [errStmt, Stmt (Exit (Just (ExprNumLiteral 1)))]
@@ -277,8 +277,7 @@ varNonEmptyCond :: Text -> FishJobList
 varNonEmptyCond name =
   let varExpr = ExprJoinList (ExprVariable (VarAll (specialVarName name)))
       setq =
-        FishJobPipeline
-          False
+        MkFishJobPipeline False
           []
           ( Stmt
               ( Command
@@ -291,19 +290,17 @@ varNonEmptyCond name =
           []
           False
       test =
-        FishJobPipeline
-          False
+        MkFishJobPipeline False
           []
           (Stmt (testUnaryCommand "-n" varExpr))
           []
           False
-   in FishJobList (FishJobConjunction Nothing setq [JCAnd test] NE.:| [])
+   in MkFishJobList (MkFishJobConjunction Nothing setq [JCAnd test] NE.:| [])
 
 varSetCond :: Text -> FishJobList
 varSetCond name =
   let setq =
-        FishJobPipeline
-          False
+        MkFishJobPipeline False
           []
           ( Stmt
               ( Command
@@ -315,14 +312,12 @@ varSetCond name =
           )
           []
           False
-   in FishJobList (FishJobConjunction Nothing setq [] NE.:| [])
+   in MkFishJobList (MkFishJobConjunction Nothing setq [] NE.:| [])
 
 jobListFromStatus :: FishCommand TStatus -> FishJobList
 jobListFromStatus cmd =
-  FishJobList
-    ( FishJobConjunction
-        Nothing
-        (FishJobPipeline False [] (Stmt cmd) [] False)
+  MkFishJobList ( MkFishJobConjunction Nothing
+        (MkFishJobPipeline False [] (Stmt cmd) [] False)
         []
         NE.:| []
     )

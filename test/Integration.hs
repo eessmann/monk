@@ -52,69 +52,72 @@ integrationTests =
 
 integrationFixtures :: [IntegrationFixture]
 integrationFixtures =
-  [ IntegrationFixture "pwd-cd" "test/fixtures/integration/pwd-cd.bash",
-    IntegrationFixture "stdout-stderr-exit" "test/fixtures/integration/stdout-stderr-exit.bash",
-    IntegrationFixture "cd-tmp" "test/fixtures/integration/cd-tmp.bash",
-    IntegrationFixture "pushd-popd" "test/fixtures/integration/pushd-popd.bash",
-    IntegrationFixture "errexit-basic" "test/fixtures/integration/errexit-basic.bash",
-    IntegrationFixture "errexit-andor" "test/fixtures/integration/errexit-andor.bash",
-    IntegrationFixture "errexit-conditionals" "test/fixtures/integration/errexit-conditionals.bash",
-    IntegrationFixture "pipefail-basic" "test/fixtures/integration/pipefail-basic.bash",
-    IntegrationFixture "pipefail-toggle" "test/fixtures/integration/pipefail-toggle.bash",
-    IntegrationFixture "background-success-wait" "test/fixtures/integration/background-success-wait.bash",
-    IntegrationFixture "background-fail-wait" "test/fixtures/integration/background-fail-wait.bash",
-    IntegrationFixture "background-pipefail" "test/fixtures/integration/background-pipefail.bash",
-    IntegrationFixture "background-jobs" "test/fixtures/integration/background-jobs.bash",
-    IntegrationFixture "background-local-scope" "test/fixtures/integration/background-local-scope.bash",
-    IntegrationFixture "read-flags" "test/fixtures/integration/read-flags.bash",
-    IntegrationFixture "read-delimiter" "test/fixtures/integration/read-delimiter.bash",
-    IntegrationFixture "read-delimiter-null-array" "test/fixtures/integration/read-delimiter-null-array.bash",
-    IntegrationFixture "read-delimiter-null-vars" "test/fixtures/integration/read-delimiter-null-vars.bash",
-    IntegrationFixture "read-delimiter-ifs" "test/fixtures/integration/read-delimiter-ifs.bash",
-    IntegrationFixture "read-delimiter-flags" "test/fixtures/integration/read-delimiter-flags.bash",
-    IntegrationFixture "here-string-basic" "test/fixtures/integration/here-string-basic.bash",
-    IntegrationFixture "param-expansion-args" "test/fixtures/integration/param-expansion-args.bash",
-    IntegrationFixture "param-expansion-redirection" "test/fixtures/integration/param-expansion-redirection.bash",
-    IntegrationFixture "param-expansion-case" "test/fixtures/integration/param-expansion-case.bash",
-    IntegrationFixture "procsub-input" "test/fixtures/integration/procsub-input.bash",
-    IntegrationFixture "procsub-output" "test/fixtures/integration/procsub-output.bash",
-    IntegrationFixture "procsub-output-pipeline" "test/fixtures/integration/procsub-output-pipeline.bash",
-    IntegrationFixture "procsub-output-variable" "test/fixtures/integration/procsub-output-variable.bash",
-    IntegrationFixture "source-recursive" "test/fixtures/integration/source-recursive.bash",
-    IntegrationFixture "trap-exit" "test/fixtures/integration/trap-exit.bash",
-    IntegrationFixture "trap-exit-expansion" "test/fixtures/integration/trap-exit-expansion.bash",
-    IntegrationFixture "arith-short-circuit" "test/fixtures/integration/arith-short-circuit.bash",
-    IntegrationFixture "time-prefix" "test/fixtures/integration/time-prefix.bash",
-    IntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
-    IntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash",
-    IntegrationFixture "realworld/hello-world" "test/fixtures/realworld/hello-world.bash",
-    IntegrationFixture "realworld/echo-args" "test/fixtures/realworld/echo-args.bash",
-    IntegrationFixture "realworld/a2l" "test/fixtures/realworld/a2l.bash",
-    IntegrationFixture "realworld/coat" "test/fixtures/realworld/coat.bash",
-    IntegrationFixture "realworld/taoc" "test/fixtures/realworld/taoc.bash",
-    IntegrationFixture "realworld/neofetch-mini" "test/fixtures/realworld/neofetch-mini.bash",
-    IntegrationFixture "realworld/argparse-mini" "test/fixtures/realworld/argparse-mini.bash",
-    IntegrationFixture "realworld/envfile-preview" "test/fixtures/realworld/envfile-preview.bash",
-    IntegrationFixture "realworld/path-filter" "test/fixtures/realworld/path-filter.bash",
-    IntegrationFixture "realworld/semver-normalize" "test/fixtures/realworld/semver-normalize.bash",
-    IntegrationFixture "realworld/pyramid-right" "test/fixtures/realworld/pyramid-right.bash",
-    IntegrationFixture "realworld/pyramid-left" "test/fixtures/realworld/pyramid-left.bash",
-    IntegrationFixture "realworld/version-compare" "test/fixtures/realworld/version-compare.bash"
+  [ MkIntegrationFixture "pwd-cd" "test/fixtures/integration/pwd-cd.bash",
+    MkIntegrationFixture "stdout-stderr-exit" "test/fixtures/integration/stdout-stderr-exit.bash",
+    MkIntegrationFixture "cd-tmp" "test/fixtures/integration/cd-tmp.bash",
+    MkIntegrationFixture "pushd-popd" "test/fixtures/integration/pushd-popd.bash",
+    MkIntegrationFixture "errexit-basic" "test/fixtures/integration/errexit-basic.bash",
+    MkIntegrationFixture "errexit-andor" "test/fixtures/integration/errexit-andor.bash",
+    MkIntegrationFixture "errexit-conditionals" "test/fixtures/integration/errexit-conditionals.bash",
+    MkIntegrationFixture "pipefail-basic" "test/fixtures/integration/pipefail-basic.bash",
+    MkIntegrationFixture "pipefail-toggle" "test/fixtures/integration/pipefail-toggle.bash",
+    MkIntegrationFixture "subshell-status-variable" "test/fixtures/integration/subshell-status-variable.bash",
+    MkIntegrationFixture "subshell-status-read-delimiter" "test/fixtures/integration/subshell-status-read-delimiter.bash",
+    MkIntegrationFixture "subshell-status-pipefail" "test/fixtures/integration/subshell-status-pipefail.bash",
+    MkIntegrationFixture "background-success-wait" "test/fixtures/integration/background-success-wait.bash",
+    MkIntegrationFixture "background-fail-wait" "test/fixtures/integration/background-fail-wait.bash",
+    MkIntegrationFixture "background-pipefail" "test/fixtures/integration/background-pipefail.bash",
+    MkIntegrationFixture "background-jobs" "test/fixtures/integration/background-jobs.bash",
+    MkIntegrationFixture "background-local-scope" "test/fixtures/integration/background-local-scope.bash",
+    MkIntegrationFixture "read-flags" "test/fixtures/integration/read-flags.bash",
+    MkIntegrationFixture "read-delimiter" "test/fixtures/integration/read-delimiter.bash",
+    MkIntegrationFixture "read-delimiter-null-array" "test/fixtures/integration/read-delimiter-null-array.bash",
+    MkIntegrationFixture "read-delimiter-null-vars" "test/fixtures/integration/read-delimiter-null-vars.bash",
+    MkIntegrationFixture "read-delimiter-ifs" "test/fixtures/integration/read-delimiter-ifs.bash",
+    MkIntegrationFixture "read-delimiter-flags" "test/fixtures/integration/read-delimiter-flags.bash",
+    MkIntegrationFixture "here-string-basic" "test/fixtures/integration/here-string-basic.bash",
+    MkIntegrationFixture "param-expansion-args" "test/fixtures/integration/param-expansion-args.bash",
+    MkIntegrationFixture "param-expansion-redirection" "test/fixtures/integration/param-expansion-redirection.bash",
+    MkIntegrationFixture "param-expansion-case" "test/fixtures/integration/param-expansion-case.bash",
+    MkIntegrationFixture "procsub-input" "test/fixtures/integration/procsub-input.bash",
+    MkIntegrationFixture "procsub-output" "test/fixtures/integration/procsub-output.bash",
+    MkIntegrationFixture "procsub-output-pipeline" "test/fixtures/integration/procsub-output-pipeline.bash",
+    MkIntegrationFixture "procsub-output-variable" "test/fixtures/integration/procsub-output-variable.bash",
+    MkIntegrationFixture "source-recursive" "test/fixtures/integration/source-recursive.bash",
+    MkIntegrationFixture "trap-exit" "test/fixtures/integration/trap-exit.bash",
+    MkIntegrationFixture "trap-exit-expansion" "test/fixtures/integration/trap-exit-expansion.bash",
+    MkIntegrationFixture "arith-short-circuit" "test/fixtures/integration/arith-short-circuit.bash",
+    MkIntegrationFixture "time-prefix" "test/fixtures/integration/time-prefix.bash",
+    MkIntegrationFixture "corpus/simple-echo" "test/fixtures/corpus/simple-echo.bash",
+    MkIntegrationFixture "corpus/if-then" "test/fixtures/corpus/if-then.bash",
+    MkIntegrationFixture "realworld/hello-world" "test/fixtures/realworld/hello-world.bash",
+    MkIntegrationFixture "realworld/echo-args" "test/fixtures/realworld/echo-args.bash",
+    MkIntegrationFixture "realworld/a2l" "test/fixtures/realworld/a2l.bash",
+    MkIntegrationFixture "realworld/coat" "test/fixtures/realworld/coat.bash",
+    MkIntegrationFixture "realworld/taoc" "test/fixtures/realworld/taoc.bash",
+    MkIntegrationFixture "realworld/neofetch-mini" "test/fixtures/realworld/neofetch-mini.bash",
+    MkIntegrationFixture "realworld/argparse-mini" "test/fixtures/realworld/argparse-mini.bash",
+    MkIntegrationFixture "realworld/envfile-preview" "test/fixtures/realworld/envfile-preview.bash",
+    MkIntegrationFixture "realworld/path-filter" "test/fixtures/realworld/path-filter.bash",
+    MkIntegrationFixture "realworld/semver-normalize" "test/fixtures/realworld/semver-normalize.bash",
+    MkIntegrationFixture "realworld/pyramid-right" "test/fixtures/realworld/pyramid-right.bash",
+    MkIntegrationFixture "realworld/pyramid-left" "test/fixtures/realworld/pyramid-left.bash",
+    MkIntegrationFixture "realworld/version-compare" "test/fixtures/realworld/version-compare.bash"
   ]
 
-data IntegrationFixture = IntegrationFixture
+data IntegrationFixture = MkIntegrationFixture
   { ifName :: String,
     ifPath :: FilePath
   }
 
 integrationTest :: IntegrationFixture -> TestTree
-integrationTest IntegrationFixture {ifName, ifPath} = H.testCase ifName $ do
+integrationTest MkIntegrationFixture {ifName, ifPath} = H.testCase ifName $ do
   runnable <- shouldRunIntegration
   case runnable of
     Left _reason -> pure ()
     Right () -> do
       fixturePath <- PathIO.resolveFile' ifPath
-      supportedPlatform <- fixtureSupportedOnCurrentPlatform fixturePath
+      supportedPlatform <- fixtureSupportsCurrentPlatform fixturePath
       prereqsMet <- fixturePrereqsAvailable fixturePath
       when (supportedPlatform && prereqsMet) $ do
         bashSrc <- TIO.readFile ifPath
@@ -142,8 +145,8 @@ fixturePrereqsAvailable path = do
   prereqs <- loadFixturePrereqs path
   and <$> mapM (fmap isJust . findExecutable . toString) prereqs
 
-fixtureSupportedOnCurrentPlatform :: Path Abs File -> IO Bool
-fixtureSupportedOnCurrentPlatform path = do
+fixtureSupportsCurrentPlatform :: Path Abs File -> IO Bool
+fixtureSupportsCurrentPlatform path = do
   mPlatforms <- loadFixturePlatforms path
   pure $
     case mPlatforms of

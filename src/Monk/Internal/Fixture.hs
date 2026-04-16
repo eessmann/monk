@@ -18,7 +18,7 @@ import Monk.Internal.Shell (ShellRunMode (..))
 import Path (Abs, File, Path, addExtension, splitExtension, toFilePath)
 import Path.IO qualified as PathIO
 
-data FixtureMetadata = FixtureMetadata
+data FixtureMetadata = MkFixtureMetadata
   { fmArgs :: [Text],
     fmMode :: ShellRunMode,
     fmPlatforms :: Maybe [Text],
@@ -30,7 +30,7 @@ data FixtureMetadata = FixtureMetadata
 
 loadFixtureMetadata :: Path Abs File -> IO FixtureMetadata
 loadFixtureMetadata path =
-  FixtureMetadata
+  MkFixtureMetadata
     <$> loadFixtureArgs path
     <*> loadFixtureMode path
     <*> loadFixturePlatforms path

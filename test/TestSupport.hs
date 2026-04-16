@@ -14,10 +14,8 @@ import Test.Tasty.HUnit as H
 
 trueCond :: FishJobList
 trueCond =
-  FishJobList
-    ( FishJobConjunction
-        Nothing
-        (FishJobPipeline False [] (Stmt (Command "true" [])) [] False)
+  MkFishJobList ( MkFishJobConjunction Nothing
+        (MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False)
         []
         NE.:| []
     )

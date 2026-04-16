@@ -88,7 +88,7 @@ data Decoration
   deriving stock (Show, Eq)
 
 -- | A source position in an input file (1-based line/column).
-data SourcePos = SourcePos
+data SourcePos = MkSourcePos
   { srcFile :: Text,
     srcLine :: Int,
     srcColumn :: Int
@@ -96,7 +96,7 @@ data SourcePos = SourcePos
   deriving stock (Show, Eq, Ord)
 
 -- | A source range with start and end positions.
-data SourceRange = SourceRange
+data SourceRange = MkSourceRange
   { rangeStart :: SourcePos,
     rangeEnd :: SourcePos
   }
@@ -129,7 +129,7 @@ instance Eq (SpecialVarRef t) where
   _ == _ = False
 
 -- | A glob pattern composed of parts.
-newtype GlobPattern = GlobPattern [GlobPart]
+newtype GlobPattern = MkGlobPattern [GlobPart]
   deriving stock (Show, Eq)
 
 -- | A component of a glob pattern.

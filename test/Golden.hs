@@ -15,7 +15,7 @@ goldenTests :: TestTree
 goldenTests =
   testGroup "Golden translations" (map goldenTest goldenFixtures)
 
-data GoldenFixture = GoldenFixture
+data GoldenFixture = MkGoldenFixture
   { gfName :: String,
     gfBashPath :: FilePath,
     gfFishPath :: FilePath
@@ -23,21 +23,21 @@ data GoldenFixture = GoldenFixture
 
 goldenFixtures :: [GoldenFixture]
 goldenFixtures =
-  [ GoldenFixture "echo-exit" "test/fixtures/golden/echo-exit.bash" "test/fixtures/golden/echo-exit.fish",
-    GoldenFixture "echo-echo" "test/fixtures/golden/echo-echo.bash" "test/fixtures/golden/echo-echo.fish",
-    GoldenFixture "assignments" "test/fixtures/golden/assignments.bash" "test/fixtures/golden/assignments.fish",
-    GoldenFixture "read-prompt" "test/fixtures/golden/read-prompt.bash" "test/fixtures/golden/read-prompt.fish",
-    GoldenFixture "double-bracket-eq" "test/fixtures/golden/double-bracket-eq.bash" "test/fixtures/golden/double-bracket-eq.fish",
-    GoldenFixture "glob-basic" "test/fixtures/golden/glob-basic.bash" "test/fixtures/golden/glob-basic.fish",
-    GoldenFixture "extglob-basic" "test/fixtures/golden/extglob-basic.bash" "test/fixtures/golden/extglob-basic.fish",
-    GoldenFixture
+  [ MkGoldenFixture "echo-exit" "test/fixtures/golden/echo-exit.bash" "test/fixtures/golden/echo-exit.fish",
+    MkGoldenFixture "echo-echo" "test/fixtures/golden/echo-echo.bash" "test/fixtures/golden/echo-echo.fish",
+    MkGoldenFixture "assignments" "test/fixtures/golden/assignments.bash" "test/fixtures/golden/assignments.fish",
+    MkGoldenFixture "read-prompt" "test/fixtures/golden/read-prompt.bash" "test/fixtures/golden/read-prompt.fish",
+    MkGoldenFixture "double-bracket-eq" "test/fixtures/golden/double-bracket-eq.bash" "test/fixtures/golden/double-bracket-eq.fish",
+    MkGoldenFixture "glob-basic" "test/fixtures/golden/glob-basic.bash" "test/fixtures/golden/glob-basic.fish",
+    MkGoldenFixture "extglob-basic" "test/fixtures/golden/extglob-basic.bash" "test/fixtures/golden/extglob-basic.fish",
+    MkGoldenFixture
       "case-pattern-expansion-glob"
       "test/fixtures/golden/case-pattern-expansion-glob.bash"
       "test/fixtures/golden/case-pattern-expansion-glob.fish"
   ]
 
 goldenTest :: GoldenFixture -> TestTree
-goldenTest GoldenFixture {gfName, gfBashPath, gfFishPath} =
+goldenTest MkGoldenFixture {gfName, gfBashPath, gfFishPath} =
   H.testCase gfName $ do
     bashSrc <- TIO.readFile gfBashPath
     expected <- TIO.readFile gfFishPath

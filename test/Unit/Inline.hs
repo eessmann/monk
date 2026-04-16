@@ -35,14 +35,14 @@ unitInlineTests =
         case (translateParseResult defaultConfig rootParse, translateParseResult defaultConfig subParse) of
           (Right rootResult, Right subResult) -> do
             let rootTr =
-                  Translation
+                  MkTranslation
                     { trPath = rootPath,
                       trStatements = translationStatements rootResult,
                       trState = translationState rootResult,
                       trSourceMap = M.fromList [("sub.sh", Just subPath)]
                     }
                 subTr =
-                  Translation
+                  MkTranslation
                     { trPath = subPath,
                       trStatements = translationStatements subResult,
                       trState = translationState subResult,
@@ -62,7 +62,7 @@ unitInlineTests =
           Left err -> H.assertFailure (show err)
           Right rootResult -> do
             let rootTr =
-                  Translation
+                  MkTranslation
                     { trPath = "root.sh",
                       trStatements = translationStatements rootResult,
                       trState = translationState rootResult,

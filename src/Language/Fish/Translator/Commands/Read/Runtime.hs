@@ -14,43 +14,31 @@ module Language.Fish.Translator.Commands.Read.Runtime
   )
 where
 
-import Prelude hiding (get, modify)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Commands.Read.Types
 import Language.Fish.Translator.Monad
-  ( TranslateM,
-    TranslateState (..),
+  ( HelperId (..),
+    TranslateM,
+    ensureHelper,
   )
-import Polysemy.State (get, modify)
 
 ensureReadDelimHelper :: TranslateM ()
-ensureReadDelimHelper = do
-  st <- get
-  if readDelimHelperAdded st
-    then pure ()
-    else
-      modify
-        ( \s ->
-            s
-              { readDelimHelperAdded = True,
-                preamble = preamble s <> readRuntimeHelperStatements
-              }
-        )
+ensureReadDelimHelper =
+  ensureHelper HelperReadRuntime readRuntimeHelperStatements
 
 readRuntimeHelperStatements :: [FishStatement]
 readRuntimeHelperStatements =
   [ readCaptureHelperStmt,
-    readAssignArrayHelperStmt,
-    readAssignVarsHelperStmt
+    readAssignHelperStmt
   ]
 
 readCaptureHelperStmt :: FishStatement
 readCaptureHelperStmt =
   Stmt
     ( Function
-        FishFunction
+        MkFishFunction
           { funcName = "__monk_read_capture_delim",
             funcFlags = [],
             funcParams = ["mode", "delimiter", "raw", "prompt", "silent", "timeout", "nchars"],
@@ -74,14 +62,14 @@ readCaptureHelperStmt =
           }
     )
 
-readAssignArrayHelperStmt :: FishStatement
-readAssignArrayHelperStmt =
+readAssignHelperStmt :: FishStatement
+readAssignHelperStmt =
   Stmt
     ( Function
-        FishFunction
-          { funcName = "__monk_read_assign_array",
+        MkFishFunction
+          { funcName = "__monk_read_assign",
             funcFlags = [],
-            funcParams = ["ifs", "record"],
+            funcParams = ["mode", "ifs", "record", "count"],
             funcBody =
               Stmt
                 ( Command
@@ -89,31 +77,7 @@ readAssignArrayHelperStmt =
                     [ ExprVal (ExprLiteral "-c"),
                       ExprVal (ExprLiteral pythonDedentExecScript),
                       ExprVal (ExprLiteral ("\n" <> readAssignPythonScript)),
-                      ExprVal (ExprLiteral "array"),
-                      ExprVal (ExprVariable (VarScalar "ifs")),
-                      ExprVal (ExprVariable (VarScalar "record"))
-                    ]
-                )
-                NE.:| []
-          }
-    )
-
-readAssignVarsHelperStmt :: FishStatement
-readAssignVarsHelperStmt =
-  Stmt
-    ( Function
-        FishFunction
-          { funcName = "__monk_read_assign_vars",
-            funcFlags = [],
-            funcParams = ["ifs", "record", "count"],
-            funcBody =
-              Stmt
-                ( Command
-                    "python3"
-                    [ ExprVal (ExprLiteral "-c"),
-                      ExprVal (ExprLiteral pythonDedentExecScript),
-                      ExprVal (ExprLiteral ("\n" <> readAssignPythonScript)),
-                      ExprVal (ExprLiteral "vars"),
+                      ExprVal (ExprVariable (VarScalar "mode")),
                       ExprVal (ExprVariable (VarScalar "ifs")),
                       ExprVal (ExprVariable (VarScalar "record")),
                       ExprVal (ExprVariable (VarScalar "count"))
@@ -191,7 +155,7 @@ captureHelperCommandToFile spec =
     ( map ExprVal (captureHelperArgs spec)
         <> captureHelperInputRedirects spec
         <> [ RedirectVal
-               ( Redirect
+               ( MkRedirect
                    RedirectStdout
                    RedirectOut
                    (RedirectFile (ExprVariable (VarScalar "__monk_read_capture_file")))
@@ -214,7 +178,7 @@ captureHelperInputRedirects :: ExactReadDelim -> [ExprOrRedirect]
 captureHelperInputRedirects spec =
   maybe
     []
-    (\fd -> [RedirectVal (Redirect RedirectStdin RedirectIn (RedirectTargetFD fd))])
+    (\fd -> [RedirectVal (MkRedirect RedirectStdin RedirectIn (RedirectTargetFD fd))])
     (erdFD spec)
 
 delimiterModeArg :: ExactReadDelimiter -> Text
@@ -242,20 +206,18 @@ assignHelperExpr spec =
 
 assignHelperCommand :: ExactReadDelim -> FishCommand TStatus
 assignHelperCommand spec =
-  case erdTarget spec of
-    ExactReadArray _ ->
-      Command
-        "__monk_read_assign_array"
-        [ ExprVal (ExprVariable (VarScalar "__monk_read_ifs")),
-          ExprVal (ExprVariable (VarScalar "__monk_read_value"))
-        ]
-    ExactReadVars names ->
-      Command
-        "__monk_read_assign_vars"
-        [ ExprVal (ExprVariable (VarScalar "__monk_read_ifs")),
-          ExprVal (ExprVariable (VarScalar "__monk_read_value")),
-          ExprVal (ExprLiteral (T.pack (show (length names))))
-        ]
+  Command
+    "__monk_read_assign"
+    [ ExprVal (ExprLiteral mode),
+      ExprVal (ExprVariable (VarScalar "__monk_read_ifs")),
+      ExprVal (ExprVariable (VarScalar "__monk_read_value")),
+      ExprVal (ExprLiteral countValue)
+    ]
+  where
+    (mode, countValue) =
+      case erdTarget spec of
+        ExactReadArray _ -> ("array", "")
+        ExactReadVars names -> ("vars", T.pack (show (length names)))
 
 helperPipelineStatusExpr :: FishExpr TStr
 helperPipelineStatusExpr =
@@ -277,7 +239,7 @@ statusFromVarCommand name =
 
 pipelineFromCommands :: FishCommand TStatus -> [FishCommand TStatus] -> FishJobPipeline
 pipelineFromCommands firstCmd rest =
-  FishJobPipeline
+  MkFishJobPipeline
     { jpTime = False,
       jpVariables = [],
       jpStatement = Stmt firstCmd,
@@ -287,10 +249,8 @@ pipelineFromCommands firstCmd rest =
 
 jobListFromCommand :: FishCommand TStatus -> FishJobList
 jobListFromCommand cmd =
-  FishJobList
-    ( FishJobConjunction
-        Nothing
-        (FishJobPipeline False [] (Stmt cmd) [] False)
+  MkFishJobList ( MkFishJobConjunction Nothing
+        (MkFishJobPipeline False [] (Stmt cmd) [] False)
         []
         NE.:| []
     )

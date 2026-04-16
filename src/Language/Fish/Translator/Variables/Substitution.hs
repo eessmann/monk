@@ -22,6 +22,11 @@ import Language.Fish.Translator.Cond
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM, withCommandSubstScope)
+import Language.Fish.Translator.Statement
+  ( noteBestEffortSubshell,
+    statusCommandBlock,
+    translateSubshellStatusCommand,
+  )
 import Language.Fish.Translator.Token (tokenHasExpansion, tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic (translateArithmetic)
 import ShellCheck.AST
@@ -73,11 +78,11 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
       T_AndIf _ l r ->
         let lp = substPipelineOf (translateSubstStatusCmd l)
             rp = substPipelineOf (translateSubstStatusCmd r)
-         in Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+         in Stmt (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
       T_OrIf _ l r ->
         let lp = substPipelineOf (translateSubstStatusCmd l)
             rp = substPipelineOf (translateSubstStatusCmd r)
-         in Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+         in Stmt (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
       T_Backgrounded _ tok ->
         Stmt (Background (translateSubstStatusCmd tok))
       T_BraceGroup _ tokens ->
@@ -130,16 +135,20 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
           translateSubstPipeline bang cmds
         T_Condition _ _ condTok ->
           translateSubstConditionToken condTok
+        T_BraceGroup _ tokens ->
+          translateSubstStatusBlock tokens
+        T_Subshell _ tokens ->
+          translateSubstSubshellStatus tokens
         T_Redirecting _ _ inner ->
           translateSubstStatusCmd inner
         T_AndIf _ l r ->
           let lp = substPipelineOf (translateSubstStatusCmd l)
               rp = substPipelineOf (translateSubstStatusCmd r)
-           in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+           in JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])
         T_OrIf _ l r ->
           let lp = substPipelineOf (translateSubstStatusCmd l)
               rp = substPipelineOf (translateSubstStatusCmd r)
-           in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+           in JobConj (MkFishJobConjunction Nothing lp [JCOr rp])
         _ -> Command "true" []
 
     translateSubstCommandTokensToStatus assignments cmdTokens =
@@ -163,23 +172,35 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
         T_SimpleCommand _ assignments rest ->
           Just (translateSubstCommandTokensToStatus assignments rest)
         T_Condition {} -> Just (translateSubstStatusCmd token)
+        T_BraceGroup _ tokens -> Just (translateSubstStatusBlock tokens)
+        T_Subshell _ tokens -> Just (translateSubstSubshellStatus tokens)
         T_Redirecting _ _ inner -> translateSubstTokenToMaybeStatusCmd inner
         T_Pipeline _ bang cmds -> Just (translateSubstPipeline bang cmds)
         T_AndIf _ l r ->
           let lp = substPipelineOf (translateSubstStatusCmd l)
               rp = substPipelineOf (translateSubstStatusCmd r)
-           in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+           in Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
         T_OrIf _ l r ->
           let lp = substPipelineOf (translateSubstStatusCmd l)
               rp = substPipelineOf (translateSubstStatusCmd r)
-           in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+           in Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
         _ -> Nothing
+
+    translateSubstStatusBlock tokens =
+      statusCommandBlock
+        (mapMaybe translateSubstTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens))
+
+    translateSubstSubshellStatus = translateSubstStatusBlock
 
     hasBang = any (\tok -> tokenToLiteralText tok == "!")
 
+    isSeparatorToken tok =
+      let txt = tokenToLiteralText tok
+       in txt == ";" || txt == "\n"
+
     substJobPipelineFromList [] = substPipelineOf (Command "true" [])
     substJobPipelineFromList (c : cs) =
-      FishJobPipeline
+      MkFishJobPipeline
         { jpTime = False,
           jpVariables = [],
           jpStatement = Stmt c,
@@ -188,7 +209,7 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
         }
 
     substPipelineOf cmd =
-      FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
+      MkFishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
 
     translateSubstConditionToken tok =
       condToCommand (condFromTokenWith translateExpr regexExpr literalExpr tok)
@@ -216,16 +237,17 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
       T_AndIf _ l r -> do
         lp <- substPipelineOf <$> translateSubstStatusCmdM l
         rp <- substPipelineOf <$> translateSubstStatusCmdM r
-        pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCAnd rp])))
+        pure (Stmt (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])))
       T_OrIf _ l r -> do
         lp <- substPipelineOf <$> translateSubstStatusCmdM l
         rp <- substPipelineOf <$> translateSubstStatusCmdM r
-        pure (Stmt (JobConj (FishJobConjunction Nothing lp [JCOr rp])))
+        pure (Stmt (JobConj (MkFishJobConjunction Nothing lp [JCOr rp])))
       T_Backgrounded _ tok ->
         Stmt . Background <$> translateSubstStatusCmdM tok
       T_BraceGroup _ tokens ->
         substBeginM tokens
-      T_Subshell _ tokens ->
+      T_Subshell _ tokens -> do
+        noteBestEffortSubshell
         substBeginM tokens
       T_Redirecting _ _ inner ->
         go inner
@@ -263,7 +285,7 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
         [] -> pure Nothing
         (c : args) -> do
           translatedArgs <- mapM translateExprOrRedirectM args
-          let Hoisted preArgs argExprs = sequenceA translatedArgs
+          let MkHoisted preArgs argExprs = sequenceA translatedArgs
               name = tokenToLiteralText c
           pure $
             if T.null name
@@ -278,16 +300,20 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
           translateSubstPipelineM bang cmds
         T_Condition _ _ condTok ->
           translateSubstConditionTokenM condTok
+        T_BraceGroup _ tokens ->
+          translateSubstStatusBlockM tokens
+        T_Subshell _ tokens ->
+          translateSubstSubshellStatusM tokens
         T_Redirecting _ _ inner ->
           translateSubstStatusCmdM inner
         T_AndIf _ l r -> do
           lp <- substPipelineOf <$> translateSubstStatusCmdM l
           rp <- substPipelineOf <$> translateSubstStatusCmdM r
-          pure (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+          pure (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
         T_OrIf _ l r -> do
           lp <- substPipelineOf <$> translateSubstStatusCmdM l
           rp <- substPipelineOf <$> translateSubstStatusCmdM r
-          pure (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+          pure (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
         _ -> pure (Command "true" [])
 
     translateSubstCommandTokensToStatusM assignments cmdToks = do
@@ -313,23 +339,37 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
         T_SimpleCommand _ assignments rest ->
           Just <$> translateSubstCommandTokensToStatusM assignments rest
         T_Condition {} -> Just <$> translateSubstStatusCmdM token
+        T_BraceGroup _ tokens -> Just <$> translateSubstStatusBlockM tokens
+        T_Subshell _ tokens -> Just <$> translateSubstSubshellStatusM tokens
         T_Redirecting _ _ inner -> translateSubstTokenToMaybeStatusCmdM inner
         T_Pipeline _ bang cmds -> Just <$> translateSubstPipelineM bang cmds
         T_AndIf _ l r -> do
           lp <- substPipelineOf <$> translateSubstStatusCmdM l
           rp <- substPipelineOf <$> translateSubstStatusCmdM r
-          pure (Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp])))
+          pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])))
         T_OrIf _ l r -> do
           lp <- substPipelineOf <$> translateSubstStatusCmdM l
           rp <- substPipelineOf <$> translateSubstStatusCmdM r
-          pure (Just (JobConj (FishJobConjunction Nothing lp [JCOr rp])))
+          pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp])))
         _ -> pure Nothing
+
+    translateSubstStatusBlockM tokens = do
+      mCmds <- mapM translateSubstTokenToMaybeStatusCmdM (filter (not . isSeparatorToken) tokens)
+      pure (statusCommandBlock (catMaybes mCmds))
+
+    translateSubstSubshellStatusM tokens = do
+      mCmds <- mapM translateSubstTokenToMaybeStatusCmdM (filter (not . isSeparatorToken) tokens)
+      translateSubshellStatusCommand (catMaybes mCmds)
 
     hasBang = any (\tok -> tokenToLiteralText tok == "!")
 
+    isSeparatorToken tok =
+      let txt = tokenToLiteralText tok
+       in txt == ";" || txt == "\n"
+
     substJobPipelineFromList [] = substPipelineOf (Command "true" [])
     substJobPipelineFromList (c : cs) =
-      FishJobPipeline
+      MkFishJobPipeline
         { jpTime = False,
           jpVariables = [],
           jpStatement = Stmt c,
@@ -338,10 +378,10 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
         }
 
     substPipelineOf cmd =
-      FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
+      MkFishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
 
     translateSubstConditionTokenM tok = do
-      Hoisted _ cond <-
+      MkHoisted _ cond <-
         condFromTokenMWith translateExprM regexExprM literalExpr tok
       pure (condToCommand cond)
       where

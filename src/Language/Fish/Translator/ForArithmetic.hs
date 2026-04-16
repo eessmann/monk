@@ -15,7 +15,11 @@ import Language.Fish.Translator.Cond
     testNonZeroCommand,
   )
 import Language.Fish.Translator.Control qualified as Control
-import Language.Fish.Translator.Monad (TranslateM, addWarning)
+import Language.Fish.Translator.Monad
+  ( TranslateM,
+    WarningCode (..),
+    addWarning,
+  )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (pipelineOf)
 import Language.Fish.Translator.Token (tokenToLiteralText)
@@ -39,19 +43,19 @@ translateForArithmetic translateStmt initTok condTok incTok body = do
   initStmt <- case parseForInit initTok of
     Just stmt -> pure stmt
     Nothing -> do
-      addWarning "Unsupported arithmetic init; emitting comment"
+      addWarning ForArithmeticIssue (Just "Unsupported arithmetic init; emitting comment")
       pure (Comment "Unsupported arithmetic init")
   let condCmd = fromMaybe (Command "false" []) (parseForCond condTok)
   incStmt <- case parseForInc incTok of
     Just stmt -> pure stmt
     Nothing -> do
-      addWarning "Unsupported arithmetic increment; emitting comment"
+      addWarning ForArithmeticIssue (Just "Unsupported arithmetic increment; emitting comment")
       pure (Comment "Unsupported arithmetic increment")
   let loopBody =
         fromMaybe
           (Comment "Empty arithmetic loop body" NE.:| [])
           (Control.toNonEmptyStmtList (bodyStmts <> [incStmt]))
-      condJob = FishJobList (FishJobConjunction Nothing (pipelineOf condCmd) [] NE.:| [])
+      condJob = MkFishJobList (MkFishJobConjunction Nothing (pipelineOf condCmd) [] NE.:| [])
       whileStmt = Stmt (While condJob loopBody [])
       initBlock = [initStmt, whileStmt]
   pure $ case Control.toNonEmptyStmtList initBlock of

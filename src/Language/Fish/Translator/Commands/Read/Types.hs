@@ -10,7 +10,7 @@ where
 
 import Language.Fish.AST
 
-data ReadParseResult = ReadParseResult
+data ReadParseResult = MkReadParseResult
   { readFlags :: [ReadFlag],
     readVars :: [Text],
     readIssues :: [Text],
@@ -29,7 +29,7 @@ data ExactReadDelimiter
   | ExactReadNull
   deriving stock (Show, Eq)
 
-data ExactReadDelim = ExactReadDelim
+data ExactReadDelim = MkExactReadDelim
   { erdDelimiter :: ExactReadDelimiter,
     erdPrompt :: Maybe Text,
     erdSilent :: Bool,

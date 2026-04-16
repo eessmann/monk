@@ -116,8 +116,8 @@ translateDoubleBracketArgsHoistedM toks =
   case toks of
     [lhs, opTok, rhs] -> do
       let op = tokenToLiteralText opTok
-      Hoisted preL lhsExpr <- translateTokenToExprM lhs
-      Hoisted preR rhsExpr <-
+      MkHoisted preL lhsExpr <- translateTokenToExprM lhs
+      MkHoisted preR rhsExpr <-
         if op == "=~"
           then translateRegexTokenToExprM rhs
           else translateTokenToExprM rhs

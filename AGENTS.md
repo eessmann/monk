@@ -12,7 +12,7 @@ Source code lives in `src/` as the `Monk` library plus `Language.Bash.Parser` an
 - `hlint .` runs lint checks across the codebase.
 
 ## Coding Style & Naming Conventions
-Use Ormolu formatting (standard 2-space indentation) and keep code aligned with the GHC2024 defaults in `monk.cabal`. Address `hlint` suggestions unless they reduce clarity. Follow existing naming patterns: modules in `PascalCase` file paths (for example, `Language/Fish/Translator.hs`), types and constructors in `UpperCamelCase`, and values in `lowerCamelCase`.
+Use Ormolu formatting (standard 2-space indentation) and keep code aligned with the GHC2024 defaults in `monk.cabal`. Address `hlint` suggestions unless they reduce clarity. Follow existing naming patterns: modules in `PascalCase` file paths (for example, `Language/Fish/Translator.hs`), types and constructors in `UpperCamelCase`, and values in `lowerCamelCase`. Avoid constructor punning for single-constructor types: prefer `data Foo = MkFoo` and `newtype Foo = MkFoo ...` over `data Foo = Foo`.
 
 ## Testing Guidelines
 Tests use `tasty`, `tasty-hunit`, and `tasty-quickcheck` with `QuickCheck`. Unit tests live in `test/Unit/*.hs`, property tests in `test/Property/*.hs`, and golden/integration coverage is driven from `test/Golden.hs` and `test/Integration.hs` using fixtures under `test/fixtures/`. When extending translation behavior, add a focused unit test and a property-based test when practical, plus update or add golden fixtures as needed.

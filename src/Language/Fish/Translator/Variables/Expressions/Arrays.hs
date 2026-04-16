@@ -44,7 +44,7 @@ translateArrayElementsMWith translateTokenToListExprM =
         [] -> hoistM [] (ExprListLiteral [])
         _ -> do
           parts <- mapM elementToListExpr elems
-          let Hoisted pre exprs = sequenceA parts
+          let MkHoisted pre exprs = sequenceA parts
           case exprs of
             [] -> hoistM pre (ExprListLiteral [])
             (x : xs) -> hoistM pre (foldl' ExprListConcat x xs)
@@ -87,18 +87,18 @@ translateArrayAssignmentMWith ::
   [Token] ->
   TranslateM [FishStatement]
 translateArrayAssignmentMWith translateTokenToListExprM translateTokenToListExprMNoSplit name flags elems = do
-  Hoisted pre stmts <- go
+  MkHoisted pre stmts <- go
   pure (pre <> stmts)
   where
     go :: HoistedM [FishStatement]
     go =
       case indexedElements elems of
         [] -> do
-          Hoisted pre expr <- translateArrayElementsMWith translateTokenToListExprM elems
+          MkHoisted pre expr <- translateArrayElementsMWith translateTokenToListExprM elems
           hoistM pre [Stmt (Set flags name expr)]
         indexed -> do
           parts <- mapM (indexedSet name) indexed
-          let Hoisted pre stmts = sequenceA parts
+          let MkHoisted pre stmts = sequenceA parts
           hoistM pre (concat stmts)
 
     indexedElements = mapMaybe asIndexed
@@ -108,5 +108,5 @@ translateArrayAssignmentMWith translateTokenToListExprM translateTokenToListExpr
 
     indexedSet var (idxTokens, value) = do
       let target = fromMaybe var (indexedVarText var idxTokens)
-      Hoisted pre expr <- translateTokenToListExprMNoSplit value
+      MkHoisted pre expr <- translateTokenToListExprMNoSplit value
       hoistM pre [Stmt (Set flags target expr)]

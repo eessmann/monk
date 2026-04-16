@@ -22,10 +22,10 @@ prettyExprOrRedirectWith prettyExpr = \case
 prettyRedirectWith :: (forall t. FishExpr t -> Doc ann) -> Redirect -> Doc ann
 prettyRedirectWith prettyExpr redir =
   case redir of
-    Redirect RedirectBoth op target@(RedirectFile _)
+    MkRedirect RedirectBoth op target@(RedirectFile _)
       | op `elem` [RedirectOut, RedirectOutAppend, RedirectClobber] ->
           prettyRedirectSource RedirectStdout <> prettyRedirectOp op <> prettyRedirectTarget target <+> "2>&1"
-    Redirect src op target ->
+    MkRedirect src op target ->
       prettyRedirectSource src <> prettyRedirectOp op <> prettyRedirectTarget target
   where
     prettyRedirectTarget = \case

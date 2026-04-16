@@ -130,7 +130,7 @@ prettyFishCommandWith prettyStmt = \case
     prettyBlockSuffix [] = mempty
     prettyBlockSuffix xs = space <> hsep (map prettyExprOrRedirect xs)
 
-    prettyFunction (FishFunction name flags params body) =
+    prettyFunction (MkFishFunction name flags params body) =
       let parts =
             ["function", pretty name]
               <> map prettyFunctionFlag flags

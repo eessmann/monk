@@ -45,8 +45,8 @@ unitBakeoffTests =
         fixtures <- resolveFixtureSelection cwd [] [fixturePath] [] []
         case fixtures of
           [fixture] -> do
-            fsGroup fixture @?= FixtureGroupIntegration
-            fsSelectionSources fixture @?= [SelectionFile fixturePath]
+            specGroup fixture @?= FixtureGroupIntegration
+            specSelectionSources fixture @?= [SelectionFile fixturePath]
           other -> H.assertFailure ("expected one selected fixture, got " <> show (length other)),
       H.testCase "makeBenchmarkPlan excludes skipped fixtures" $ do
         cwd <- PathIO.getCurrentDir
@@ -56,39 +56,39 @@ unitBakeoffTests =
         integrationArtifactDir <- fixtureArtifactDir integrationRel
         let benchmarkPath = cwd </> benchmarkRel
             integrationPath = cwd </> integrationRel
-            metadata = FixtureMetadata [] ShellRunSource Nothing "" [] False
+            metadata = MkFixtureMetadata [] ShellRunSource Nothing "" [] False
             benchmarkFixture =
-              FixtureSpec
-                { fsPath = benchmarkPath,
-                  fsRelativePath = benchmarkRel,
-                  fsGroup = FixtureGroupBenchmark,
-                  fsMetadata = metadata,
-                  fsSelectionSources = [SelectionDefault FixtureGroupBenchmark],
-                  fsArtifactDir = benchmarkArtifactDir,
-                  fsSkipReason = Nothing
+              MkFixtureSpec
+                { specPath = benchmarkPath,
+                  specRelativePath = benchmarkRel,
+                  specGroup = FixtureGroupBenchmark,
+                  specMetadata = metadata,
+                  specSelectionSources = [SelectionDefault FixtureGroupBenchmark],
+                  specArtifactDir = benchmarkArtifactDir,
+                  specSkipReason = Nothing
                 }
             skippedFixture =
               benchmarkFixture
-                { fsPath = integrationPath,
-                  fsRelativePath = integrationRel,
-                  fsGroup = FixtureGroupIntegration,
-                  fsSelectionSources = [SelectionDefault FixtureGroupIntegration],
-                  fsArtifactDir = integrationArtifactDir,
-                  fsSkipReason = Just (SkipMissingPrereqs ["missing-tool"])
+                { specPath = integrationPath,
+                  specRelativePath = integrationRel,
+                  specGroup = FixtureGroupIntegration,
+                  specSelectionSources = [SelectionDefault FixtureGroupIntegration],
+                  specArtifactDir = integrationArtifactDir,
+                  specSkipReason = Just (SkipMissingPrereqs ["missing-tool"])
                 }
             tools =
-              ResolvedTools
-                { rtMonkExecutable = integrationPath,
-                  rtBabelfishPath = integrationPath,
-                  rtFishPath = integrationPath,
-                  rtHyperfinePath = Nothing,
-                  rtBabelfishVersion = "unknown",
-                  rtFishVersion = "unknown",
-                  rtHyperfineVersion = Nothing
+              MkResolvedTools
+                { toolsMonkExecutable = integrationPath,
+                  toolsBabelfishPath = integrationPath,
+                  toolsFishPath = integrationPath,
+                  toolsHyperfinePath = Nothing,
+                  toolsBabelfishVersion = "unknown",
+                  toolsFishVersion = "unknown",
+                  toolsHyperfineVersion = Nothing
                 }
             plan = makeBenchmarkPlan [benchmarkFixture, skippedFixture] tools
-        bpAllFixtures plan @?= [benchmarkPath]
-        bpBenchmarkFixtures plan @?= [benchmarkPath],
+        benchmarkAllFixtures plan @?= [benchmarkPath]
+        benchmarkFixtures plan @?= [benchmarkPath],
       H.testCase "renderSummaryMarkdown reports aggregated statuses and mismatches" $ do
         cwd <- PathIO.getCurrentDir
         fixturePath <- repoFile "test/fixtures/integration/source-recursive.bash"
@@ -102,82 +102,82 @@ unitBakeoffTests =
         monkBin <- repoFile "app/Main.hs"
         outputRel <- parseRelDir "tmp-bakeoff/"
         let meta =
-              MetaReport
-                { mrTimestamp = UTCTime (fromGregorian 2026 4 16) (secondsToDiffTime 0),
-                  mrCwd = cwd,
-                  mrOutputDir = cwd </> outputRel,
-                  mrGit = GitMetadata {gmSha = Just "deadbeef", gmDirty = True},
-                  mrHostOs = "darwin",
-                  mrHostArch = "aarch64",
-                  mrTools =
-                    ResolvedTools
-                      { rtMonkExecutable = monkBin,
-                        rtBabelfishPath = monkBin,
-                        rtFishPath = monkBin,
-                        rtHyperfinePath = Nothing,
-                        rtBabelfishVersion = "unknown",
-                        rtFishVersion = "unknown",
-                        rtHyperfineVersion = Nothing
+              MkMetaReport
+                { metaTimestamp = UTCTime (fromGregorian 2026 4 16) (secondsToDiffTime 0),
+                  metaCwd = cwd,
+                  metaOutputDir = cwd </> outputRel,
+                  metaGit = MkGitMetadata {gitSha = Just "deadbeef", gitDirty = True},
+                  metaHostOs = "darwin",
+                  metaHostArch = "aarch64",
+                  metaTools =
+                    MkResolvedTools
+                      { toolsMonkExecutable = monkBin,
+                        toolsBabelfishPath = monkBin,
+                        toolsFishPath = monkBin,
+                        toolsHyperfinePath = Nothing,
+                        toolsBabelfishVersion = "unknown",
+                        toolsFishVersion = "unknown",
+                        toolsHyperfineVersion = Nothing
                       },
-                  mrConfig =
-                    ConfigReport
-                      { crTranslationTimeoutSeconds = 30,
-                        crRuntimeTimeoutSeconds = 30,
-                        crBenchmarksEnabled = False,
-                        crHyperfineRuns = 10,
-                        crHyperfineWarmup = 1,
-                        crJobs = Nothing,
-                        crGroups = [FixtureGroupIntegration],
-                        crFiles = [fixturePath],
-                        crFileLists = [],
-                        crCompatibleFileLists = []
+                  metaConfig =
+                    MkConfigReport
+                      { configTranslationTimeoutSeconds = 30,
+                        configRuntimeTimeoutSeconds = 30,
+                        configBenchmarksEnabled = False,
+                        configHyperfineRuns = 10,
+                        configHyperfineWarmup = 1,
+                        configJobs = Nothing,
+                        configGroups = [FixtureGroupIntegration],
+                        configFiles = [fixturePath],
+                        configFileLists = [],
+                        configCompatibleFileLists = []
                       },
-                  mrFixtures = [makeFixtureSelectionReport fixture]
+                  metaFixtures = [makeFixtureSelectionReport fixture]
                 }
             monkTranslation =
-              TranslationReport
-                { trTool = ToolMonk,
-                  trStatus = CommandSucceeded,
-                  trExitCode = Just 0,
-                  trWarnings = 0,
-                  trNotes = 0,
-                  trWarningHigh = 0,
-                  trWarningMedium = 0,
-                  trWarningLow = 0,
-                  trConfidenceScore = Just 100,
-                  trOutputPath = Nothing,
-                  trStderrPath = Nothing,
-                  trErrorMessage = Nothing
+              MkTranslationReport
+                { translationTool = ToolMonk,
+                  translationStatus = CommandSucceeded,
+                  translationExitCode = Just 0,
+                  translationWarningCount = 0,
+                  translationNotesCount = 0,
+                  translationHighWarnings = 0,
+                  translationMediumWarnings = 0,
+                  translationLowWarnings = 0,
+                  translationConfidenceScore = Just 100,
+                  translationOutputPath = Nothing,
+                  translationStderrPath = Nothing,
+                  translationErrorMessage = Nothing
                 }
             babelfishTranslation =
-              TranslationReport
-                { trTool = ToolBabelfish,
-                  trStatus = CommandFailed,
-                  trExitCode = Just 1,
-                  trWarnings = 0,
-                  trNotes = 0,
-                  trWarningHigh = 0,
-                  trWarningMedium = 0,
-                  trWarningLow = 0,
-                  trConfidenceScore = Nothing,
-                  trOutputPath = Nothing,
-                  trStderrPath = Nothing,
-                  trErrorMessage = Just "parse error"
+              MkTranslationReport
+                { translationTool = ToolBabelfish,
+                  translationStatus = CommandFailed,
+                  translationExitCode = Just 1,
+                  translationWarningCount = 0,
+                  translationNotesCount = 0,
+                  translationHighWarnings = 0,
+                  translationMediumWarnings = 0,
+                  translationLowWarnings = 0,
+                  translationConfidenceScore = Nothing,
+                  translationOutputPath = Nothing,
+                  translationStderrPath = Nothing,
+                  translationErrorMessage = Just "parse error"
                 }
             report =
-              FixtureReport
-                { frPath = fixturePath,
-                  frRelativePath = relPath,
-                  frArtifactDir = artifactDir,
-                  frGroup = FixtureGroupIntegration,
-                  frSelectionSources = [SelectionFile fixturePath],
-                  frMetadata = summarizeFixtureMetadata (fsMetadata fixture),
-                  frSkipReason = Nothing,
-                  frMonkTranslation = Just monkTranslation,
-                  frBabelfishTranslation = Just babelfishTranslation,
-                  frMonkRuntime = Nothing,
-                  frBabelfishRuntime = Nothing,
-                  frDiff = Nothing
+              MkFixtureReport
+                { fixtureReportPath = fixturePath,
+                  fixtureReportRelativePath = relPath,
+                  fixtureReportArtifactDir = artifactDir,
+                  fixtureReportGroup = FixtureGroupIntegration,
+                  fixtureReportSelectionSources = [SelectionFile fixturePath],
+                  fixtureReportMetadata = summarizeFixtureMetadata (specMetadata fixture),
+                  fixtureReportSkipReason = Nothing,
+                  fixtureReportMonkTranslation = Just monkTranslation,
+                  fixtureReportBabelfishTranslation = Just babelfishTranslation,
+                  fixtureReportMonkRuntime = Nothing,
+                  fixtureReportBabelfishRuntime = Nothing,
+                  fixtureReportDiff = Nothing
                 }
             summary = renderSummaryMarkdown meta [report] []
         assertContains summary "- Babelfish translation: succeeded=0, failed=1, timed_out=0, skipped=0"

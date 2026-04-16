@@ -14,7 +14,6 @@ where
 import Prelude hiding (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
-import Language.Fish.Pretty (renderFish)
 import Language.Fish.AST
 import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens (translateTokensToStatusCmd)
@@ -29,7 +28,11 @@ import Language.Fish.Translator.Pipeline
     pipelineOf,
   )
 import Language.Fish.Translator.Redirections (translateRedirectTokenM)
-import Language.Fish.Translator.Statement (toNonEmptyStmtList)
+import Language.Fish.Translator.Statement
+  ( statusCommandBlock,
+    toNonEmptyStmtList,
+    translateSubshellStatusCommand,
+  )
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables (translateArithmeticStatusM)
 import Polysemy.State (gets)
@@ -67,7 +70,7 @@ translateTokenToStatusCmdM tok =
       translatePipelineToStatusM bang cmds
     T_Condition _ _ condTok ->
       do
-        Hoisted pre cmd <- translateConditionTokenM condTok
+        MkHoisted pre cmd <- translateConditionTokenM condTok
         pure (beginIfNeeded pre cmd)
     T_Subshell _ tokens ->
       translateSubshellStatusM tokens
@@ -76,18 +79,18 @@ translateTokenToStatusCmdM tok =
     T_Redirecting _ redirs inner -> do
       cmd <- translateTokenToStatusCmdM inner
       parts <- mapM translateRedirectTokenM redirs
-      let Hoisted pre mRedirs = sequenceA parts
+      let MkHoisted pre mRedirs = sequenceA parts
       pure (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd))
     T_Arithmetic _ exprTok ->
       translateArithmeticStatusM exprTok
     T_AndIf _ l r -> do
       lp <- pipelineOf <$> translateTokenToStatusCmdM l
       rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+      pure (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
     T_OrIf _ l r -> do
       lp <- pipelineOf <$> translateTokenToStatusCmdM l
       rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+      pure (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
     _ ->
       pure (Command "true" [])
 
@@ -114,17 +117,17 @@ translateTokenToMaybeStatusCmdM token =
     T_Redirecting _ redirs inner -> do
       cmd <- translateTokenToStatusCmdM inner
       parts <- mapM translateRedirectTokenM redirs
-      let Hoisted pre mRedirs = sequenceA parts
+      let MkHoisted pre mRedirs = sequenceA parts
       pure (Just (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd)))
     T_Pipeline _ bang cmds -> Just <$> translatePipelineToStatusM bang cmds
     T_AndIf _ l r -> do
       lp <- pipelineOf <$> translateTokenToStatusCmdM l
       rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp])))
+      pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])))
     T_OrIf _ l r -> do
       lp <- pipelineOf <$> translateTokenToStatusCmdM l
       rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (Just (JobConj (FishJobConjunction Nothing lp [JCOr rp])))
+      pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp])))
     _ -> pure Nothing
 
 stmtToStatusCommand :: FishStatement -> FishCommand TStatus
@@ -179,26 +182,12 @@ hasBang = any (\tok -> tokenToLiteralText tok == "!")
 translateStatusBlockM :: [Token] -> TranslateM (FishCommand TStatus)
 translateStatusBlockM tokens = do
   cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
-  case cmds of
-    [] -> pure (Command "true" [])
-    (cmd : rest) ->
-      pure (Begin (Stmt cmd NE.:| map Stmt rest) [])
+  pure (statusCommandBlock cmds)
 
 translateSubshellStatusM :: [Token] -> TranslateM (FishCommand TStatus)
 translateSubshellStatusM tokens = do
   cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
-  let script =
-        case cmds of
-          [] -> "true"
-          _ -> renderFish (map Stmt cmds)
-  pure
-    ( Command
-        "fish"
-        [ ExprVal (ExprLiteral "--no-config"),
-          ExprVal (ExprLiteral "-c"),
-          ExprVal (ExprLiteral script)
-        ]
-    )
+  translateSubshellStatusCommand cmds
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirsToStatus redirs cmd =

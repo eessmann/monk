@@ -14,6 +14,7 @@ import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStm
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslationContext (..),
+    WarningCode (..),
     addLocalVars,
     addWarning,
     context,
@@ -31,7 +32,7 @@ translateLocalCommand :: [Token] -> TranslateM FishStatement
 translateLocalCommand args = do
   inFunc <- gets (inFunction . context)
   unless inFunc $
-    addWarning "local used outside a function; fish will treat it as local to the current scope"
+    addWarning ScopeIssue (Just "local used outside a function; fish will treat it as local to the current scope")
   let localFlag = if inFunc then SetFunction else SetLocal
   parsed <- mapM (parseLocalArg localFlag) args
   let names = map fst (catMaybes parsed)
@@ -84,7 +85,7 @@ parseLocalArg localFlag tok =
           if isValidVarName txt
             then pure (Just (txt, [Stmt (Set [localFlag] txt (ExprListLiteral []))]))
             else do
-              addWarning ("Unsupported local argument: " <> txt)
+              addWarning ScopeIssue (Just ("Unsupported local argument: " <> txt))
               pure Nothing
 
 parseExportArg :: Bool -> Set.Set Text -> Token -> TranslateM [FishStatement]
@@ -104,7 +105,7 @@ parseExportArg inFunc locals tok =
           if isValidVarName txt
             then pure [Stmt (Set (exportFlags inFunc locals txt) txt (ExprVariable (VarAll txt)))]
             else do
-              addWarning ("Unsupported export argument: " <> txt)
+              addWarning ScopeIssue (Just ("Unsupported export argument: " <> txt))
               pure []
 
 exportFlags :: Bool -> Set.Set Text -> Text -> [SetFlag]

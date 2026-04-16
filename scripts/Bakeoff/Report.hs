@@ -16,13 +16,13 @@ import Path (Abs, Dir, File, Path, Rel, toFilePath)
 import Path.IO qualified as PathIO
 import System.FilePath (dropTrailingPathSeparator)
 
-data HyperfineEnvelope = HyperfineEnvelope
+data HyperfineEnvelope = MkHyperfineEnvelope
   { results :: [HyperfineEntry]
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (FromJSON)
 
-data HyperfineEntry = HyperfineEntry
+data HyperfineEntry = MkHyperfineEntry
   { command :: Text,
     mean :: Double,
     stddev :: Double
@@ -36,18 +36,18 @@ readHyperfineSummary title jsonPath markdownPath = do
   if not exists
     then pure Nothing
     else do
-      HyperfineEnvelope {results} <- readJsonFile jsonPath
+      MkHyperfineEnvelope {results} <- readJsonFile jsonPath
       pure $
         Just
-          HyperfineSummary
-            { hsTitle = title,
-              hsJsonPath = jsonPath,
-              hsMarkdownPath = markdownPath,
-              hsResults =
-                [ HyperfineResult
-                    { hrCommand = command entry,
-                      hrMean = mean entry,
-                      hrStddev = stddev entry
+          MkHyperfineSummary
+            { hyperfineTitle = title,
+              hyperfineJsonPath = jsonPath,
+              hyperfineMarkdownPath = markdownPath,
+              hyperfineResults =
+                [ MkHyperfineResult
+                    { hyperfineCommand = command entry,
+                      hyperfineMean = mean entry,
+                      hyperfineStddev = stddev entry
                     }
                   | entry <- results
                 ]
@@ -60,13 +60,13 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
       "",
       "## Run",
       "",
-      "- Date: " <> show (mrTimestamp meta),
-      "- CWD: `" <> dirText (mrCwd meta) <> "`",
-      "- Output dir: `" <> dirText (mrOutputDir meta) <> "`",
-      "- Host: `" <> mrHostOs meta <> "/" <> mrHostArch meta <> "`",
-      "- Monk executable: `" <> fileText (rtMonkExecutable (mrTools meta)) <> "`",
-      "- Babelfish: `" <> fileText (rtBabelfishPath (mrTools meta)) <> "` (" <> rtBabelfishVersion (mrTools meta) <> ")",
-      "- Fish: `" <> fileText (rtFishPath (mrTools meta)) <> "` (" <> rtFishVersion (mrTools meta) <> ")"
+      "- Date: " <> show (metaTimestamp meta),
+      "- CWD: `" <> dirText (metaCwd meta) <> "`",
+      "- Output dir: `" <> dirText (metaOutputDir meta) <> "`",
+      "- Host: `" <> metaHostOs meta <> "/" <> metaHostArch meta <> "`",
+      "- Monk executable: `" <> fileText (toolsMonkExecutable (metaTools meta)) <> "`",
+      "- Babelfish: `" <> fileText (toolsBabelfishPath (metaTools meta)) <> "` (" <> toolsBabelfishVersion (metaTools meta) <> ")",
+      "- Fish: `" <> fileText (toolsFishPath (metaTools meta)) <> "` (" <> toolsFishVersion (metaTools meta) <> ")"
     ]
       <> hyperfineRunLine
       <> [ "",
@@ -85,16 +85,16 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
       <> benchmarkSection
   where
     totalFixtures = length fixtures
-    skippedFixtures = length (filter (isJust . frSkipReason) fixtures)
-    monkTranslationCounts = collectTranslationCounts frMonkTranslation fixtures
-    babelfishTranslationCounts = collectTranslationCounts frBabelfishTranslation fixtures
-    monkRuntimeCounts = collectRuntimeCounts frMonkRuntime fixtures
-    babelfishRuntimeCounts = collectRuntimeCounts frBabelfishRuntime fixtures
+    skippedFixtures = length (filter (isJust . fixtureReportSkipReason) fixtures)
+    monkTranslationCounts = collectTranslationCounts fixtureReportMonkTranslation fixtures
+    babelfishTranslationCounts = collectTranslationCounts fixtureReportBabelfishTranslation fixtures
+    monkRuntimeCounts = collectRuntimeCounts fixtureReportMonkRuntime fixtures
+    babelfishRuntimeCounts = collectRuntimeCounts fixtureReportBabelfishRuntime fixtures
     mismatches = filter fixtureHasMismatch fixtures
     mismatchingFixtures = length mismatches
     skipCounts = countSkipReasons fixtures
     hyperfineRunLine =
-      case rtHyperfineVersion (mrTools meta) of
+      case toolsHyperfineVersion (metaTools meta) of
         Nothing -> []
         Just version -> ["- Hyperfine: `" <> version <> "`"]
     skipSection
@@ -137,14 +137,14 @@ collectTranslationCounts ::
   [FixtureReport] ->
   [(CommandStatus, Int)]
 collectTranslationCounts project fixtures =
-  countStatuses (map (fmap trStatus . project) fixtures)
+  countStatuses (map (fmap translationStatus . project) fixtures)
 
 collectRuntimeCounts ::
   (FixtureReport -> Maybe RuntimeReport) ->
   [FixtureReport] ->
   [(CommandStatus, Int)]
 collectRuntimeCounts project fixtures =
-  countStatuses (map (fmap rrStatus . project) fixtures)
+  countStatuses (map (fmap runtimeStatus . project) fixtures)
 
 countStatuses :: [Maybe CommandStatus] -> [(CommandStatus, Int)]
 countStatuses statuses =
@@ -161,7 +161,7 @@ countSkipReasons fixtures =
         . sort
         $ [ renderSkipReason reason
             | fixture <- fixtures,
-              Just reason <- [frSkipReason fixture]
+              Just reason <- [fixtureReportSkipReason fixture]
           ]
     summarize [] = ("", 0)
     summarize (reason : rest) = (reason, 1 + length rest)
@@ -172,60 +172,60 @@ renderSkipCount (reason, count) =
 
 fixtureHasMismatch :: FixtureReport -> Bool
 fixtureHasMismatch fixture =
-  case frDiff fixture of
-    Just DiffReport {..} ->
-      any ((== DiffDifferent) . daStatus) [drStdout, drStderr, drExitCode]
+  case fixtureReportDiff fixture of
+    Just MkDiffReport {..} ->
+      any ((== DiffDifferent) . diffArtifactStatus) [diffStdout, diffStderr, diffExitCode]
     Nothing ->
-      any translationProblem [frMonkTranslation fixture, frBabelfishTranslation fixture]
-        || any runtimeProblem [frMonkRuntime fixture, frBabelfishRuntime fixture]
+      any translationProblem [fixtureReportMonkTranslation fixture, fixtureReportBabelfishTranslation fixture]
+        || any runtimeProblem [fixtureReportMonkRuntime fixture, fixtureReportBabelfishRuntime fixture]
   where
     translationProblem = \case
-      Just report -> trStatus report /= CommandSucceeded
+      Just report -> translationStatus report /= CommandSucceeded
       Nothing -> False
     runtimeProblem = \case
-      Just report -> rrStatus report /= CommandSucceeded
+      Just report -> runtimeStatus report /= CommandSucceeded
       Nothing -> False
 
 renderMismatch :: FixtureReport -> Text
 renderMismatch fixture =
-  "- `" <> relFileText (frRelativePath fixture) <> "`: " <> mismatchReason fixture
+  "- `" <> relFileText (fixtureReportRelativePath fixture) <> "`: " <> mismatchReason fixture
 
 mismatchReason :: FixtureReport -> Text
 mismatchReason fixture =
-  case frDiff fixture of
-    Just DiffReport {..}
-      | any ((== DiffDifferent) . daStatus) [drStdout, drStderr, drExitCode] ->
-          T.intercalate ", " (catMaybes [renderDiff "stdout" drStdout, renderDiff "stderr" drStderr, renderDiff "exit" drExitCode])
+  case fixtureReportDiff fixture of
+    Just MkDiffReport {..}
+      | any ((== DiffDifferent) . diffArtifactStatus) [diffStdout, diffStderr, diffExitCode] ->
+          T.intercalate ", " (catMaybes [renderDiff "stdout" diffStdout, renderDiff "stderr" diffStderr, renderDiff "exit" diffExitCode])
     _ ->
-      T.intercalate ", " (catMaybes [renderTranslationState ToolMonk (frMonkTranslation fixture), renderTranslationState ToolBabelfish (frBabelfishTranslation fixture), renderRuntimeState ToolMonk (frMonkRuntime fixture), renderRuntimeState ToolBabelfish (frBabelfishRuntime fixture)])
+      T.intercalate ", " (catMaybes [renderTranslationState ToolMonk (fixtureReportMonkTranslation fixture), renderTranslationState ToolBabelfish (fixtureReportBabelfishTranslation fixture), renderRuntimeState ToolMonk (fixtureReportMonkRuntime fixture), renderRuntimeState ToolBabelfish (fixtureReportBabelfishRuntime fixture)])
   where
     renderDiff label diffArtifact
-      | daStatus diffArtifact == DiffDifferent = Just label
+      | diffArtifactStatus diffArtifact == DiffDifferent = Just label
       | otherwise = Nothing
 
 renderTranslationState :: ToolName -> Maybe TranslationReport -> Maybe Text
 renderTranslationState tool = \case
   Just report
-    | trStatus report /= CommandSucceeded ->
-        Just (renderToolName tool <> " translation " <> renderCommandStatus (trStatus report))
+    | translationStatus report /= CommandSucceeded ->
+        Just (renderToolName tool <> " translation " <> renderCommandStatus (translationStatus report))
   _ -> Nothing
 
 renderRuntimeState :: ToolName -> Maybe RuntimeReport -> Maybe Text
 renderRuntimeState tool = \case
   Just report
-    | rrStatus report /= CommandSucceeded ->
-        Just (renderToolName tool <> " runtime " <> renderCommandStatus (rrStatus report))
+    | runtimeStatus report /= CommandSucceeded ->
+        Just (renderToolName tool <> " runtime " <> renderCommandStatus (runtimeStatus report))
   _ -> Nothing
 
 renderBenchmark :: HyperfineSummary -> [Text]
 renderBenchmark summary =
-  [ "### " <> hsTitle summary,
+  [ "### " <> hyperfineTitle summary,
     "",
-    "- JSON: `" <> fileText (hsJsonPath summary) <> "`",
-    "- Markdown: `" <> fileText (hsMarkdownPath summary) <> "`"
+    "- JSON: `" <> fileText (hyperfineJsonPath summary) <> "`",
+    "- Markdown: `" <> fileText (hyperfineMarkdownPath summary) <> "`"
   ]
-    <> [ "- " <> hrCommand result <> ": mean=" <> formatSeconds (hrMean result) <> "s, stddev=" <> formatSeconds (hrStddev result) <> "s"
-         | result <- hsResults summary
+    <> [ "- " <> hyperfineCommand result <> ": mean=" <> formatSeconds (hyperfineMean result) <> "s, stddev=" <> formatSeconds (hyperfineStddev result) <> "s"
+         | result <- hyperfineResults summary
        ]
     <> [""]
 

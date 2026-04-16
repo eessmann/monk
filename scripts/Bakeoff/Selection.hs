@@ -90,14 +90,14 @@ finalizeSelection cwd (path, (fixtureGroup, sources)) = do
   artifactDir <- fixtureArtifactDir relativePath
   skipReason <- determineSkip metadata
   pure
-    FixtureSpec
-      { fsPath = path,
-        fsRelativePath = relativePath,
-        fsGroup = fixtureGroup,
-        fsMetadata = metadata,
-        fsSelectionSources = ordNub sources,
-        fsArtifactDir = artifactDir,
-        fsSkipReason = skipReason
+    MkFixtureSpec
+      { specPath = path,
+        specRelativePath = relativePath,
+        specGroup = fixtureGroup,
+        specMetadata = metadata,
+        specSelectionSources = ordNub sources,
+        specArtifactDir = artifactDir,
+        specSkipReason = skipReason
       }
   where
     determineSkip metadata = do
@@ -210,25 +210,25 @@ loadFileList path = do
     resolveLine line = PathIO.resolveFile' (toString (T.strip line))
 
 summarizeFixtureMetadata :: FixtureMetadata -> FixtureMetadataSummary
-summarizeFixtureMetadata FixtureMetadata {..} =
-  FixtureMetadataSummary
-    { fmsArgs = fmArgs,
-      fmsMode = fmMode,
-      fmsPlatforms = fmPlatforms,
-      fmsPrereqs = fmPrereqs,
-      fmsRecursive = fmRecursive,
-      fmsHasStdin = not (T.null fmStdin)
+summarizeFixtureMetadata MkFixtureMetadata {..} =
+  MkFixtureMetadataSummary
+    { fixtureMetaArgs = fmArgs,
+      fixtureMetaMode = fmMode,
+      fixtureMetaPlatforms = fmPlatforms,
+      fixtureMetaPrereqs = fmPrereqs,
+      fixtureMetaRecursive = fmRecursive,
+      fixtureMetaHasStdin = not (T.null fmStdin)
     }
 
 makeFixtureSelectionReport :: FixtureSpec -> FixtureSelectionReport
 makeFixtureSelectionReport fixture =
-  FixtureSelectionReport
-    { fsrPath = fsPath fixture,
-      fsrRelativePath = fsRelativePath fixture,
-      fsrGroup = fsGroup fixture,
-      fsrSelectionSources = fsSelectionSources fixture,
-      fsrArtifactDir = fsArtifactDir fixture,
-      fsrSkipReason = fsSkipReason fixture
+  MkFixtureSelectionReport
+    { selectionPath = specPath fixture,
+      selectionRelativePath = specRelativePath fixture,
+      selectionGroup = specGroup fixture,
+      selectionSources = specSelectionSources fixture,
+      selectionArtifactDir = specArtifactDir fixture,
+      selectionSkipReason = specSkipReason fixture
     }
 
 findExecutablePath :: Text -> IO (Maybe (Path Abs File))

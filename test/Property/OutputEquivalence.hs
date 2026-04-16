@@ -49,7 +49,7 @@ propertyOutputEquivalenceTests =
                       QCM.assert (rrStderr bashRes == rrStderr fishRes)
     ]
 
-data ScriptCase = ScriptCase
+data ScriptCase = MkScriptCase
   { scLabel :: Text,
     scScript :: Text,
     scArgs :: [Text],
@@ -111,7 +111,7 @@ genArgvRoundTrip = do
           <> "for arg in \"$@\"; do\n"
           <> "  printf 'arg:%s\\n' \"$arg\"\n"
           <> "done"
-  pure (ScriptCase "argv-roundtrip" script args "")
+  pure (MkScriptCase "argv-roundtrip" script args "")
 
 genReadSplit :: QC.Gen ScriptCase
 genReadSplit = do
@@ -122,7 +122,7 @@ genReadSplit = do
           <> "read -r left right\n"
           <> "printf 'read:%s|%s\\n' \"$left\" \"$right\""
       stdinInput = lhs <> ":" <> rhs <> "\n"
-  pure (ScriptCase "read-split" script [] stdinInput)
+  pure (MkScriptCase "read-split" script [] stdinInput)
 
 genTempEnv :: QC.Gen ScriptCase
 genTempEnv = do
@@ -156,7 +156,7 @@ genHereString = do
   pure (mkCase "here-string" script)
 
 mkCase :: Text -> Text -> ScriptCase
-mkCase caseName script = ScriptCase caseName script [] ""
+mkCase caseName script = MkScriptCase caseName script [] ""
 
 genWord :: QC.Gen Text
 genWord = T.pack <$> QC.listOf1 (QC.elements (['a' .. 'z'] <> ['A' .. 'Z'] <> ['0' .. '9'] <> ['_']))

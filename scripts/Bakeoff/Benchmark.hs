@@ -17,10 +17,10 @@ import System.Process (proc)
 
 makeBenchmarkPlan :: [FixtureSpec] -> ResolvedTools -> BenchmarkPlan
 makeBenchmarkPlan fixtures tools =
-  BenchmarkPlan
-    { bpAllFixtures = [fsPath fixture | fixture <- fixtures, isNothing (fsSkipReason fixture)],
-      bpBenchmarkFixtures = [fsPath fixture | fixture <- fixtures, fsGroup fixture == FixtureGroupBenchmark, isNothing (fsSkipReason fixture)],
-      bpBabelfishPath = rtBabelfishPath tools
+  MkBenchmarkPlan
+    { benchmarkAllFixtures = [specPath fixture | fixture <- fixtures, isNothing (specSkipReason fixture)],
+      benchmarkFixtures = [specPath fixture | fixture <- fixtures, specGroup fixture == FixtureGroupBenchmark, isNothing (specSkipReason fixture)],
+      benchmarkBabelfishPath = toolsBabelfishPath tools
     }
 
 runHyperfineSuite ::
@@ -55,9 +55,9 @@ runHyperfineSuite hyperfinePath cfg outputs suite jsonPath markdownPath = do
         proc
           (toFilePath hyperfinePath)
           [ "--warmup",
-            show (bcHyperfineWarmup cfg),
+            show (bakeoffHyperfineWarmup cfg),
             "--runs",
-            show (bcHyperfineRuns cfg),
+            show (bakeoffHyperfineRuns cfg),
             "--ignore-failure",
             "--export-json",
             toFilePath jsonPath,

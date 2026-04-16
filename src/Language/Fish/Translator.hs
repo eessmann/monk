@@ -43,9 +43,9 @@ import Language.Fish.Translator.Monad
     TranslateM,
     TranslateState (..),
     TranslationContext (..),
+    WarningCode (..),
     addWarning,
     isErrexitEnabled,
-    noteUnsupported,
     runTranslateWithPositions,
     unsupportedStmt,
     withTokenRange,
@@ -62,6 +62,9 @@ import Language.Fish.Translator.Redirections
     translateRedirectTokenM,
   )
 import Language.Fish.Translator.Simplify (simplifyFishStatement)
+import Language.Fish.Translator.Statement
+  ( translateSubshellStatement,
+  )
 import Language.Fish.Translator.Variables
 import Polysemy.State (gets)
 import ShellCheck.AST
@@ -143,7 +146,7 @@ translateToken token =
                         then [localFlag]
                         else [SetGlobal]
                  in do
-                      Hoisted preRedirs (redirs, plainArgs) <- parseRedirectTokensM args
+                      MkHoisted preRedirs (redirs, plainArgs) <- parseRedirectTokensM args
                       if null plainArgs && not (null redirs)
                         then do
                           fishAssignments <-
@@ -154,7 +157,7 @@ translateToken token =
                                     translateAssignmentWithFlagsM (scopeFor (T.pack var)) tok
                                   _ -> translateAssignmentWithFlagsM (scopeFor "") tok
                           let execStmt = Stmt (Command "exec" (renderArgs redirs))
-                          addWarning "exec with file descriptor redirection may require manual adjustment in fish"
+                          addWarning ExecFdRedirect Nothing
                           case Control.toNonEmptyStmtList (preRedirs <> fishAssignments <> [execStmt]) of
                             Just body -> pure (Stmt (Begin body []))
                             Nothing -> pure (Comment "Empty exec with assignments")
@@ -193,20 +196,19 @@ translateToken token =
           Just neBody -> pure (Stmt (Begin neBody []))
           Nothing -> pure (Comment "Skipped empty brace group")
       T_Subshell _ tokens -> do
-        note <- noteUnsupported "Subshell does not isolate environment in fish; best-effort translation emitted"
         bodyStmts <- mapM translateToken tokens
         case Control.toNonEmptyStmtList bodyStmts of
-          Just neBody -> pure (StmtList [note, Stmt (Begin neBody [])])
-          Nothing -> pure note
+          Just neBody -> translateSubshellStatement neBody
+          Nothing -> unsupportedStmt BestEffortSubshell Nothing
       T_AndIf _ l r -> do
         lp <- pipelineOf <$> translateTokenToStatusCmdM l
         rp <- pipelineOf <$> translateTokenToStatusCmdM r
-        conj <- wrapErrexitOnConjunction (FishJobConjunction Nothing lp [JCAnd rp])
+        conj <- wrapErrexitOnConjunction (MkFishJobConjunction Nothing lp [JCAnd rp])
         pure (Stmt (JobConj conj))
       T_OrIf _ l r -> do
         lp <- pipelineOf <$> translateTokenToStatusCmdM l
         rp <- pipelineOf <$> translateTokenToStatusCmdM r
-        conj <- wrapErrexitOnConjunction (FishJobConjunction Nothing lp [JCOr rp])
+        conj <- wrapErrexitOnConjunction (MkFishJobConjunction Nothing lp [JCOr rp])
         pure (Stmt (JobConj conj))
       T_Backgrounded _ bgToken -> do
         cmd <- translateTokenToStatusCmdM bgToken
@@ -214,7 +216,7 @@ translateToken token =
       T_Annotation _ _ inner -> translateToken inner
       T_ForIn _ var tokens body -> do
         argParts <- mapM translateTokenToListExprM tokens
-        let Hoisted pre args = sequenceA argParts
+        let MkHoisted pre args = sequenceA argParts
             (pre', args') =
               if null tokens
                 then ([], [ExprVariable (VarAll "argv")])
@@ -232,11 +234,11 @@ translateToken token =
       T_SelectIn _ var tokens body ->
         Control.translateSelectExpression translateToken var tokens body
       T_CaseExpression _ switchExpr cases -> Control.translateCaseExpression translateToken switchExpr cases
-      T_CoProc {} -> unsupportedStmt "Coprocess (coproc)"
-      T_CoProcBody {} -> unsupportedStmt "Coprocess body (coproc)"
+      T_CoProc {} -> unsupportedStmt UnsupportedConstruct (Just "Coprocess (coproc)")
+      T_CoProcBody {} -> unsupportedStmt UnsupportedConstruct (Just "Coprocess body (coproc)")
       T_Redirecting _ redirs cmd -> do
         parts <- mapM translateRedirectTokenM redirs
-        let Hoisted preRedirs redirArgs = sequenceA parts
+        let MkHoisted preRedirs redirArgs = sequenceA parts
             redirExprs' = renderArgs (catMaybes redirArgs)
         translated <- translateToken cmd
         let attached = attachRedirs redirExprs' translated
@@ -246,7 +248,7 @@ translateToken token =
             case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
               Just body -> pure (Stmt (Begin body []))
               Nothing -> pure (Comment "Skipped empty redirection block")
-      _ -> unsupportedStmt ("Skipped token at statement level: " <> T.pack (show token))
+      _ -> unsupportedStmt UnsupportedConstruct (Just ("Skipped token at statement level: " <> T.pack (show token)))
 
 wrapStmtList :: [FishStatement] -> FishStatement
 wrapStmtList [stmt] = stmt

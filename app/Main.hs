@@ -21,11 +21,11 @@ import Monk.Source
 import Monk.Translation
   ( Translation (..),
     TranslateError,
-    TranslateState (..),
     Warning,
     defaultConfig,
     inlineStatements,
     renderFish,
+    stateWarnings,
     strictConfig,
   )
 import Options.Applicative
@@ -34,7 +34,7 @@ import System.Directory (canonicalizePath)
 import System.FilePath (replaceExtension)
 import System.IO (hPutStrLn)
 
-data Options = Options
+data Options = MkOptions
   { optInput :: FilePath,
     optOutput :: Maybe FilePath,
     optStrict :: Bool,
@@ -51,7 +51,7 @@ main = do
 
 optionsParser :: Parser Options
 optionsParser =
-  Options
+  MkOptions
     <$> strArgument (metavar "FILE" <> help "Bash script to translate")
     <*> optional (strOption (short 'o' <> long "output" <> metavar "FILE" <> help "Write output to file"))
     <*> switch (long "strict" <> help "Fail on unsupported constructs")
@@ -102,7 +102,7 @@ emitSourceGraphWarnings opts graph =
       case M.lookup path (sgTranslations graph) of
         Nothing -> pure ()
         Just translation -> do
-          let warns = warnings (trState translation)
+          let warns = stateWarnings (trState translation)
           emitTranslateWarnings warns
           emitTranslateNotes path warns
 

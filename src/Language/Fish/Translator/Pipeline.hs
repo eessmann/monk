@@ -26,7 +26,7 @@ import Polysemy.State qualified as State
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
-  FishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
+  MkFishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
 
 jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
 jobPipelineFromList = jobPipelineFromListWithTime False
@@ -34,7 +34,7 @@ jobPipelineFromList = jobPipelineFromListWithTime False
 jobPipelineFromListWithTime :: Bool -> [FishCommand TStatus] -> FishJobPipeline
 jobPipelineFromListWithTime _ [] = pipelineOf (Command "true" [])
 jobPipelineFromListWithTime timed (c : cs) =
-  FishJobPipeline
+  MkFishJobPipeline
     { jpTime = timed,
       jpVariables = [],
       jpStatement = Stmt c,
@@ -56,7 +56,7 @@ wrapErrexitStatusCommand cmd
   | otherwise =
       let cmdPipe = pipelineOf cmd
           guardPipe = pipelineOf errexitGuard
-       in JobConj (FishJobConjunction Nothing cmdPipe [JCOr guardPipe])
+       in JobConj (MkFishJobConjunction Nothing cmdPipe [JCOr guardPipe])
   where
     errexitGuard =
       let statusVar = "__monk_errexit_status"
@@ -83,7 +83,7 @@ wrapErrexitStatusCommand cmd
           checkOrExit =
             Stmt
               ( JobConj
-                  (FishJobConjunction Nothing checkPipe [JCOr exitPipe])
+                  (MkFishJobConjunction Nothing checkPipe [JCOr exitPipe])
               )
        in Begin (saveStatus NE.:| [checkOrExit]) []
 

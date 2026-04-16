@@ -311,7 +311,7 @@ instance Eq (FishIndex a b) where
   _ == _ = False
 
 -- | Function definition.
-data FishFunction = FishFunction
+data FishFunction = MkFishFunction
   { funcName :: Text,
     funcFlags :: [FunctionFlag],
     funcParams :: [Text],
@@ -324,7 +324,7 @@ data FishFunction = FishFunction
 --------------------------------------------------------------------------------
 
 -- | Variable assignment attached to a job or continuation.
-data VariableAssignment = VariableAssignment
+data VariableAssignment = MkVariableAssignment
   { vaName :: Text,
     vaValue :: Maybe (FishExpr TStr)
   }
@@ -338,7 +338,7 @@ data JobPipeCont = PipeTo
   deriving stock (Show, Eq)
 
 -- | Pipeline with optional @time@, leading variables, and backgrounding.
-data FishJobPipeline = FishJobPipeline
+data FishJobPipeline = MkFishJobPipeline
   { jpTime :: Bool,
     jpVariables :: [VariableAssignment],
     jpStatement :: FishStatement,
@@ -354,7 +354,7 @@ data FishJobConjCont
   deriving stock (Show, Eq)
 
 -- | A job conjunction consisting of an optional leading decorator and continuations.
-data FishJobConjunction = FishJobConjunction
+data FishJobConjunction = MkFishJobConjunction
   { jcDecorator :: Maybe Conjunction,
     jcJob :: FishJobPipeline,
     jcContinuations :: [FishJobConjCont]
@@ -362,7 +362,7 @@ data FishJobConjunction = FishJobConjunction
   deriving stock (Show, Eq)
 
 -- | A list of job conjunctions (used for if/while conditions).
-newtype FishJobList = FishJobList (NonEmpty FishJobConjunction)
+newtype FishJobList = MkFishJobList (NonEmpty FishJobConjunction)
   deriving stock (Show, Eq)
 
 --------------------------------------------------------------------------------
@@ -372,14 +372,14 @@ newtype FishJobList = FishJobList (NonEmpty FishJobConjunction)
 --------------------------------------------------------------------------------
 
 -- | A switch case item with one or more patterns and a body.
-data CaseItem = CaseItem
+data CaseItem = MkCaseItem
   { casePatterns :: NonEmpty (FishExpr TStr),
     caseBody :: NonEmpty FishStatement
   }
   deriving stock (Show, Eq)
 
 -- | Detailed redirection model.
-data Redirect = Redirect
+data Redirect = MkRedirect
   { redirSource :: RedirectSource,
     redirOp :: RedirectOp,
     redirTarget :: RedirectTarget

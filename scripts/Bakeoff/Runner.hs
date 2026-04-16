@@ -52,36 +52,36 @@ import System.Info qualified as SysInfo
 
 runBakeoff :: BakeoffConfig -> IO ()
 runBakeoff cfg = do
-  prepareOutputDirectory (bcOutputDir cfg) (bcForce cfg)
+  prepareOutputDirectory (bakeoffOutputDir cfg) (bakeoffForce cfg)
   monkExecutable <- PathIO.resolveFile' =<< getExecutablePath
   tools <- resolveTools monkExecutable cfg
   processEnv <- prepareEnv
-  fixtures <- resolveFixtureSelection (bcCwd cfg) (bcGroups cfg) (bcFiles cfg) (bcFileLists cfg) (bcCompatibleFileLists cfg)
+  fixtures <- resolveFixtureSelection (bakeoffCwd cfg) (bakeoffGroups cfg) (bakeoffFiles cfg) (bakeoffFileLists cfg) (bakeoffCompatibleFileLists cfg)
   artifacts <- traverse (\fixture -> (fixture,) <$> fixtureArtifacts cfg fixture) fixtures
-  outputs <- bakeoffOutputs (bcOutputDir cfg)
-  git <- collectGitMetadata (bcCwd cfg)
+  outputs <- bakeoffOutputs (bakeoffOutputDir cfg)
+  git <- collectGitMetadata (bakeoffCwd cfg)
   timestamp <- getCurrentTime
   let meta =
-        MetaReport
-          { mrTimestamp = timestamp,
-            mrCwd = bcCwd cfg,
-            mrOutputDir = bcOutputDir cfg,
-            mrGit = git,
-            mrHostOs = toText SysInfo.os,
-            mrHostArch = toText SysInfo.arch,
-            mrTools = tools,
-            mrConfig = configReport cfg,
-            mrFixtures = map (makeFixtureSelectionReport . fst) artifacts
+        MkMetaReport
+          { metaTimestamp = timestamp,
+            metaCwd = bakeoffCwd cfg,
+            metaOutputDir = bakeoffOutputDir cfg,
+            metaGit = git,
+            metaHostOs = toText SysInfo.os,
+            metaHostArch = toText SysInfo.arch,
+            metaTools = tools,
+            metaConfig = configReport cfg,
+            metaFixtures = map (makeFixtureSelectionReport . fst) artifacts
           }
       benchmarkPlan = makeBenchmarkPlan (map fst artifacts) tools
       benchmarkTargets =
-        case (bcBenchmarksEnabled cfg, rtHyperfinePath tools) of
+        case (bakeoffBenchmarksEnabled cfg, toolsHyperfinePath tools) of
           (True, Just _) -> [boHyperfineAllJsonPath outputs, boHyperfineBenchmarkJsonPath outputs]
           _ -> []
   shake
     ( shakeOptions
         { shakeFiles = toFilePath (boShakeDir outputs),
-          shakeThreads = fromMaybe 0 (bcJobs cfg),
+          shakeThreads = fromMaybe 0 (bakeoffJobs cfg),
           shakeVerbosity = Quiet
         }
     )
@@ -122,12 +122,12 @@ runBakeoff cfg = do
 
 runBenchmarkWorker :: ToolName -> Path Abs File -> BenchmarkSuite -> IO Int
 runBenchmarkWorker tool planPath suite = do
-  BenchmarkPlan {..} <- readJsonFile planPath
+  MkBenchmarkPlan {..} <- readJsonFile planPath
   let fixtures =
         case suite of
-          BenchmarkSuiteAll -> bpAllFixtures
-          BenchmarkSuiteBenchmark -> bpBenchmarkFixtures
-  failures <- catMaybes <$> traverse (runWorkerFixture tool bpBabelfishPath) fixtures
+          BenchmarkSuiteAll -> benchmarkAllFixtures
+          BenchmarkSuiteBenchmark -> benchmarkFixtures
+  failures <- catMaybes <$> traverse (runWorkerFixture tool benchmarkBabelfishPath) fixtures
   pure $
     if null failures
       then 0

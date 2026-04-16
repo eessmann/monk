@@ -37,13 +37,13 @@ parseRedirectTokens = go [] []
         Nothing ->
           case parseRedirectToken (tokenToLiteralText opTok) of
             Just (src, op, Just target) ->
-              let redir = argRedirect (Redirect src op target)
+              let redir = argRedirect (MkRedirect src op target)
                in go (redir : redirs) args rest
             Just (src, op, Nothing) ->
               case rest of
                 (t : ts) ->
                   let target = RedirectFile (translateTokenToExpr t)
-                      redir = argRedirect (Redirect src op target)
+                      redir = argRedirect (MkRedirect src op target)
                    in go (redir : redirs) args ts
                 [] -> go redirs (opTok : args) rest
             Nothing -> go redirs (opTok : args) rest
@@ -57,7 +57,7 @@ parseRedirectTokensHoistedM = go [] []
   where
     go redirs args [] = pure (hoist [] (reverse redirs, reverse args))
     go redirs args (opTok : rest) = do
-      Hoisted pre maybeRedir <- translateRedirectTokenM opTok
+      MkHoisted pre maybeRedir <- translateRedirectTokenM opTok
       case maybeRedir of
         Just redir -> do
           restHoisted <- go (redir : redirs) args rest
@@ -65,14 +65,14 @@ parseRedirectTokensHoistedM = go [] []
         Nothing ->
           case parseRedirectToken (tokenToLiteralText opTok) of
             Just (src, op, Just target) ->
-              let redir = argRedirect (Redirect src op target)
+              let redir = argRedirect (MkRedirect src op target)
                in go (redir : redirs) args rest
             Just (src, op, Nothing) ->
               case rest of
                 (t : ts) -> do
-                  Hoisted preTarget expr <- translateTokenToExprM t
+                  MkHoisted preTarget expr <- translateTokenToExprM t
                   let target = RedirectFile expr
-                      redir = argRedirect (Redirect src op target)
+                      redir = argRedirect (MkRedirect src op target)
                   restHoisted <- go (redir : redirs) args ts
                   pure (prependHoist preTarget restHoisted)
                 [] -> go redirs (opTok : args) rest
@@ -86,7 +86,7 @@ translateRedirectToken = \case
 translateRedirectTokenM :: Token -> HoistedM (Maybe Arg)
 translateRedirectTokenM = \case
   T_FdRedirect _ src redirTok -> do
-    Hoisted pre mRedir <- translateFdRedirectM src redirTok
+    MkHoisted pre mRedir <- translateFdRedirectM src redirTok
     hoistM pre (fmap argRedirect mRedir)
   _ -> hoistM [] Nothing
 
@@ -96,18 +96,18 @@ translateFdRedirect src redirTok =
     T_IoFile _ op file -> do
       (redirOp, dir) <- redirectOpFromToken op
       let source = sourceFromFd src dir
-      pure (Redirect source redirOp (RedirectFile (translateTokenToExpr file)))
+      pure (MkRedirect source redirOp (RedirectFile (translateTokenToExpr file)))
     T_IoDuplicate _ op target -> do
       (redirOp, dir) <- redirectOpFromToken op
       let source = sourceFromFd src dir
       targetRef <- redirectTargetFromDup target
-      pure (Redirect source redirOp targetRef)
+      pure (MkRedirect source redirOp targetRef)
     T_HereString _ word -> do
       let expr = hereStringExpr [word]
-      pure (Redirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))
+      pure (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))
     T_HereDoc _ _ _ _ toks -> do
       let expr = hereDocExpr toks
-      pure (Redirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))
+      pure (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))
     _ -> Nothing
 
 translateFdRedirectM :: String -> Token -> HoistedM (Maybe Redirect)
@@ -116,9 +116,9 @@ translateFdRedirectM src redirTok =
     T_IoFile _ op file ->
       case redirectOpFromToken op of
         Just (redirOp, dir) -> do
-          Hoisted pre expr <- translateTokenToExprM file
+          MkHoisted pre expr <- translateTokenToExprM file
           let source = sourceFromFd src dir
-          hoistM pre (Just (Redirect source redirOp (RedirectFile expr)))
+          hoistM pre (Just (MkRedirect source redirOp (RedirectFile expr)))
         Nothing -> hoistM [] Nothing
     T_IoDuplicate _ op target ->
       case redirectOpFromToken op of
@@ -126,15 +126,15 @@ translateFdRedirectM src redirTok =
           case redirectTargetFromDup target of
             Just targetRef -> do
               let source = sourceFromFd src dir
-              hoistM [] (Just (Redirect source redirOp targetRef))
+              hoistM [] (Just (MkRedirect source redirOp targetRef))
             Nothing -> hoistM [] Nothing
         Nothing -> hoistM [] Nothing
     T_HereString _ word -> do
-      Hoisted pre expr <- hereStringExprM [word]
-      hoistM pre (Just (Redirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr)))
+      MkHoisted pre expr <- hereStringExprM [word]
+      hoistM pre (Just (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr)))
     T_HereDoc _ _ _ _ toks -> do
-      Hoisted pre expr <- hereDocExprM toks
-      hoistM pre (Just (Redirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr)))
+      MkHoisted pre expr <- hereDocExprM toks
+      hoistM pre (Just (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr)))
     _ -> hoistM [] Nothing
 
 data RedirectDir = InputRedirect | OutputRedirect
@@ -194,7 +194,7 @@ hereStringExprM = hereExprM "%s\\n"
 
 hereExprM :: Text -> [Token] -> HoistedM (FishExpr TStr)
 hereExprM fmt toks = do
-  Hoisted pre expr <- concatHereDocM toks
+  MkHoisted pre expr <- concatHereDocM toks
   let printfStmt =
         Stmt
           ( Command
@@ -215,7 +215,7 @@ concatHereDocM :: [Token] -> HoistedM (FishExpr TStr)
 concatHereDocM [] = pure (hoist [] (ExprLiteral ""))
 concatHereDocM toks = do
   parts <- mapM translateTokenToExprM toks
-  let Hoisted pre exprs = sequenceA parts
+  let MkHoisted pre exprs = sequenceA parts
       expr =
         case exprs of
           [] -> ExprLiteral ""

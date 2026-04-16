@@ -27,7 +27,7 @@ data ParamCore
   | ParamCoreOperator Text ParamOperator
   | ParamCoreModifier Text ParamModifier
 
-data ParamSimple = ParamSimple
+data ParamSimple = MkParamSimple
   { simpleName :: Maybe Text,
     simpleIndex :: Maybe (FishIndex TStr (TList TStr))
   }
@@ -36,7 +36,7 @@ data ParamOpKind = OpDefault | OpAssign | OpError | OpAlt
 
 data ParamOpCond = CondSet | CondNonEmpty
 
-data ParamOperator = ParamOperator ParamOpKind ParamOpCond [Token]
+data ParamOperator = MkParamOperator ParamOpKind ParamOpCond [Token]
 
 data ParamModifier
   = ModAltSelf

@@ -12,6 +12,7 @@ module Monk.Translation
     translateParseResult,
     translateBashFile,
     translateBashScript,
+    translationWarnings,
     translationStatements,
     renderTranslation,
     flattenStatements,
@@ -19,9 +20,14 @@ module Monk.Translation
     strictConfig,
     TranslateConfig (..),
     TranslateError (..),
-    TranslateState (..),
-    TranslationContext (..),
+    TranslateState,
     Warning (..),
+    WarningCode (..),
+    WarningSeverity (..),
+    warnMessage,
+    stateWarnings,
+    stateErrexitEnabled,
+    statePipefailEnabled,
     Translation (..),
     WarnFn,
     inlineStatements,
@@ -39,16 +45,21 @@ import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator qualified as Translator
 import Language.Fish.Translator.Monad
   ( TranslateConfig (..),
-    TranslationContext (..),
     TranslateError (..),
-    TranslateState (..),
+    TranslateState,
     Warning (..),
+    WarningCode (..),
+    WarningSeverity (..),
     defaultConfig,
+    stateErrexitEnabled,
+    statePipefailEnabled,
+    stateWarnings,
+    warnMessage,
   )
 import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 
 -- | Result of a successful translation.
-data TranslationResult = TranslationResult
+data TranslationResult = MkTranslationResult
   { -- | Root fish statement produced by the translator.
     translationStatement :: FishStatement,
     -- | Final translation state containing warnings and source mapping.
@@ -71,7 +82,7 @@ translateParseResult ::
   Either TranslateError TranslationResult
 translateParseResult cfg parseResult = do
   (stmt, st) <- Translator.translateParseResult cfg parseResult
-  pure (TranslationResult stmt st)
+  pure (MkTranslationResult stmt st)
 
 -- | Parse and translate a Bash file on disk.
 translateBashFile ::
@@ -103,6 +114,10 @@ translateBashScript cfg fileName scriptText = do
         case translateParseResult cfg parseRes of
           Left err -> Left (TranslateFailure err)
           Right res -> Right res
+
+-- | Flatten the translated root statement into top-level statements.
+translationWarnings :: TranslationResult -> [Warning]
+translationWarnings = stateWarnings . translationState
 
 -- | Flatten the translated root statement into top-level statements.
 translationStatements :: TranslationResult -> [FishStatement]

@@ -8,7 +8,11 @@ where
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (wrapStmtList)
-import Language.Fish.Translator.Monad (TranslateM, addWarning)
+import Language.Fish.Translator.Monad
+  ( TranslateM,
+    WarningCode (..),
+    addWarning,
+  )
 import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 
@@ -34,12 +38,12 @@ translateUnsetCommand args = do
               "-v" -> go UnsetVar acc rest
               "--" -> go mode acc rest
               _ -> do
-                addWarning ("Unsupported unset flag: " <> txt)
+                addWarning UnsetIssue (Just ("Unsupported unset flag: " <> txt))
                 go mode acc rest
             else
               if T.null txt
                 then do
-                  addWarning "Unsupported unset argument: empty name"
+                  addWarning UnsetIssue (Just "Unsupported unset argument: empty name")
                   go mode acc rest
                 else do
                   let stmt = case mode of

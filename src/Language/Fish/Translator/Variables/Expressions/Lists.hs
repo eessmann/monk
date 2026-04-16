@@ -159,7 +159,7 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
             | isNoSplitParamExpansion tok ->
                 translateDollarBracedWithPrelude (unwrapBraced tok)
           _ -> do
-            Hoisted pre expr <- translateDoubleQuotedExprMWith translateTokenToExprM parts
+            MkHoisted pre expr <- translateDoubleQuotedExprMWith translateTokenToExprM parts
             hoistM pre (ExprListLiteral [expr])
       T_NormalWord _ parts ->
         case parts of
@@ -170,7 +170,7 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
             | not splitEnabled -> translateDollarBracedWithPrelude word
             | isNoSplitParamExpansion word -> translateDollarBracedWithPrelude word
             | otherwise -> do
-                Hoisted pre expr <- translateWordPartsToExprMWith translateTokenToExprM parts
+                MkHoisted pre expr <- translateWordPartsToExprMWith translateTokenToExprM parts
                 let listExpr =
                       if wordNeedsSplit parts
                         then splitOnIfsExpr expr
@@ -182,7 +182,7 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
                   then hoistM [] (extglobShimListExpr (renderGlobWordRaw parts))
                   else hoistM [] (ExprGlob (parseGlobPattern (renderGlobWord parts)))
             | otherwise -> do
-                Hoisted pre expr <- translateWordPartsToExprMWith translateTokenToExprM parts
+                MkHoisted pre expr <- translateWordPartsToExprMWith translateTokenToExprM parts
                 let listExpr =
                       if splitEnabled && wordNeedsSplit parts
                         then splitOnIfsExpr expr
@@ -192,17 +192,17 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
         expr <- translateSimpleVarM tok
         hoistM [] expr
       T_DollarBraced _ _ word -> do
-        Hoisted pre expr <- translateDollarBracedWithPrelude word
+        MkHoisted pre expr <- translateDollarBracedWithPrelude word
         hoistM pre $
           if not splitEnabled || isNoSplitParamExpansion word
             then expr
             else splitOnIfsListExpr expr
       T_DollarArithmetic _ exprTok -> do
-        Hoisted pre args <- arithArgsPlanM exprTok
+        MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs False args
         hoistM pre (ExprCommandSubst (Stmt cmd NE.:| []))
       T_Arithmetic _ exprTok -> do
-        Hoisted pre args <- arithArgsPlanM exprTok
+        MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs True args
         hoistM pre (ExprCommandSubst (Stmt cmd NE.:| []))
       T_Backticked _ stmts ->
@@ -235,7 +235,7 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
               hoistM [] expr
             Nothing -> hoistM [] (ExprListLiteral [])
       T_Array _ elems -> do
-        Hoisted pre expr <- translateArrayElementsMWith go elems
+        MkHoisted pre expr <- translateArrayElementsMWith go elems
         hoistM pre expr
       other -> hoistM [] (ExprListLiteral [ExprLiteral (tokenToLiteralText other)])
 
@@ -263,7 +263,7 @@ translateTokensToListExprMWith translateTokenToListExprM =
       [] -> hoistM [] (ExprListLiteral [])
       tokens -> do
         translated <- mapM translateTokenToListExprM tokens
-        let Hoisted pre exprs = sequenceA translated
+        let MkHoisted pre exprs = sequenceA translated
         case exprs of
           [] -> hoistM pre (ExprListLiteral [])
           (x : xs) -> hoistM pre (foldl' ExprListConcat x xs)

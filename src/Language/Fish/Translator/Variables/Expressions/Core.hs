@@ -109,15 +109,15 @@ translateTokenToExprMWith ::
   Token ->
   HoistedM (FishExpr TStr)
 translateTokenToExprMWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken =
-  translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken
+  translateTokenToExprPlanWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken
 
-translateTokenToExprHoistedWith ::
+translateTokenToExprPlanWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
   ([Token] -> TranslateM (FishExpr TStr)) ->
   (Token -> TranslateM FishStatement) ->
   Token ->
   HoistedM (FishExpr TStr)
-translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken = go
+translateTokenToExprPlanWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken = go
   where
     go = \case
       T_Literal _ s -> hoistM [] (ExprLiteral (T.pack s))
@@ -141,11 +141,11 @@ translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExp
       T_DollarBraced _ _ word ->
         translateDollarBracedWithPrelude word
       T_DollarArithmetic _ exprTok -> do
-        Hoisted pre args <- arithArgsPlanM exprTok
+        MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs False args
         hoistM pre (ExprJoinList (ExprCommandSubst (Stmt cmd NE.:| [])))
       T_Arithmetic _ exprTok -> do
-        Hoisted pre args <- arithArgsPlanM exprTok
+        MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs True args
         hoistM pre (ExprJoinList (ExprCommandSubst (Stmt cmd NE.:| [])))
       T_Backticked _ stmts ->
@@ -196,7 +196,7 @@ translateTokenToArgMWith ::
   Token ->
   HoistedM Arg
 translateTokenToArgMWith translateTokenToListExprM tok = do
-  Hoisted pre expr <- translateTokenToListExprM tok
+  MkHoisted pre expr <- translateTokenToListExprM tok
   hoistM pre (argExpr expr)
 
 translateTokenToExprOrRedirectHoistedWith ::
@@ -204,5 +204,5 @@ translateTokenToExprOrRedirectHoistedWith ::
   Token ->
   HoistedM ExprOrRedirect
 translateTokenToExprOrRedirectHoistedWith translateTokenToListExprM tok = do
-  Hoisted pre arg <- translateTokenToArgMWith translateTokenToListExprM tok
+  MkHoisted pre arg <- translateTokenToArgMWith translateTokenToListExprM tok
   hoistM pre (renderArg arg)

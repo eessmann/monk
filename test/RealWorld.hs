@@ -21,7 +21,7 @@ import System.Directory (findExecutable)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
-data RealWorldFixture = RealWorldFixture
+data RealWorldFixture = MkRealWorldFixture
   { rfName :: String,
     rfBashPath :: FilePath,
     rfFishPath :: FilePath,
@@ -30,47 +30,47 @@ data RealWorldFixture = RealWorldFixture
 
 realWorldFixtures :: [RealWorldFixture]
 realWorldFixtures =
-  [ RealWorldFixture
+  [ MkRealWorldFixture
       "hello-world"
       "test/fixtures/realworld/hello-world.bash"
       "test/fixtures/realworld/hello-world.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "echo-args"
       "test/fixtures/realworld/echo-args.bash"
       "test/fixtures/realworld/echo-args.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "a2l"
       "test/fixtures/realworld/a2l.bash"
       "test/fixtures/realworld/a2l.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "coat"
       "test/fixtures/realworld/coat.bash"
       "test/fixtures/realworld/coat.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "taoc"
       "test/fixtures/realworld/taoc.bash"
       "test/fixtures/realworld/taoc.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "neofetch"
       "test/fixtures/realworld/neofetch.bash"
       "test/fixtures/realworld/neofetch.fish"
       (Just "manual translation too large; bake-off only"),
-    RealWorldFixture
+    MkRealWorldFixture
       "pyramid-right"
       "test/fixtures/realworld/pyramid-right.bash"
       "test/fixtures/realworld/pyramid-right.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "pyramid-left"
       "test/fixtures/realworld/pyramid-left.bash"
       "test/fixtures/realworld/pyramid-left.fish"
       Nothing,
-    RealWorldFixture
+    MkRealWorldFixture
       "version-compare"
       "test/fixtures/realworld/version-compare.bash"
       "test/fixtures/realworld/version-compare.fish"
@@ -82,7 +82,7 @@ realWorldTests =
   testGroup "Real-world fixtures (manual fish baseline only)" (map realWorldTest realWorldFixtures)
 
 realWorldTest :: RealWorldFixture -> TestTree
-realWorldTest RealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.testCase rfName $ do
+realWorldTest MkRealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.testCase rfName $ do
   case rfSkip of
     Just _reason -> pure ()
     Nothing -> do

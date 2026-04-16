@@ -56,7 +56,7 @@ translateDoubleQuotedExprHoistedWith translateToken parts =
     [] -> hoistM [] (ExprLiteral "")
     _ -> do
       translated <- mapM translateToken parts
-      let Hoisted pre exprs = sequenceA translated
+      let MkHoisted pre exprs = sequenceA translated
       case exprs of
         [] -> hoistM pre (ExprLiteral "")
         (x : xs) -> hoistM pre (foldl' ExprStringConcat x xs)

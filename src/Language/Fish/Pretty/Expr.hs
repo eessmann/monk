@@ -66,7 +66,7 @@ prettyFishExprWith prettyStmt = go
          in start <> ".." <> end
       IndexList xs -> hsep (map go (NE.toList xs))
 
-    prettyGlob (GlobPattern parts) = hcat (map prettyGlobPart parts)
+    prettyGlob (MkGlobPattern parts) = hcat (map prettyGlobPart parts)
 
     prettyGlobPart = \case
       GlobLiteral txt -> pretty txt

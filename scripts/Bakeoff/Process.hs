@@ -17,7 +17,7 @@ import System.FilePath (dropTrailingPathSeparator)
 import System.Process (CreateProcess, readCreateProcessWithExitCode)
 import System.Timeout (timeout)
 
-data ProcessOutput = ProcessOutput
+data ProcessOutput = MkProcessOutput
   { poExitCode :: ExitCode,
     poStdout :: Text,
     poStderr :: Text
@@ -29,7 +29,7 @@ runProcessText timeoutSeconds process stdinInput =
   timeout timeoutMicros $ do
     (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
     pure
-      ProcessOutput
+      MkProcessOutput
         { poExitCode = exitCode,
           poStdout = T.pack out,
           poStderr = T.pack err

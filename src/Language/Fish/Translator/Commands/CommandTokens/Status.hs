@@ -13,7 +13,6 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
-import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTokensWithoutTime)
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
@@ -21,6 +20,7 @@ import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
 import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime, pipelineOf)
 import Language.Fish.Translator.Redirections (translateRedirectToken)
+import Language.Fish.Translator.Statement (statusCommandBlock)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables
   ( translateAssignmentWithFlags,
@@ -67,11 +67,11 @@ translateTokenToMaybeStatusCmd token =
     T_AndIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCAnd rp]))
+       in Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
     T_OrIf _ l r ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (FishJobConjunction Nothing lp [JCOr rp]))
+       in Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
     _ -> Nothing
 
 translateTokensToStatusCmd :: [Token] -> FishCommand TStatus
@@ -87,11 +87,11 @@ translateTokensToStatusCmd tokens =
     [T_AndIf _ l r] ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+       in JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])
     [T_OrIf _ l r] ->
       let lp = pipelineOf (translateTokenToStatusCmd l)
           rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+       in JobConj (MkFishJobConjunction Nothing lp [JCOr rp])
     (c : args) -> Command (tokenToLiteralText c) (map translateTokenToExprOrRedirect args)
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
@@ -126,22 +126,13 @@ hasBang = any (\tok -> tokenToLiteralText tok == "!")
 
 translateStatusBlock :: [Token] -> FishCommand TStatus
 translateStatusBlock tokens =
-  case mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens) of
-    [] -> Command "true" []
-    (cmd : rest) -> Begin (Stmt cmd NE.:| map Stmt rest) []
+  statusCommandBlock
+    (mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens))
 
 translateSubshellStatus :: [Token] -> FishCommand TStatus
 translateSubshellStatus tokens =
-  let script =
-        case mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens) of
-          [] -> "true"
-          cmds -> renderFish (map Stmt cmds)
-   in Command
-        "fish"
-        [ ExprVal (ExprLiteral "--no-config"),
-          ExprVal (ExprLiteral "-c"),
-          ExprVal (ExprLiteral script)
-        ]
+  statusCommandBlock
+    (mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens))
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirsToStatus redirs cmd =

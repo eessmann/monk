@@ -26,7 +26,7 @@ import ShellCheck.AST
 -- Echo handling
 --------------------------------------------------------------------------------
 
-data EchoOptions = EchoOptions
+data EchoOptions = MkEchoOptions
   { echoNewline :: Bool,
     echoEscapes :: Bool,
     echoHadOptions :: Bool
@@ -34,7 +34,7 @@ data EchoOptions = EchoOptions
   deriving stock (Show, Eq)
 
 defaultEchoOptions :: EchoOptions
-defaultEchoOptions = EchoOptions True False False
+defaultEchoOptions = MkEchoOptions True False False
 
 parseEchoOptions :: [Token] -> Maybe (EchoOptions, [Token])
 parseEchoOptions = go defaultEchoOptions
@@ -86,7 +86,7 @@ translateTokensToListExprHoisted tokens =
     [] -> hoistM [] (ExprListLiteral [])
     _ -> do
       translated <- mapM translateTokenToListExprM tokens
-      let Hoisted pre exprs = sequenceA translated
+      let MkHoisted pre exprs = sequenceA translated
       case exprs of
         [] -> hoistM pre (ExprListLiteral [])
         (x : xs) -> hoistM pre (foldl' ExprListConcat x xs)
@@ -116,18 +116,18 @@ translateEchoM plainArgs redirs =
   case parseEchoOptions plainArgs of
     Just (opts, rest)
       | echoEscapes opts -> do
-          Hoisted pre listExpr <- translateTokensToListExprM rest
+          MkHoisted pre listExpr <- translateTokensToListExprM rest
           let msgExpr = listExprToString listExpr
               fmt = echoFormat opts
               cmd = Command "printf" (renderArgs (argExpr (ExprLiteral fmt) : argExpr msgExpr : redirs))
           hoistM pre cmd
       | otherwise -> do
-          Hoisted pre argExprs <- translateArgsM rest
+          MkHoisted pre argExprs <- translateArgsM rest
           let optExprs =
                 if echoHadOptions opts && not (echoNewline opts)
                   then [argExpr (ExprLiteral "-n")]
                   else []
           hoistM pre (Command "echo" (renderArgs (optExprs ++ argExprs ++ redirs)))
     _ -> do
-      Hoisted pre argExprs <- translateArgsM plainArgs
+      MkHoisted pre argExprs <- translateArgsM plainArgs
       hoistM pre (Command "echo" (renderArgs (argExprs ++ redirs)))

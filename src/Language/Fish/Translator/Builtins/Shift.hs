@@ -6,7 +6,11 @@ module Language.Fish.Translator.Builtins.Shift
 where
 
 import Language.Fish.AST
-import Language.Fish.Translator.Monad (TranslateM, addWarning)
+import Language.Fish.Translator.Monad
+  ( TranslateM,
+    WarningCode (..),
+    addWarning,
+  )
 import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 
@@ -18,13 +22,13 @@ translateShiftCommand args =
       case parseShiftCount tok of
         Just n | n >= 0 -> pure (shiftByCount n)
         Just _ -> do
-          addWarning "shift count must be non-negative; emitting comment"
+          addWarning ShiftIssue (Just "shift count must be non-negative; emitting comment")
           pure (Comment "Unsupported shift count")
         Nothing -> do
-          addWarning "Unsupported shift argument; emitting comment"
+          addWarning ShiftIssue (Just "Unsupported shift argument; emitting comment")
           pure (Comment "Unsupported shift argument")
     _ -> do
-      addWarning "shift with multiple arguments is not supported; emitting comment"
+      addWarning ShiftIssue (Just "shift with multiple arguments is not supported; emitting comment")
       pure (Comment "Unsupported shift arguments")
 
 shiftByCount :: Int -> FishStatement

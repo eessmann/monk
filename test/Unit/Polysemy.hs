@@ -7,14 +7,20 @@ where
 
 import Monk.Translation
   ( TranslateError (..),
-    TranslateState (..),
+    TranslateState,
     Warning (..),
+    WarningCode (..),
+    WarningSeverity (..),
     defaultConfig,
     parseBashScript,
     renderTranslation,
+    stateErrexitEnabled,
+    statePipefailEnabled,
+    stateWarnings,
     strictConfig,
     translationState,
     translateParseResult,
+    warnMessage,
   )
 import Data.Text qualified as T
 import Test.Tasty (TestTree, testGroup)
@@ -30,19 +36,23 @@ unitPolysemyTests =
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation -> do
             let st = translationState translation
-            length (warnings st) @?= 1
-            case warnings st of
-              [Warning msg mRange] -> do
-                msg @?= "Coprocess (coproc)"
-                case mRange of
+                warns = stateWarnings st
+            length warns @?= 1
+            case warns of
+              [warning] -> do
+                warnCode warning @?= UnsupportedConstruct
+                warnSeverity warning @?= WarnHigh
+                warnMessage warning @?= "Coprocess (coproc)"
+                case warnRange warning of
                   Nothing -> H.assertFailure "expected warning range"
                   Just _ -> pure ()
-              _ -> H.assertFailure "expected single warning"
-            rangeStack st @?= [],
+              _ -> H.assertFailure "expected single warning",
       H.testCase "Strict mode raises error for unsupported" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi"
         case translateParseResult strictConfig result of
-          Left (Unsupported msg _) -> msg @?= "Coprocess (coproc)"
+          Left (Unsupported warning) -> do
+            warnCode warning @?= UnsupportedConstruct
+            warnMessage warning @?= "Coprocess (coproc)"
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right _ -> H.assertFailure "expected error in strict mode",
       H.testCase "Warnings accumulate in order" $ do
@@ -52,7 +62,7 @@ unitPolysemyTests =
           Right translation ->
             let st = translationState translation
              in
-            fmap warnMessage (warnings st)
+            fmap warnMessage (stateWarnings st)
               @?= [ "Coprocess (coproc)",
                     "Coprocess (coproc)"
                   ],
@@ -65,7 +75,7 @@ unitPolysemyTests =
              in
             H.assertBool
               "unexpected warning for arithmetic short-circuit"
-              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (warnings st))),
+              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Arithmetic short-circuit (||) no longer warns on side effects" $ do
         result <- parseBashScript "spec.sh" "echo $((a++ || b++))"
         case translateParseResult defaultConfig result of
@@ -75,7 +85,7 @@ unitPolysemyTests =
              in
             H.assertBool
               "unexpected warning for arithmetic short-circuit"
-              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (warnings st))),
+              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Arithmetic ternary no longer warns on side effects" $ do
         result <- parseBashScript "spec.sh" "echo $((a ? b++ : c++))"
         case translateParseResult defaultConfig result of
@@ -85,7 +95,7 @@ unitPolysemyTests =
              in
             H.assertBool
               "unexpected warning for arithmetic ternary"
-              (not (any ((== "Arithmetic ternary may not preserve conditional side effects") . warnMessage) (warnings st))),
+              (not (any ((== "Arithmetic ternary may not preserve conditional side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Read -r is treated as no-op" $ do
         result <- parseBashScript "spec.sh" "read -r name"
         case translateParseResult defaultConfig result of
@@ -95,7 +105,7 @@ unitPolysemyTests =
              in
             H.assertBool
               "unexpected warning for read -r"
-              (not (any ((== "read -r has no fish equivalent; backslash escapes may differ") . warnMessage) (warnings st))),
+              (not (any ((== "read -r has no fish equivalent; backslash escapes may differ") . warnMessage) (stateWarnings st))),
       H.testCase "Read array warns about IFS splitting" $ do
         result <- parseBashScript "spec.sh" "read -a arr"
         case translateParseResult defaultConfig result of
@@ -105,19 +115,19 @@ unitPolysemyTests =
              in
             H.assertBool
               "expected warning for read IFS splitting"
-              (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (warnings st)),
+              (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)),
       H.testCase "Set -euo pipefail enables errexit/pipefail and warns about nounset" $ do
         result <- parseBashScript "spec.sh" "set -euo pipefail"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation -> do
             let st = translationState translation
-            let msgs = fmap warnMessage (warnings st)
+            let msgs = fmap warnMessage (stateWarnings st)
             H.assertBool "expected nounset warning" ("Bash set -u/nounset has no fish equivalent; manual review required" `elem` msgs)
             H.assertBool "unexpected errexit warning" (not ("Bash set -e/errexit has no fish equivalent; manual review required" `elem` msgs))
             H.assertBool "unexpected pipefail warning" (not ("Bash set -o pipefail has no fish equivalent; manual review required" `elem` msgs))
-            H.assertBool "expected errexit enabled" (errexitEnabled st)
-            H.assertBool "expected pipefail enabled" (pipefailEnabled st),
+            H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
+            H.assertBool "expected pipefail enabled" (statePipefailEnabled st),
       H.testCase "shopt is warning-only and lowered to true" $ do
         (out, st) <- translateWithState "shopt -s nullglob"
         assertHasWarning "shopt has no fish equivalent; ignored" st
@@ -127,37 +137,37 @@ unitPolysemyTests =
         (out, st) <- translateWithState "read -d : first second"
         H.assertBool
           "unexpected warning for exact read delimiter helper"
-          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
-        H.assertBool "expected exact variable assignment helper" (T.isInfixOf "__monk_read_assign_vars" out),
+        H.assertBool "expected exact variable assignment helper" (T.isInfixOf "__monk_read_assign" out),
       H.testCase "read -d '' array path lowers without delimiter or IFS warnings" $ do
         (out, st) <- translateWithState "read -d '' -ra items"
         H.assertBool
           "unexpected delimiter warning for exact null-delimited array path"
-          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool
           "unexpected IFS warning for exact null-delimited array path"
-          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (warnings st)))
-        H.assertBool "expected exact array assignment helper" (T.isInfixOf "__monk_read_assign_array" out),
+          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+        H.assertBool "expected exact array assignment helper" (T.isInfixOf "__monk_read_assign" out),
       H.testCase "numeric fd read lowers to exact helper without semantic warnings" $ do
         (out, st) <- translateWithState "read -u 3 -r tail"
         H.assertBool
           "unexpected delimiter warning for numeric fd helper path"
-          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool
           "unexpected IFS warning for numeric fd helper path"
-          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (warnings st)))
+          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
         H.assertBool "expected numeric fd redirection" (T.isInfixOf "<&3" out),
       H.testCase "read -s lowers without warning" $ do
         (out, st) <- translateWithState "read -s secret"
-        H.assertBool "unexpected warning for read -s" (not (any ((== "Unsupported read flag: -s") . warnMessage) (warnings st)))
+        H.assertBool "unexpected warning for read -s" (not (any ((== "Unsupported read flag: -s") . warnMessage) (stateWarnings st)))
         H.assertBool "expected lowered silent flag" (T.isInfixOf "read --silent secret" out),
       H.testCase "clustered delimiter read flags use exact helper" $ do
         (out, st) <- translateWithState "read -rsd: -n 3 secret"
         H.assertBool
           "unexpected warning for exact clustered delimiter helper"
-          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out),
       H.testCase "clustered read flags keep nchars and array options" $ do
         (out, st) <- translateWithState "read -n3 -a items"
@@ -171,6 +181,18 @@ unitPolysemyTests =
         (out, st) <- translateWithState "set -o $mode"
         assertHasWarningContaining "dynamic option requires manual review" st
         H.assertBool "expected set warning note in output" (T.isInfixOf "dynamic option requires manual review" out),
+      H.testCase "Warnings carry stable codes and severities" $ do
+        (_out, st) <- translateWithState "readonly FOO=bar\ntrap"
+        let warns = stateWarnings st
+        H.assertBool "expected readonly code" (any ((== ReadonlyNotEnforced) . warnCode) warns)
+        H.assertBool "expected trap code" (any ((== TrapIssue) . warnCode) warns)
+        H.assertBool "expected high severity warning" (any ((== WarnHigh) . warnSeverity) warns)
+        H.assertBool "expected medium severity warning" (any ((== WarnMedium) . warnSeverity) warns),
+      H.testCase "Command-substitution subshell warns with a stable code" $ do
+        (_out, st) <- translateWithState "echo $( (echo hi) )"
+        let warns = stateWarnings st
+        H.assertBool "expected best-effort subshell code" (any ((== BestEffortSubshell) . warnCode) warns)
+        H.assertBool "expected high-severity subshell warning" (any ((== WarnHigh) . warnSeverity) warns),
       H.testCase "trap with no arguments warns" $ do
         (out, st) <- translateWithState "trap"
         assertHasWarning "trap with no arguments is not supported" st
@@ -229,10 +251,10 @@ assertHasWarning :: T.Text -> TranslateState -> Assertion
 assertHasWarning msg st =
   H.assertBool
     ("expected warning: " <> toString msg)
-    (any ((== msg) . warnMessage) (warnings st))
+    (any ((== msg) . warnMessage) (stateWarnings st))
 
 assertHasWarningContaining :: T.Text -> TranslateState -> Assertion
 assertHasWarningContaining needle st =
   H.assertBool
     ("expected warning containing: " <> toString needle)
-    (any (T.isInfixOf needle . warnMessage) (warnings st))
+    (any (T.isInfixOf needle . warnMessage) (stateWarnings st))

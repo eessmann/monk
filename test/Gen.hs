@@ -59,7 +59,7 @@ genPipeline = do
   bg <- arbitrary
   let toCont c = PipeTo {jpcVariables = [], jpcStatement = Stmt c}
   pure
-    FishJobPipeline
+    MkFishJobPipeline
       { jpTime = False,
         jpVariables = [],
         jpStatement = Stmt headCmd,
@@ -75,7 +75,7 @@ genConjunction = do
   tailPipes <- vectorOf k genPipeline
   let mk b p = if b then JCAnd p else JCOr p
   pure
-    FishJobConjunction
+    MkFishJobConjunction
       { jcDecorator = Nothing,
         jcJob = headP,
         jcContinuations = zipWith mk bools tailPipes

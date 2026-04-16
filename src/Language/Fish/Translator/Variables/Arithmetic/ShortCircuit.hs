@@ -27,8 +27,8 @@ arithShortCircuitPlan ::
   Token ->
   HoistedM [FishExpr TStr]
 arithShortCircuitPlan arithArgsPlan tok opTxt l r = do
-  Hoisted preL argsL <- arithArgsPlan l
-  Hoisted preR argsR <- arithArgsPlan r
+  MkHoisted preL argsL <- arithArgsPlan l
+  MkHoisted preR argsR <- arithArgsPlan r
   let condVar = arithTempNameWith tok "cond"
       rhsVar = arithTempNameWith tok "rhs"
       resVar = arithTempNameWith tok "res"
@@ -66,9 +66,9 @@ arithTernaryPlan ::
   Token ->
   HoistedM [FishExpr TStr]
 arithTernaryPlan arithArgsPlan tok condTok thenTok elseTok = do
-  Hoisted preCond argsCond <- arithArgsPlan condTok
-  Hoisted preThen argsThen <- arithArgsPlan thenTok
-  Hoisted preElse argsElse <- arithArgsPlan elseTok
+  MkHoisted preCond argsCond <- arithArgsPlan condTok
+  MkHoisted preThen argsThen <- arithArgsPlan thenTok
+  MkHoisted preElse argsElse <- arithArgsPlan elseTok
   let condVar = arithTempNameWith tok "cond"
       resVar = arithTempNameWith tok "res"
       setCond = setLocalFromArgs condVar (fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsCond)))
@@ -109,4 +109,4 @@ testNonZeroCond name =
 
 jobListFromStatus :: FishCommand TStatus -> FishJobList
 jobListFromStatus cmd =
-  FishJobList (FishJobConjunction Nothing (pipelineOf cmd) [] NE.:| [])
+  MkFishJobList (MkFishJobConjunction Nothing (pipelineOf cmd) [] NE.:| [])

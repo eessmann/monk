@@ -14,6 +14,7 @@ import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStm
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslationContext (..),
+    WarningCode (..),
     addLocalVars,
     addWarning,
     context,
@@ -26,7 +27,7 @@ import Language.Fish.Translator.Variables
 import Polysemy.State (gets)
 import ShellCheck.AST
 
-data DeclareFlags = DeclareFlags
+data DeclareFlags = MkDeclareFlags
   { declareGlobal :: Bool,
     declareExport :: Bool,
     declareReadonly :: Bool
@@ -34,7 +35,7 @@ data DeclareFlags = DeclareFlags
   deriving stock (Show, Eq)
 
 defaultDeclareFlags :: DeclareFlags
-defaultDeclareFlags = DeclareFlags False False False
+defaultDeclareFlags = MkDeclareFlags False False False
 
 translateDeclareCommand :: [Token] -> TranslateM FishStatement
 translateDeclareCommand =
@@ -49,7 +50,7 @@ translateDeclareCommandWith baseFlags args = do
   inFunc <- gets (inFunction . context)
   (flags, rest) <- parseDeclareFlags baseFlags args
   when (declareReadonly flags) $
-    addWarning "readonly/declare -r has no direct fish equivalent; emitted set without enforcing readonly"
+    addWarning ReadonlyNotEnforced Nothing
   let scopeFlags = declareScopeFlags inFunc flags
   if null rest
     then pure (Stmt (Command "set" []))
@@ -100,7 +101,7 @@ parseDeclareFlags = go
         _ -> addWarnFlag flags ("declare flag -" <> T.singleton c)
 
     addWarnFlag flags msg = do
-      addWarning ("Unsupported " <> msg <> "; ignoring flag")
+      addWarning DeclareIssue (Just ("Unsupported " <> msg <> "; ignoring flag"))
       pure flags
 
 parseDeclareArg :: [SetFlag] -> Token -> TranslateM (Maybe Text, [FishStatement])
@@ -120,5 +121,5 @@ parseDeclareArg flags tok =
           if isValidVarName txt
             then pure (Just txt, [Stmt (Set flags txt (ExprVariable (VarAll txt)))])
             else do
-              addWarning ("Unsupported declare argument: " <> txt)
+              addWarning DeclareIssue (Just ("Unsupported declare argument: " <> txt))
               pure (Nothing, [])

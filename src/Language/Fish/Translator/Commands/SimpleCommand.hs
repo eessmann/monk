@@ -87,7 +87,7 @@ translateSimpleCommandMWith allowErrexit scopeFlags assignments cmdTokens = do
       | hasCmd && not (null assignments) ->
           translateEnvPrefixM allowErrexit assignments cmdTokens
       | otherwise -> do
-          Hoisted preArgs fishCmd <- translateCommandTokensM cmdTokens
+          MkHoisted preArgs fishCmd <- translateCommandTokensM cmdTokens
           fishCmd' <-
             case fishCmd of
               Just cmd
@@ -118,7 +118,7 @@ translateSimpleCommandMWith allowErrexit scopeFlags assignments cmdTokens = do
     translateEnvPrefixM allowErrexit' assigns tokens = do
       let envFlags = [SetLocal, SetExport]
           envAssigns = concatMap (translateAssignmentWithFlags envFlags) assigns
-      Hoisted preArgs fishCmd <- translateCommandTokensM tokens
+      MkHoisted preArgs fishCmd <- translateCommandTokensM tokens
       fishCmd' <-
         case fishCmd of
           Just cmd

@@ -10,7 +10,10 @@ import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
-import Language.Fish.Translator.Monad (unsupported)
+import Language.Fish.Translator.Monad
+  ( WarningCode (..),
+    unsupported,
+  )
 import Language.Fish.Translator.Variables.Common (scopeFlagsForVarM)
 import Language.Fish.Translator.Variables.Arithmetic.Helpers
   ( UnaryFixity (..),
@@ -35,7 +38,7 @@ planUnaryOp arithArgsPlan tok op inner = do
   if opTxt == "++" || opTxt == "--"
     then do
       let delta = if opTxt == "++" then "+" else "-"
-      Hoisted preInner _ <- arithArgsPlan inner
+      MkHoisted preInner _ <- arithArgsPlan inner
       case arithVarName inner of
         Just var -> do
           flags <- scopeFlagsForVarM var
@@ -51,8 +54,8 @@ planUnaryOp arithArgsPlan tok op inner = do
             _ ->
               hoistM (preInner <> [setStmt]) [ExprVariable (VarScalar var)]
         Nothing -> do
-          unsupported "Arithmetic ++/-- with non-variable; side effects may be lost"
-          Hoisted pre args <- arithArgsPlan inner
+          unsupported ArithmeticIssue (Just "Arithmetic ++/-- with non-variable; side effects may be lost")
+          MkHoisted pre args <- arithArgsPlan inner
           let baseArgs = ensureArithArgs args
               valueArgs =
                 case fixity of
@@ -60,7 +63,7 @@ planUnaryOp arithArgsPlan tok op inner = do
                   _ -> wrapParens (baseArgs <> [ExprLiteral delta, ExprLiteral "1"])
           hoistM pre valueArgs
     else do
-      Hoisted pre args <- arithArgsPlan inner
+      MkHoisted pre args <- arithArgsPlan inner
       hoistM pre (ExprLiteral opTxt : ensureArithArgs args)
 
 planAssignment ::
@@ -72,12 +75,12 @@ planAssignment ::
 planAssignment arithArgsPlan op lhs rhs =
   case arithVarName lhs of
     Just var -> do
-      Hoisted preR argsR <- arithArgsPlan rhs
+      MkHoisted preR argsR <- arithArgsPlan rhs
       flags <- scopeFlagsForVarM var
       let rhsArgs = fromMaybe (ExprLiteral "0" NE.:| []) (NE.nonEmpty (ensureArithArgs argsR))
           args = assignmentArgs (toText op) var rhsArgs
           setStmt = Stmt (Set flags var (mathSubstFromArgs args))
       hoistM (preR <> [setStmt]) [ExprVariable (VarScalar var)]
     Nothing -> do
-      unsupported "Arithmetic assignment with unsupported lvalue; side effects may be lost"
+      unsupported ArithmeticIssue (Just "Arithmetic assignment with unsupported lvalue; side effects may be lost")
       arithArgsPlan rhs

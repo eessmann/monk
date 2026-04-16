@@ -36,11 +36,11 @@ condToCommand = \case
   CondAnd l r ->
     let lp = pipelineOf (condToCommand l)
         rp = pipelineOf (condToCommand r)
-     in JobConj (FishJobConjunction Nothing lp [JCAnd rp])
+     in JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])
   CondOr l r ->
     let lp = pipelineOf (condToCommand l)
         rp = pipelineOf (condToCommand r)
-     in JobConj (FishJobConjunction Nothing lp [JCOr rp])
+     in JobConj (MkFishJobConjunction Nothing lp [JCOr rp])
   CondTest cmd -> cmd
 
 condUnaryCommand :: Text -> FishExpr TStr -> FishCommand TStatus
@@ -127,31 +127,31 @@ condFromTokenMWith translateExprM translateRegexM literalExpr = go
     go = \case
       TC_Group _ _ inner -> go inner
       TC_And _ _ _ l r -> do
-        Hoisted _ condL <- go l
-        Hoisted _ condR <- go r
+        MkHoisted _ condL <- go l
+        MkHoisted _ condR <- go r
         hoistM [] (CondAnd condL condR)
       TC_Or _ _ _ l r -> do
-        Hoisted _ condL <- go l
-        Hoisted _ condR <- go r
+        MkHoisted _ condL <- go l
+        MkHoisted _ condR <- go r
         hoistM [] (CondOr condL condR)
       TC_Unary _ _ "!" inner -> do
-        Hoisted _ cond <- go inner
+        MkHoisted _ cond <- go inner
         hoistM [] (CondNot cond)
       TC_Unary _ _ op inner -> do
-        Hoisted pre expr <- translateExprM inner
+        MkHoisted pre expr <- translateExprM inner
         let cmd = beginIfNeeded pre (condUnaryCommand (toText op) expr)
         hoistM [] (CondTest cmd)
       TC_Binary _ _ op lhs rhs -> do
         let opText = toText op
-        Hoisted preL lhsExpr <- translateExprM lhs
-        Hoisted preR rhsExpr <-
+        MkHoisted preL lhsExpr <- translateExprM lhs
+        MkHoisted preR rhsExpr <-
           if opText == "=~"
             then translateRegexM rhs
             else translateExprM rhs
         let cmd = beginIfNeeded (preL <> preR) (condBinaryCommand opText lhsExpr rhsExpr)
         hoistM [] (CondTest cmd)
       TC_Nullary _ _ tok -> do
-        Hoisted pre expr <- translateExprM tok
+        MkHoisted pre expr <- translateExprM tok
         let cmd = beginIfNeeded pre (condNullaryCommand expr)
         hoistM [] (CondTest cmd)
       TC_Empty {} ->

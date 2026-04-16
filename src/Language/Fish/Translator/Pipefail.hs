@@ -5,18 +5,17 @@ module Language.Fish.Translator.Pipefail
   )
 where
 
-import Prelude hiding (get, modify)
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
-import Language.Fish.Translator.Monad (TranslateM, TranslateState (..))
-import Polysemy.State (get, modify)
+import Language.Fish.Translator.Monad
+  ( HelperId (..),
+    TranslateM,
+    ensureHelper,
+  )
 
 ensurePipefailHelper :: TranslateM ()
-ensurePipefailHelper = do
-  st <- get
-  if pipefailHelperAdded st
-    then pure ()
-    else modify (\s -> s {pipefailHelperAdded = True, preamble = preamble s <> [pipefailHelper]})
+ensurePipefailHelper =
+  ensureHelper HelperPipefail [pipefailHelper]
 
 pipefailHelper :: FishStatement
 pipefailHelper =
@@ -36,10 +35,8 @@ pipefailHelper =
             ExprVal (ExprLiteral "0")
           ]
       cond =
-        FishJobList
-          ( FishJobConjunction
-              Nothing
-              (FishJobPipeline False [] (Stmt testCmd) [] False)
+        MkFishJobList ( MkFishJobConjunction Nothing
+              (MkFishJobPipeline False [] (Stmt testCmd) [] False)
               []
               NE.:| []
           )
@@ -68,7 +65,7 @@ pipefailHelper =
       body = statusInit NE.:| [forStmt, returnStmt]
    in Stmt
         ( Function
-            FishFunction
+            MkFishFunction
               { funcName = "__monk_pipefail",
                 funcFlags = [],
                 funcParams = [],

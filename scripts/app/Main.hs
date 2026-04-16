@@ -16,7 +16,7 @@ data Command
   = Run RawOptions
   | BenchmarkWorker ToolName FilePath BenchmarkSuite
 
-data RawOptions = RawOptions
+data RawOptions = MkRawOptions
   { roOutDir :: Maybe FilePath,
     roGroups :: [FixtureGroup],
     roFiles :: [FilePath],
@@ -52,24 +52,24 @@ main = do
       fishPathHint <- traverse PathIO.resolveFile' (roFishPath raw)
       hyperfinePathHint <- traverse PathIO.resolveFile' (roHyperfinePath raw)
       let cfg =
-            BakeoffConfig
-              { bcCwd = cwd,
-                bcOutputDir = outputDir,
-                bcForce = roForce raw,
-                bcGroups = roGroups raw,
-                bcFiles = files,
-                bcFileLists = fileLists,
-                bcCompatibleFileLists = [cwd </> compatibleSelector | roCompatible raw],
-                bcJobs = roJobs raw,
-                bcTranslationTimeoutSeconds = roTranslationTimeoutSeconds raw,
-                bcRuntimeTimeoutSeconds = roRuntimeTimeoutSeconds raw,
-                bcBenchmarksEnabled = not (roNoBenchmark raw),
-                bcHyperfineRuns = roHyperfineRuns raw,
-                bcHyperfineWarmup = roHyperfineWarmup raw,
-                bcBabelfishPathHint = babelfishPathHint,
-                bcFishPathHint = fishPathHint,
-                bcHyperfinePathHint = hyperfinePathHint,
-                bcBabelfishVersionOverride = roBabelfishVersion raw
+            MkBakeoffConfig
+              { bakeoffCwd = cwd,
+                bakeoffOutputDir = outputDir,
+                bakeoffForce = roForce raw,
+                bakeoffGroups = roGroups raw,
+                bakeoffFiles = files,
+                bakeoffFileLists = fileLists,
+                bakeoffCompatibleFileLists = [cwd </> compatibleSelector | roCompatible raw],
+                bakeoffJobs = roJobs raw,
+                bakeoffTranslationTimeoutSeconds = roTranslationTimeoutSeconds raw,
+                bakeoffRuntimeTimeoutSeconds = roRuntimeTimeoutSeconds raw,
+                bakeoffBenchmarksEnabled = not (roNoBenchmark raw),
+                bakeoffHyperfineRuns = roHyperfineRuns raw,
+                bakeoffHyperfineWarmup = roHyperfineWarmup raw,
+                bakeoffBabelfishPathHint = babelfishPathHint,
+                bakeoffFishPathHint = fishPathHint,
+                bakeoffHyperfinePathHint = hyperfinePathHint,
+                bakeoffBabelfishVersionOverride = roBabelfishVersion raw
               }
       runBakeoff cfg
     BenchmarkWorker tool planPath suite -> do
@@ -87,7 +87,7 @@ commandParser =
 
 rawOptionsParser :: Parser RawOptions
 rawOptionsParser =
-  RawOptions
+  MkRawOptions
     <$> optional (strOption (long "out-dir" <> metavar "DIR" <> help "Output directory"))
     <*> fmap concat (many groupOptionParser)
     <*> many (strOption (long "file" <> metavar "PATH" <> help "Bake off a specific fixture"))

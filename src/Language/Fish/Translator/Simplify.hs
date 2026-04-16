@@ -187,7 +187,7 @@ simplifyCommand = \case
   Begin body suffix ->
     Begin (simplifyNE body) suffix
   If cond thn els suffix ->
-    If (simplifyJobList cond) (simplifyNE thn) (simplifyStmtList els) suffix
+    If (simplifyJobList cond) (simplifyNE thn) (simplifyElseBranch els) suffix
   Switch expr cases suffix ->
     Switch expr (fmap simplifyCaseItem cases) suffix
   Pipeline pipe ->
@@ -207,6 +207,33 @@ simplifyCommand = \case
 simplifyCaseItem :: CaseItem -> CaseItem
 simplifyCaseItem item =
   item {caseBody = simplifyNE (caseBody item)}
+
+simplifyElseBranch :: [FishStatement] -> [FishStatement]
+simplifyElseBranch els =
+  let simplified = simplifyStmtList els
+   in if isSyntheticTrueElse simplified
+        then []
+        else simplified
+
+isSyntheticTrueElse :: [FishStatement] -> Bool
+isSyntheticTrueElse = \case
+  [stmt] -> stmtIsSyntheticTrue stmt
+  _ -> False
+
+stmtIsSyntheticTrue :: FishStatement -> Bool
+stmtIsSyntheticTrue = \case
+  Stmt cmd -> commandIsSyntheticTrue cmd
+  _ -> False
+
+commandIsSyntheticTrue :: FishCommand t -> Bool
+commandIsSyntheticTrue = \case
+  Command "true" [] -> True
+  Begin body suffix ->
+    null suffix
+      && case NE.toList body of
+        [stmt] -> stmtIsSyntheticTrue stmt
+        _ -> False
+  _ -> False
 
 simplifyPipeline :: FishJobPipeline -> FishJobPipeline
 simplifyPipeline pipe =
@@ -271,5 +298,5 @@ simplifyConjCont = \case
   JCOr pipe -> JCOr (simplifyPipeline pipe)
 
 simplifyJobList :: FishJobList -> FishJobList
-simplifyJobList (FishJobList conjs) =
-  FishJobList (fmap simplifyConjunction conjs)
+simplifyJobList (MkFishJobList conjs) =
+  MkFishJobList (fmap simplifyConjunction conjs)
