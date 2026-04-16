@@ -7,11 +7,15 @@ import Property.Pretty
 import Property.Translation
 import RealWorld
 import Test.Tasty (TestTree, defaultMain, testGroup)
+import Unit.Bakeoff
+import Unit.Harness
+import Unit.Inline
 import Unit.Polysemy
 import Unit.Pipefail
 import Unit.Pretty
+import Unit.Refactor
+import Unit.Source
 import Unit.Translation
-import Unit.Inline
 
 main :: IO ()
 main = defaultMain tests
@@ -23,6 +27,10 @@ tests =
     [ unitPrettyTests,
       unitTranslationTests,
       unitInlineTests,
+      unitSourceTests,
+      unitHarnessTests,
+      unitBakeoffTests,
+      unitRefactorTests,
       unitPolysemyTests,
       unitPipefailTests,
       propertyPrettyTests,

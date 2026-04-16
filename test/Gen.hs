@@ -13,7 +13,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Monk
+import Monk.AST
 import Test.QuickCheck
 
 -- Basic text generator avoiding single quotes to simplify pretty expectations

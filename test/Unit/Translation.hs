@@ -6,7 +6,7 @@ module Unit.Translation
 where
 
 import Data.Text qualified as T
-import Monk
+import Monk.Translation
   ( TranslateState (..),
     TranslationResult (..),
     Warning (..),
@@ -26,10 +26,12 @@ unitTranslationTests =
     "Translation"
     [ H.testCase "Process substitution output redirect uses FIFO workaround" $ do
         out <- translateScript "echo hi > >(cat)"
-        T.isInfixOf "mktemp '-d'" out H.@? "expected temporary directory for process substitution output"
-        T.isInfixOf "mkfifo" out H.@? "expected mkfifo in translation"
-        T.isInfixOf "rm '-f' $__monk_psub_fifo" out H.@? "expected fifo cleanup in translation"
-        T.isInfixOf "rmdir $__monk_psub_dir" out H.@? "expected temp directory cleanup in translation",
+        T.isInfixOf "function __monk_procsub_out" out H.@? "expected generated procsub helper"
+        T.isInfixOf "__monk_procsub_out" out H.@? "expected helper invocation in translation"
+        T.isInfixOf "mkfifo" out H.@? "expected mkfifo in helper"
+        T.isInfixOf "eval $body" out H.@? "expected helper to evaluate rendered fish body"
+        T.isInfixOf "rm '-f' $__monk_psub_fifo" out H.@? "expected fifo cleanup in helper"
+        T.isInfixOf "rmdir $__monk_psub_dir" out H.@? "expected temp directory cleanup in helper",
       H.testCase "Echo -e lowers to printf %b" $ do
         out <- translateScript "echo -e \"hi\\nthere\""
         T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
@@ -233,10 +235,46 @@ unitTranslationTests =
         H.assertBool
           ("unexpected trivial begin wrapper in else branch: " <> T.unpack out)
           (not (T.isInfixOf "else\n  begin\n    true\n  end" out)),
+      H.testCase "Simplifier keeps multi-statement pipeline stages wrapped" $ do
+        out <- translateScript "echo hi | FOO=bar BAR=baz cat"
+        T.isInfixOf "| begin" out H.@? "expected wrapped pipeline stage"
+        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected first prelude assignment inside pipeline stage"
+        T.isInfixOf "set --local --export BAR 'baz'" out H.@? "expected second prelude assignment inside pipeline stage",
+      H.testCase "Simplifier keeps conjunction stages wrapped when preludes remain" $ do
+        out <- translateScript "FOO=bar BAR=baz true && echo ok"
+        T.isInfixOf "begin" out H.@? "expected wrapped conjunction stage"
+        T.isInfixOf "and echo 'ok'" out H.@? "expected conjunction preserved",
+      H.testCase "Simplifier does not elide background wrappers around instrumented jobs" $ do
+        out <- translateScript "FOO=bar BAR=baz true &"
+        T.isInfixOf "end &" out H.@? "expected background block wrapper to remain"
+        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected exported prelude inside background job"
+        T.isInfixOf "set --local --export BAR 'baz'" out H.@? "expected second exported prelude inside background job",
       H.testCase "Simplifier preserves redirected brace groups" $ do
         out <- translateScript "{ echo hi; } > out"
         T.isInfixOf "begin" out H.@? "expected redirected block wrapper to remain"
         T.isInfixOf "> 'out'" out H.@? "expected redirected block suffix to remain",
+      H.testCase "Simplifier flattens nested scope-neutral prelude begins" $ do
+        out <- translateScript "{ { X=1; }; echo hi; }"
+        T.count "begin" out @?= 1
+        T.isInfixOf "set --global X '1'" out H.@? "expected scope-neutral set to flatten"
+        T.isInfixOf "echo 'hi'" out H.@? "expected command to remain",
+      H.testCase "Simplifier flattens nested trivial begin wrappers" $ do
+        out <- translateScript "{ { true; }; }"
+        H.assertBool
+          ("unexpected begin wrapper after simplification: " <> T.unpack out)
+          (not (T.isInfixOf "begin" out))
+        T.isInfixOf "true" out H.@? "expected safe command to remain",
+      H.testCase "Simplifier elides pipeline-local wrapper only for single safe stage" $ do
+        out <- translateScript "echo hi | { { cat; }; }"
+        T.isInfixOf "| cat" out H.@? "expected simplified single-command pipeline stage"
+        H.assertBool
+          ("unexpected begin wrapper in simplified pipeline stage: " <> T.unpack out)
+          (not (T.isInfixOf "| begin" out)),
+      H.testCase "Simplifier preserves scope-changing prelude begin wrappers" $ do
+        out <- translateScript "{ { FOO=bar true; }; echo hi; }"
+        T.count "begin" out @?= 2
+        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected local export to keep inner scope"
+        T.isInfixOf "echo 'hi'" out H.@? "expected command to remain",
       H.testCase "Env prefix uses local export block" $ do
         out <- translateScript "FOO=bar echo hi"
         T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected local export set"
@@ -269,8 +307,9 @@ unitTranslationTests =
         T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
         T.isInfixOf "switch (string join ' ' -- $X ; or printf '')" out H.@? "expected switch to use X",
       H.testCase "Read flags translate to fish equivalents" $ do
-        outD <- translateScript "read -d : field"
-        T.isInfixOf "__monk_read_delim" outD H.@? "expected delimiter helper"
+        outD <- translateScript "read -d : first second"
+        T.isInfixOf "__monk_read_capture_delim" outD H.@? "expected delimiter capture helper"
+        T.isInfixOf "__monk_read_assign_vars" outD H.@? "expected Bash-style assignment helper"
         H.assertBool
           ("unexpected delimiter warning comment in exact helper path: " <> T.unpack outD)
           (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" outD))
@@ -281,7 +320,8 @@ unitTranslationTests =
         outT <- translateScript "read -t 5 bar"
         T.isInfixOf "read --timeout 5 bar" outT H.@? "expected timeout flag"
         outU <- translateScript "read -u 9 baz"
-        T.isInfixOf "read --fd 9 baz" outU H.@? "expected fd flag"
+        T.isInfixOf "__monk_read_capture_delim" outU H.@? "expected exact helper for numeric fd read"
+        T.isInfixOf "<&9" outU H.@? "expected numeric fd redirection in helper path"
         outA <- translateScript "read -a arr"
         T.isInfixOf "read --array arr" outA H.@? "expected array flag",
       H.testCase "Background jobs use Monk tracking runtime" $ do
@@ -291,30 +331,52 @@ unitTranslationTests =
         T.isInfixOf "__monk_wait" out H.@? "expected translated wait helper"
         T.isInfixOf "printf '%s\\n' $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
         H.assertBool "expected $! to lower to Monk job token" (not (T.isInfixOf "$last_pid" out)),
-      H.testCase "Exact read delimiter helper emits no delimiter warning" $ do
-        result <- parseBashScript "spec.sh" "read -rd: field"
+      H.testCase "Exact read delimiter array helper emits no semantic warnings" $ do
+        result <- parseBashScript "spec.sh" "read -d '' -ra fields"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
                 warnMessages = map warnMessage (warnings (translationState translation))
-            T.isInfixOf "__monk_read_delim" out H.@? "expected exact helper in translation"
+            T.isInfixOf "__monk_read_assign_array" out H.@? "expected exact array assignment helper"
+            T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited capture helper"
             H.assertBool
-              ("unexpected delimiter warning in warnings: " <> show warnMessages)
+              ("unexpected warnings in exact array path: " <> show warnMessages)
+              ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
+                  && "read IFS splitting semantics may differ between bash and fish" `notElem` warnMessages
+              ),
+      H.testCase "Multi-variable delimiter reads use exact helper without warnings" $ do
+        result <- parseBashScript "spec.sh" "read -d : one two three"
+        case translateParseResult defaultConfig result of
+          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
+          Right translation -> do
+            let out = renderTranslation translation
+                warnMessages = map warnMessage (warnings (translationState translation))
+            T.isInfixOf "__monk_read_assign_vars" out H.@? "expected exact variable assignment helper"
+            H.assertBool
+              ("unexpected warnings in exact multi-var path: " <> show warnMessages)
+              ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
+                  && "read IFS splitting semantics may differ between bash and fish" `notElem` warnMessages
+              ),
+      H.testCase "Mixed delimiter flag clusters use exact helper" $ do
+        result <- parseBashScript "spec.sh" "read -rsd: -n 3 field"
+        case translateParseResult defaultConfig result of
+          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
+          Right translation -> do
+            let out = renderTranslation translation
+                warnMessages = map warnMessage (warnings (translationState translation))
+            T.isInfixOf "__monk_read_capture_delim" out H.@? "expected exact capture helper"
+            H.assertBool
+              ("unexpected delimiter warning in mixed exact path: " <> show warnMessages)
               ("read delimiter semantics may differ between bash and fish" `notElem` warnMessages),
-      H.testCase "Empty delimiter stays best effort" $ do
-        out <- translateScript "read -d '' field"
-        T.isInfixOf "read --delimiter '' field" out H.@? "expected fish read fallback"
+      H.testCase "No-var null delimiter stays best effort and uses --null" $ do
+        out <- translateScript "read -d ''"
+        T.isInfixOf "read --null" out H.@? "expected ReadNull pretty-printing on fallback path"
         T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note",
-      H.testCase "Array delimiter read stays best effort" $ do
-        out <- translateScript "read -d : -a fields"
-        T.isInfixOf "read --delimiter ':' --array fields" out H.@? "expected fish read fallback with array flag"
-        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note"
-        T.isInfixOf "read IFS splitting semantics may differ between bash and fish" out H.@? "expected IFS warning note",
-      H.testCase "Mixed delimiter flag clusters stay best effort" $ do
-        out <- translateScript "read -rd: -s field"
-        T.isInfixOf "read --delimiter ':' --silent field" out H.@? "expected fish read fallback with mixed flags"
-        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note",
+      H.testCase "Delimiter values normalize to the first character" $ do
+        out <- translateScript "read -d '::' field"
+        T.isInfixOf "__monk_read_capture_delim 'char' ':'" out H.@? "expected normalized delimiter helper call"
+        H.assertBool "unexpected multi-character delimiter in helper call" (not (T.isInfixOf "'::'" out)),
       H.testCase "Source passes args" $ do
         out <- translateScript "source /tmp/script.sh a b"
         T.isInfixOf "source '/tmp/script.sh' 'a' 'b'" out H.@? "expected args passed to source",

@@ -37,19 +37,19 @@ simplifyCommandStmt cmd =
   case cmd of
     Begin body suffix
       | null suffix ->
-          let simplifiedBody = simplifyNE body
+          let simplifiedBody = normalizeBeginBody (simplifyNE body)
            in case simplifyPreludeBody simplifiedBody of
                 Just flattened -> flattened
                 Nothing ->
-                  case NE.toList simplifiedBody of
-                    [single] | safeToElideBegin single -> single
-                    _ -> Stmt (Begin simplifiedBody [])
+                  case simplifySingleSafeBody simplifiedBody of
+                    Just flattened -> flattened
+                    Nothing -> Stmt (Begin simplifiedBody [])
     _ -> Stmt cmd
 
 simplifyPreludeBody :: NE.NonEmpty FishStatement -> Maybe FishStatement
 simplifyPreludeBody body =
   let flattened = simplifyStmtList (NE.toList body)
-   in if all isPreludeStmt flattened
+   in if all isScopeNeutralPreludeStmt flattened
         then Just $
           case flattened of
             [] -> EmptyStmt
@@ -57,11 +57,103 @@ simplifyPreludeBody body =
             xs -> StmtList xs
         else Nothing
 
-isPreludeStmt :: FishStatement -> Bool
-isPreludeStmt = \case
-  Stmt (Set {}) -> True
+normalizeBeginBody :: NE.NonEmpty FishStatement -> NE.NonEmpty FishStatement
+normalizeBeginBody =
+  nonEmptyStmtList
+    . concatMap normalizeBeginStmt
+    . NE.toList
+
+normalizeBeginStmt :: FishStatement -> [FishStatement]
+normalizeBeginStmt = \case
+  Stmt (Begin body suffix)
+    | null suffix ->
+        let normalizedBody = normalizeBeginBody body
+         in if canSpliceNestedBeginBody normalizedBody
+              then NE.toList normalizedBody
+              else [Stmt (Begin normalizedBody [])]
+  other -> [other]
+
+canSpliceNestedBeginBody :: NE.NonEmpty FishStatement -> Bool
+canSpliceNestedBeginBody body =
+  commentsOnlyBody body
+    || scopeNeutralPreludeBody body
+    || singleSafeBody body
+
+commentsOnlyBody :: NE.NonEmpty FishStatement -> Bool
+commentsOnlyBody = all isCommentStmt . NE.toList
+
+scopeNeutralPreludeBody :: NE.NonEmpty FishStatement -> Bool
+scopeNeutralPreludeBody = all isScopeNeutralPreludeStmt . NE.toList
+
+isScopeNeutralPreludeStmt :: FishStatement -> Bool
+isScopeNeutralPreludeStmt = \case
+  Comment _ -> True
+  Stmt (Set flags _ _) -> scopeNeutralSetFlags flags
+  _ -> False
+
+scopeNeutralSetFlags :: [SetFlag] -> Bool
+scopeNeutralSetFlags flags =
+  SetLocal `notElem` flags
+    && SetFunction `notElem` flags
+
+singleSafeBody :: NE.NonEmpty FishStatement -> Bool
+singleSafeBody body =
+  case nonCommentStatements (NE.toList body) of
+    [single] -> safeToElideBegin single
+    _ -> False
+
+simplifySingleSafeBody :: NE.NonEmpty FishStatement -> Maybe FishStatement
+simplifySingleSafeBody body =
+  case nonCommentStatements (NE.toList body) of
+    [single]
+      | safeToElideBegin single || isElidableNestedBeginStmt single ->
+          Just (stmtListToStatement (NE.toList body))
+    _ -> Nothing
+
+isElidableNestedBeginStmt :: FishStatement -> Bool
+isElidableNestedBeginStmt = \case
+  Stmt (Begin body suffix) ->
+    null suffix
+      && all nestedBeginBodyStmtSafe (NE.toList body)
+  _ -> False
+
+nestedBeginBodyStmtSafe :: FishStatement -> Bool
+nestedBeginBodyStmtSafe = \case
+  Comment _ -> True
+  Stmt cmd -> nestedBeginCommandSafe cmd
+  _ -> False
+
+nestedBeginCommandSafe :: FishCommand t -> Bool
+nestedBeginCommandSafe = \case
+  Command {} -> True
+  Echo {} -> True
+  Printf {} -> True
+  Read {} -> True
+  Eval {} -> True
+  Source {} -> True
+  Set {} -> True
+  Decorated _ inner -> nestedBeginCommandSafe inner
+  Begin inner suffix -> null suffix && all nestedBeginBodyStmtSafe (NE.toList inner)
+  _ -> False
+
+isCommentStmt :: FishStatement -> Bool
+isCommentStmt = \case
   Comment _ -> True
   _ -> False
+
+nonCommentStatements :: [FishStatement] -> [FishStatement]
+nonCommentStatements = filter (not . isCommentStmt)
+
+stmtListToStatement :: [FishStatement] -> FishStatement
+stmtListToStatement = \case
+  [] -> EmptyStmt
+  [single] -> single
+  stmts -> StmtList stmts
+
+nonEmptyStmtList :: [FishStatement] -> NE.NonEmpty FishStatement
+nonEmptyStmtList = \case
+  [] -> EmptyStmt NE.:| []
+  (x : xs) -> x NE.:| xs
 
 safeToElideBegin :: FishStatement -> Bool
 safeToElideBegin = \case
@@ -81,9 +173,7 @@ safeToElideBegin = \case
 
 simplifyNE :: NE.NonEmpty FishStatement -> NE.NonEmpty FishStatement
 simplifyNE body =
-  case simplifyStmtList (NE.toList body) of
-    [] -> EmptyStmt NE.:| []
-    (x : xs) -> x NE.:| xs
+  nonEmptyStmtList (simplifyStmtList (NE.toList body))
 
 simplifyCommand :: FishCommand t -> FishCommand t
 simplifyCommand = \case
@@ -121,13 +211,52 @@ simplifyCaseItem item =
 simplifyPipeline :: FishJobPipeline -> FishJobPipeline
 simplifyPipeline pipe =
   pipe
-    { jpStatement = simplifyStmt (jpStatement pipe),
+    { jpStatement = simplifyPipelineStage (jpStatement pipe),
       jpCont = map simplifyPipeCont (jpCont pipe)
     }
 
 simplifyPipeCont :: JobPipeCont -> JobPipeCont
 simplifyPipeCont cont =
-  cont {jpcStatement = simplifyStmt (jpcStatement cont)}
+  cont {jpcStatement = simplifyPipelineStage (jpcStatement cont)}
+
+simplifyPipelineStage :: FishStatement -> FishStatement
+simplifyPipelineStage stmt =
+  case simplifyStmt stmt of
+    StmtList [] -> EmptyStmt
+    StmtList [single] -> unwrapTrivialPipelineStage single
+    StmtList (stageHead : stageRest) -> Stmt (Begin (stageHead NE.:| stageRest) [])
+    other -> unwrapTrivialPipelineStage other
+
+unwrapTrivialPipelineStage :: FishStatement -> FishStatement
+unwrapTrivialPipelineStage stmt =
+  let stripped = stripTrivialPipelineStage stmt
+   in if safeToElideBegin stripped
+        then stripped
+        else stmt
+
+stripTrivialPipelineStage :: FishStatement -> FishStatement
+stripTrivialPipelineStage = \case
+  Stmt (Begin body suffix)
+    | null suffix,
+      Just single <- exactSingleBodyStmt body ->
+        stripTrivialPipelineStage single
+  Stmt (Pipeline pipe)
+    | trivialSingleStagePipeline pipe ->
+        stripTrivialPipelineStage (jpStatement pipe)
+  other -> other
+
+exactSingleBodyStmt :: NE.NonEmpty FishStatement -> Maybe FishStatement
+exactSingleBodyStmt body =
+  case NE.toList body of
+    [single] -> Just single
+    _ -> Nothing
+
+trivialSingleStagePipeline :: FishJobPipeline -> Bool
+trivialSingleStagePipeline pipe =
+  not (jpTime pipe)
+    && null (jpVariables pipe)
+    && null (jpCont pipe)
+    && not (jpBackgrounded pipe)
 
 simplifyConjunction :: FishJobConjunction -> FishJobConjunction
 simplifyConjunction conj =

@@ -5,7 +5,7 @@ module Main (main) where
 import Criterion.Main (bench, bgroup, defaultMain, env, nfIO)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Monk (defaultConfig, parseBashScript, projectName, renderTranslation, translateParseResult)
+import Monk.Translation (defaultConfig, parseBashScript, projectName, renderTranslation, translateParseResult)
 
 fixtures :: [(String, FilePath)]
 fixtures =

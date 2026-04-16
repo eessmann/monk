@@ -1,0 +1,5 @@
+# comment
+project name=Monk
+build target=fish translator
+empty=
+feature flag=background wait

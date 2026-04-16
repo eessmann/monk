@@ -6,7 +6,7 @@ module Unit.Pipefail
 where
 
 import Data.Text qualified as T
-import Monk
+import Monk.Translation
   ( defaultConfig,
     parseBashScript,
     renderTranslation,

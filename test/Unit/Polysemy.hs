@@ -5,7 +5,7 @@ module Unit.Polysemy
   )
 where
 
-import Monk
+import Monk.Translation
   ( TranslateError (..),
     TranslateState (..),
     Warning (..),
@@ -124,23 +124,49 @@ unitPolysemyTests =
         H.assertBool "expected shopt note in output" (T.isInfixOf "shopt has no fish equivalent; ignored" out)
         H.assertBool "expected fallback true command" (T.isInfixOf "true '-s' 'nullglob'" out),
       H.testCase "read -d lowers to exact helper without semantic warning" $ do
-        (out, st) <- translateWithState "read -d : field"
+        (out, st) <- translateWithState "read -d : first second"
         H.assertBool
           "unexpected warning for exact read delimiter helper"
           (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
-        H.assertBool "expected exact delimiter helper" (T.isInfixOf "__monk_read_delim" out),
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
+        H.assertBool "expected exact variable assignment helper" (T.isInfixOf "__monk_read_assign_vars" out),
+      H.testCase "read -d '' array path lowers without delimiter or IFS warnings" $ do
+        (out, st) <- translateWithState "read -d '' -ra items"
+        H.assertBool
+          "unexpected delimiter warning for exact null-delimited array path"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool
+          "unexpected IFS warning for exact null-delimited array path"
+          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool "expected exact array assignment helper" (T.isInfixOf "__monk_read_assign_array" out),
+      H.testCase "numeric fd read lowers to exact helper without semantic warnings" $ do
+        (out, st) <- translateWithState "read -u 3 -r tail"
+        H.assertBool
+          "unexpected delimiter warning for numeric fd helper path"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool
+          "unexpected IFS warning for numeric fd helper path"
+          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
+        H.assertBool "expected numeric fd redirection" (T.isInfixOf "<&3" out),
       H.testCase "read -s lowers without warning" $ do
         (out, st) <- translateWithState "read -s secret"
         H.assertBool "unexpected warning for read -s" (not (any ((== "Unsupported read flag: -s") . warnMessage) (warnings st)))
         H.assertBool "expected lowered silent flag" (T.isInfixOf "read --silent secret" out),
-      H.testCase "clustered read flags preserve supported options" $ do
-        (out, st) <- translateWithState "read -rsd: secret"
-        assertHasWarning "read delimiter semantics may differ between bash and fish" st
-        H.assertBool "expected silent flag from cluster" (T.isInfixOf "read --silent --delimiter ':' secret" out),
+      H.testCase "clustered delimiter read flags use exact helper" $ do
+        (out, st) <- translateWithState "read -rsd: -n 3 secret"
+        H.assertBool
+          "unexpected warning for exact clustered delimiter helper"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (warnings st)))
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out),
       H.testCase "clustered read flags keep nchars and array options" $ do
         (out, st) <- translateWithState "read -n3 -a items"
         assertHasWarning "read IFS splitting semantics may differ between bash and fish" st
         H.assertBool "expected clustered nchars flag" (T.isInfixOf "read --nchars 3 --array items" out),
+      H.testCase "read -d '' with no vars stays warning-driven and uses --null" $ do
+        (out, st) <- translateWithState "read -d ''"
+        assertHasWarning "read delimiter semantics may differ between bash and fish" st
+        H.assertBool "expected ReadNull pretty-printing on fallback path" (T.isInfixOf "read --null" out),
       H.testCase "dynamic set -o warns for manual review" $ do
         (out, st) <- translateWithState "set -o $mode"
         assertHasWarningContaining "dynamic option requires manual review" st

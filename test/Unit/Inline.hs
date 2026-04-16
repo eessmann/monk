@@ -8,7 +8,7 @@ where
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Monk
+import Monk.Translation
   ( Translation (..),
     defaultConfig,
     inlineStatements,

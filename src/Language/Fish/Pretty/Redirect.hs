@@ -64,10 +64,11 @@ prettyReadFlag = \case
   ReadExport -> "--export"
   ReadSilent -> "--silent"
   ReadArray -> "--array"
+  ReadNull -> "--null"
   ReadDelimiter t -> "--delimiter" <+> escapeFishString t
   ReadNChars n -> "--nchars" <+> pretty n
   ReadTimeout t -> "--timeout" <+> pretty t
-  ReadFD fd -> "--fd" <+> pretty fd
+  ReadFD fd -> "-u" <+> pretty fd
 
 prettySetFlag :: SetFlag -> Doc ann
 prettySetFlag = \case

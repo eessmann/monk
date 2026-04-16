@@ -65,4 +65,5 @@ module Language.Fish.AST
 where
 
 import Language.Fish.AST.Example (exampleAST)
+import Language.Fish.AST.Common
 import Language.Fish.AST.Types

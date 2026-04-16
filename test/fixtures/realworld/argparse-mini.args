@@ -1,0 +1,1 @@
+--name=monk --mode detail --color=always --tag alpha --tag beta -- --literal -n tail

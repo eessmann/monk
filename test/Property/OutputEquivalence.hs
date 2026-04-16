@@ -6,7 +6,7 @@ module Property.OutputEquivalence
 where
 
 import Data.Text qualified as T
-import Monk
+import Monk.Translation
 import ShellSupport
   ( RunResult (..),
     Shell (..),

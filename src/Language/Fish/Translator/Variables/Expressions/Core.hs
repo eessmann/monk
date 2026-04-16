@@ -48,7 +48,10 @@ import Language.Fish.Translator.Variables.ParamExpansion
   ( translateSimpleVar,
     translateSimpleVarM,
   )
-import Language.Fish.Translator.Variables.ProcessSubst (procSubExpr)
+import Language.Fish.Translator.Variables.ProcessSubst
+  ( procSubExpr,
+    procSubExprM,
+  )
 import ShellCheck.AST
 
 translateTokenToExprWith ::
@@ -161,7 +164,9 @@ translateTokenToExprHoistedWith translateDollarBracedWithPrelude commandSubstExp
         do
           body <- mapM translateSubstToken stmts
           case NE.nonEmpty body of
-            Just neBody -> hoistM [] (procSubExpr dir neBody)
+            Just neBody -> do
+              expr <- procSubExprM dir neBody
+              hoistM [] expr
             Nothing -> hoistM [] (ExprLiteral "")
       other -> hoistM [] (ExprLiteral (tokenToLiteralText other))
 

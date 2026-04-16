@@ -7,6 +7,7 @@ where
 
 import Data.Text.IO qualified as TIO
 import FixtureSupport (loadFixtureArgs, loadFixturePrereqs, loadFixtureStdin)
+import Path.IO qualified as PathIO
 import ShellSupport
   ( RunResult (..),
     Shell (..),
@@ -89,13 +90,14 @@ realWorldTest RealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.test
       case runnable of
         Left _reason -> pure ()
         Right () -> do
-          prereqs <- loadFixturePrereqs rfBashPath
-          prereqOk <- and <$> mapM (fmap isJust . findExecutable) prereqs
+          bashPath <- PathIO.resolveFile' rfBashPath
+          prereqs <- loadFixturePrereqs bashPath
+          prereqOk <- and <$> mapM (fmap isJust . findExecutable . toString) prereqs
           when prereqOk $ do
             bashSrc <- TIO.readFile rfBashPath
             fishSrc <- TIO.readFile rfFishPath
-            args <- loadFixtureArgs rfBashPath
-            stdinInput <- loadFixtureStdin rfBashPath
+            args <- loadFixtureArgs bashPath
+            stdinInput <- loadFixtureStdin bashPath
             baseEnv <- prepareEnv
             baseBash <- runShell ShellBash baseEnv ""
             baseFish <- runShell ShellFish baseEnv ""

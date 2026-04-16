@@ -7,7 +7,7 @@ where
 
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Monk
+import Monk.Translation
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 

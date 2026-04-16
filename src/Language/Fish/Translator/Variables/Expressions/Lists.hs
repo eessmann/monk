@@ -54,6 +54,7 @@ import Language.Fish.Translator.Variables.ParamExpansion
   )
 import Language.Fish.Translator.Variables.ProcessSubst
   ( procSubListExpr,
+    procSubListExprM,
   )
 import ShellCheck.AST
 
@@ -229,7 +230,9 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
         do
           body <- mapM translateStmt stmts
           case NE.nonEmpty body of
-            Just neBody -> hoistM [] (procSubListExpr dir neBody)
+            Just neBody -> do
+              expr <- procSubListExprM dir neBody
+              hoistM [] expr
             Nothing -> hoistM [] (ExprListLiteral [])
       T_Array _ elems -> do
         Hoisted pre expr <- translateArrayElementsMWith go elems

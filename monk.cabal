@@ -74,8 +74,16 @@ library
   import:              common-options
   hs-source-dirs:      src
   exposed-modules:     Monk
+                     , Monk.AST
+                     , Monk.Source
+                     , Monk.Translation
                      , Language.Fish.Inline
+                     , Monk.Diagnostics
+  build-depends:       containers
+                     , directory
+                     , filepath
   other-modules:       Language.Fish.AST
+                     , Language.Fish.AST.Common
                      , Language.Fish.AST.Example
                      , Language.Fish.AST.Types
                      , Language.Fish.Pretty
@@ -124,6 +132,9 @@ library
                      , Language.Fish.Translator.Variables.Glob
                      , Language.Fish.Translator.Variables.Index
                      , Language.Fish.Translator.Variables.ParamExpansion
+                     , Language.Fish.Translator.Variables.ParamExpansion.Parse
+                     , Language.Fish.Translator.Variables.ParamExpansion.Render
+                     , Language.Fish.Translator.Variables.ParamExpansion.Types
                      , Language.Fish.Translator.Variables.ParamParse
                      , Language.Fish.Translator.Variables.ProcessSubst
                      , Language.Fish.Translator.Variables.Substitution
@@ -136,6 +147,10 @@ library
                      , Language.Fish.Translator.Commands.CommandTokens.Status
                      , Language.Fish.Translator.Commands.Echo
                      , Language.Fish.Translator.Commands.Read
+                     , Language.Fish.Translator.Commands.Read.Exact
+                     , Language.Fish.Translator.Commands.Read.Parse
+                     , Language.Fish.Translator.Commands.Read.Runtime
+                     , Language.Fish.Translator.Commands.Read.Types
                      , Language.Fish.Translator.Commands.SetOptions
                      , Language.Fish.Translator.Commands.SimpleCommand
                      , Language.Fish.Translator.Commands.Status
@@ -147,6 +162,45 @@ library
                      , Language.Fish.Translator.Redirections
                      , Language.Bash.Parser
 
+library monk-harness-support
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      src
+  exposed-modules:     Monk.Internal.Fixture
+                     , Monk.Internal.Shell
+  build-depends:       aeson ^>= 2.2
+                     , containers
+                     , path
+                     , path-io
+                     , process
+
+library monk-bakeoff-lib
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      scripts
+  exposed-modules:     Bakeoff.Fixture
+                     , Bakeoff.Artifacts
+                     , Bakeoff.Benchmark
+                     , Bakeoff.Execution
+                     , Bakeoff.Process
+                     , Bakeoff.Report
+                     , Bakeoff.Runner
+                     , Bakeoff.Selection
+                     , Bakeoff.Shell
+                     , Bakeoff.Tools
+                     , Bakeoff.Types
+  build-depends:       monk
+                     , monk:monk-harness-support
+                     , aeson ^>= 2.2
+                     , bytestring
+                     , containers
+                     , filepath
+                     , path
+                     , path-io
+                     , process
+                     , shake ^>= 0.19
+                     , time
+
 executable monk
   import:              common-options
   hs-source-dirs:      app
@@ -156,6 +210,19 @@ executable monk
                      , containers
                      , directory
                      , filepath
+  ghc-options:         -threaded
+                       -rtsopts
+                       -with-rtsopts=-N
+
+executable monk-bakeoff
+  import:              common-options
+  hs-source-dirs:      scripts/app
+  main-is:             Main.hs
+  build-depends:       monk:monk-bakeoff-lib
+                     , optparse-applicative ^>= 0.19
+                     , path
+                     , path-io
+                     , time
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
@@ -173,21 +240,30 @@ test-suite monk-test
                      , Golden
                      , Integration
                      , Unit.Inline
+                     , Unit.Bakeoff
+                     , Unit.Harness
                      , Unit.Polysemy
                      , Unit.Pipefail
                      , Unit.Pretty
+                     , Unit.Refactor
+                     , Unit.Source
                      , Unit.Translation
                      , Property.Pretty
                      , Property.Translation
                      , Property.OutputEquivalence
   build-depends:       monk
+                     , monk:monk-harness-support
+                     , monk:monk-bakeoff-lib
                      , containers
                      , directory
                      , filepath
+                     , path
+                     , path-io
                      , process
                      , tasty ^>= 1.5
                      , tasty-hunit ^>= 0.10
                      , tasty-quickcheck ^>= 0.11
+                     , time
                      , QuickCheck >= 2.14 && < 2.17
 
   ghc-options:         -threaded

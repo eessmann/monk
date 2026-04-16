@@ -8,7 +8,8 @@ module TestSupport
 where
 
 import Data.List.NonEmpty qualified as NE
-import Monk
+import Monk.AST
+import Monk.Translation
 import Test.Tasty.HUnit as H
 
 trueCond :: FishJobList
