@@ -68,5 +68,5 @@ This guide covers the warning classes and best-effort areas that most often need
 
 - Run Monk and review the typed warnings, not only the rendered script.
 - Re-run the translated script against representative Bash inputs.
-- Use `MONK_INTEGRATION=1 cabal test` as the current project-level regression gate; the current local baseline is a passing 232-test run that includes the focused subshell-status fixtures, generalized covered `read -d` fixtures, recursive source coverage, and curated real-world parity fixtures.
+- Use `MONK_INTEGRATION=1 cabal test` as the current project-level regression gate; the current local baseline is a passing 245-test run that includes the focused subshell-status fixtures, generalized covered `read -d` fixtures, recursive source coverage, public diagnostics-contract tests, bake-off preflight coverage, and curated real-world parity fixtures.
 - Treat `docs/design/translator-audit.md` as the fidelity source of truth when deciding whether a warning can be ignored.

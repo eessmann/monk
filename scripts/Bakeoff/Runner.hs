@@ -4,6 +4,8 @@ module Bakeoff.Runner
   )
 where
 
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Data.Time (getCurrentTime)
 import Bakeoff.Artifacts
   ( BakeoffOutputs (..),
@@ -37,7 +39,9 @@ import Bakeoff.Shell (prepareEnv)
 import Bakeoff.Tools
   ( collectGitMetadata,
     configReport,
+    renderToolPreflightFailure,
     resolveTools,
+    toolPreflightWarnings,
   )
 import Bakeoff.Types
 import Path
@@ -48,13 +52,26 @@ import Path
   )
 import Path.IO qualified as PathIO
 import System.Environment (getExecutablePath)
+import System.Exit qualified as Exit
 import System.Info qualified as SysInfo
 
 runBakeoff :: BakeoffConfig -> IO ()
 runBakeoff cfg = do
   prepareOutputDirectory (bakeoffOutputDir cfg) (bakeoffForce cfg)
   monkExecutable <- PathIO.resolveFile' =<< getExecutablePath
-  tools <- resolveTools monkExecutable cfg
+  toolsResult <- resolveTools monkExecutable cfg
+  tools <-
+    case toolsResult of
+      Left preflightFailure ->
+        Exit.die (toString (renderToolPreflightFailure preflightFailure))
+      Right resolved -> pure resolved
+  let warnings = toolPreflightWarnings cfg tools
+  unless (null warnings) $
+    TIO.hPutStrLn stderr $
+      T.unlines
+        ( "Bake-off tool preflight notes:"
+            : map ("- " <>) warnings
+        )
   processEnv <- prepareEnv
   fixtures <- resolveFixtureSelection (bakeoffCwd cfg) (bakeoffGroups cfg) (bakeoffFiles cfg) (bakeoffFileLists cfg) (bakeoffCompatibleFileLists cfg)
   artifacts <- traverse (\fixture -> (fixture,) <$> fixtureArtifacts cfg fixture) fixtures
@@ -98,8 +115,8 @@ runBakeoff cfg = do
           ensureParentDirectory (boBenchmarkPlanPath outputs)
           writeJsonFile (boBenchmarkPlanPath outputs) benchmarkPlan
 
-      forM_ artifacts $ \(fixture, fixtureArtifactPaths) ->
-        defineFixtureRules cfg tools processEnv fixture fixtureArtifactPaths
+      forM_ artifacts $
+        uncurry (defineFixtureRules cfg tools processEnv)
 
       toFilePath (boReportPath outputs) %> \_ -> do
         need (map (toFilePath . faResultJson . snd) artifacts)
@@ -108,7 +125,7 @@ runBakeoff cfg = do
           ensureParentDirectory (boReportPath outputs)
           writeJsonFile (boReportPath outputs) (reports :: [FixtureReport])
 
-      when (not (null benchmarkTargets)) $
+      unless (null benchmarkTargets) $
         defineBenchmarkRules cfg tools outputs
 
       toFilePath (boSummaryPath outputs) %> \_ -> do

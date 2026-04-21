@@ -18,7 +18,7 @@ where
 
 import GHC.Show qualified as GHC
 import Language.Fish.AST (SourcePos (..), SourceRange (..))
-import Language.Fish.Translator.Monad
+import Monk.Translation.Types
   ( TranslateError (..),
     Warning (..),
     WarningCode (..),
@@ -76,8 +76,8 @@ renderTranslationNotes path warns =
    in header : detailLines
 
 summarizeWarnings :: [Warning] -> WarningCounts
-summarizeWarnings warns =
-  foldl' tally (MkWarningCounts 0 0 0) warns
+summarizeWarnings =
+  foldl' tally (MkWarningCounts 0 0 0)
   where
     tally counts warn =
       case warningSeverity warn of

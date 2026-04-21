@@ -23,6 +23,7 @@ import Monk.Translation
     warnMessage,
   )
 import Data.Text qualified as T
+import Monk.AST (SourcePos (..), SourceRange (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -66,6 +67,22 @@ unitPolysemyTests =
               @?= [ "Coprocess (coproc)",
                     "Coprocess (coproc)"
                   ],
+      H.testCase "Background tracking warning is emitted once across repeated wait translation" $ do
+        (_out, st) <- translateWithState "sleep 1 &\nwait\nwait"
+        fmap warnCode (stateWarnings st)
+          @?= [BackgroundTracking],
+      H.testCase "Function scope is restored after translating a function body" $ do
+        (_out, st) <- translateWithState "f() { local inside=1; }\nlocal outside=1"
+        fmap warnMessage (stateWarnings st)
+          @?= ["local used outside a function; fish will treat it as local to the current scope"],
+      H.testCase "Warnings keep their own source ranges across statements" $ do
+        result <- parseBashScript "spec.sh" "coproc echo hi\ntrap"
+        case translateParseResult defaultConfig result of
+          Left err -> H.assertFailure ("unexpected error: " <> show err)
+          Right translation -> do
+            let warns = stateWarnings (translationState translation)
+                starts = mapMaybe (fmap rangeStart . warnRange) warns
+            map srcLine starts @?= [1, 2],
       H.testCase "Arithmetic short-circuit no longer warns on side effects" $ do
         result <- parseBashScript "spec.sh" "echo $((a++ && b++))"
         case translateParseResult defaultConfig result of
@@ -124,8 +141,8 @@ unitPolysemyTests =
             let st = translationState translation
             let msgs = fmap warnMessage (stateWarnings st)
             H.assertBool "expected nounset warning" ("Bash set -u/nounset has no fish equivalent; manual review required" `elem` msgs)
-            H.assertBool "unexpected errexit warning" (not ("Bash set -e/errexit has no fish equivalent; manual review required" `elem` msgs))
-            H.assertBool "unexpected pipefail warning" (not ("Bash set -o pipefail has no fish equivalent; manual review required" `elem` msgs))
+            H.assertBool "unexpected errexit warning" ("Bash set -e/errexit has no fish equivalent; manual review required" `notElem` msgs)
+            H.assertBool "unexpected pipefail warning" ("Bash set -o pipefail has no fish equivalent; manual review required" `notElem` msgs)
             H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
             H.assertBool "expected pipefail enabled" (statePipefailEnabled st),
       H.testCase "shopt is warning-only and lowered to true" $ do

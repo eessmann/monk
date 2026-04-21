@@ -41,10 +41,7 @@ main = do
   case parsedCommand of
     Run raw -> do
       cwd <- PathIO.getCurrentDir
-      outputDir <-
-        case roOutDir raw of
-          Just outDir -> PathIO.resolveDir' outDir
-          Nothing -> defaultOutputDirectory
+      outputDir <- maybe defaultOutputDirectory PathIO.resolveDir' (roOutDir raw)
       files <- traverse PathIO.resolveFile' (roFiles raw)
       fileLists <- traverse PathIO.resolveFile' (roFileLists raw)
       compatibleSelector <- parseRelFile "scripts/bakeoff-compatible.txt"

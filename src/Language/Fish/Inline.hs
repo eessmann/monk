@@ -64,7 +64,7 @@ inlineStatement warn translations stack tr = \case
   Stmt (Source expr) ->
     case expr of
       ExprLiteral txt ->
-        case M.lookup txt (trSourceMap tr) >>= id of
+        case join (M.lookup txt (trSourceMap tr)) of
           Just resolved
             | Set.member resolved stack -> do
                 warn ("warning: recursive source detected: " <> toText resolved)
@@ -93,7 +93,7 @@ inlineSourceCommand warn translations stack tr args =
   case args of
     (ExprVal pathExpr : rest)
       | Just txt <- literalPath pathExpr ->
-          case M.lookup txt (trSourceMap tr) >>= id of
+          case join (M.lookup txt (trSourceMap tr)) of
             Just resolved
               | Set.member resolved stack -> do
                   warn ("warning: recursive source detected: " <> toText resolved)
@@ -204,8 +204,8 @@ inlineBodyList ::
   Translation ->
   [FishStatement] ->
   IO [FishStatement]
-inlineBodyList warn translations stack tr stmts =
-  concatMapM (inlineStatement warn translations stack tr) stmts
+inlineBodyList warn translations stack tr =
+  concatMapM (inlineStatement warn translations stack tr)
 
 inlineCaseItem ::
   WarnFn ->

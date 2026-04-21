@@ -18,7 +18,7 @@ where
 import Language.Fish.AST
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
-import Language.Fish.Translator.Pipeline (pipelineOf)
+import Language.Fish.Translator.Statement (statusConjunction)
 import ShellCheck.AST
 
 data Cond
@@ -33,21 +33,15 @@ condToCommand :: Cond -> FishCommand TStatus
 condToCommand = \case
   CondTrue -> Command "true" []
   CondNot inner -> Not (condToCommand inner)
-  CondAnd l r ->
-    let lp = pipelineOf (condToCommand l)
-        rp = pipelineOf (condToCommand r)
-     in JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])
-  CondOr l r ->
-    let lp = pipelineOf (condToCommand l)
-        rp = pipelineOf (condToCommand r)
-     in JobConj (MkFishJobConjunction Nothing lp [JCOr rp])
+  CondAnd l r -> statusConjunction ConjAnd (condToCommand l) (condToCommand r)
+  CondOr l r -> statusConjunction ConjOr (condToCommand l) (condToCommand r)
   CondTest cmd -> cmd
 
 condUnaryCommand :: Text -> FishExpr TStr -> FishCommand TStatus
-condUnaryCommand op expr = testUnaryCommand op expr
+condUnaryCommand = testUnaryCommand
 
 condNullaryCommand :: FishExpr TStr -> FishCommand TStatus
-condNullaryCommand expr = testNullaryCommand expr
+condNullaryCommand = testNullaryCommand
 
 condBinaryCommand :: Text -> FishExpr TStr -> FishExpr TStr -> FishCommand TStatus
 condBinaryCommand op lhs rhs

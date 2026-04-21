@@ -52,6 +52,12 @@ jobs:
     - name: Install dependencies
       run: |
         cabal build all --only-dependencies
+        cabal install hlint --ignore-project --installdir="$HOME/.local/bin" --overwrite-policy=always
+
+    - name: Lint
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        hlint .
 
     - name: Build
       run: |

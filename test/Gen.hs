@@ -41,12 +41,8 @@ genStatusCommand =
       do
         n <- chooseInt (0, 3)
         pure (Exit (Just (ExprNumLiteral n))),
-      do
-        t <- genTextNoQuote
-        pure (Eval (ExprLiteral t)),
-      do
-        f <- genTextNoQuote
-        pure (Source (ExprLiteral f)),
+      Eval . ExprLiteral <$> genTextNoQuote,
+      Source . ExprLiteral <$> genTextNoQuote,
       pure (Exec (ExprLiteral "true") []),
       pure (Read [ReadPrompt "Enter:", ReadLocal] ["x"])
     ]

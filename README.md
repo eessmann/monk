@@ -76,6 +76,7 @@ Warnings and notes go to stderr.
 The public modules are intentionally small:
 
 - `Monk.Translation` for parse + translate entry points
+- `Monk.Translation.Types` for the stable translation/diagnostics contract
 - `Monk.AST` for the public fish AST
 - `Monk.Source` for recursive source-graph helpers
 - `Monk.Diagnostics` for warning rendering and confidence summaries
@@ -112,6 +113,12 @@ There is also a bake-off runner for comparing Monk and Babelfish:
 ```bash
 cabal run monk-bakeoff -- --compatible --no-benchmark --out-dir /tmp/monk-bakeoff
 ```
+
+Bake-off prerequisites:
+
+- `babelfish` and `fish` are required
+- `hyperfine` is optional and only needed for benchmark runs
+- the runner now validates tool paths up front and reports actionable preflight errors or benchmark-skip notes
 
 ## Docs
 

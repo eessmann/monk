@@ -117,6 +117,11 @@ unitTranslationTests =
         T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split in command substitution"
         T.isInfixOf "(echo" out H.@? "expected command substitution structure"
         T.isInfixOf "echo 'hi'" out H.@? "expected innermost echo",
+      H.testCase "Command substitution preserves status conjunctions" $ do
+        out <- translateScript "echo $(false || true && false)"
+        H.assertBool
+          ("expected command-substitution conjunctions, got: " <> T.unpack out)
+          (T.isInfixOf "or " out && T.isInfixOf "and " out),
       H.testCase "Errexit guard is command-substitution aware" $ do
         let script =
               T.unlines

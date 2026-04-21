@@ -21,7 +21,7 @@ where
 import Control.Exception (bracket)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Char (isAlpha, toLower)
-import Data.List (findIndices)
+import Data.List (elemIndices)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
@@ -82,8 +82,7 @@ shouldRunIntegration = do
 
 prepareEnv :: IO [(String, String)]
 prepareEnv = do
-  env <- Env.getEnvironment
-  pure (setVars [("LC_ALL", "C"), ("LANG", "C")] env)
+  setVars [("LC_ALL", "C"), ("LANG", "C")] <$> Env.getEnvironment
   where
     setVars vars env0 = foldl' (\acc (k, v) -> (k, v) : filter ((/= k) . fst) acc) env0 vars
 
@@ -99,8 +98,8 @@ runShellWithMode runMode shell env0 script args stdinInput =
     runShellFileWithMode' (effectiveRunMode runMode script) shell env0 scriptPath args stdinInput
 
 runShellFileWithMode :: ShellRunMode -> Shell -> [(String, String)] -> Path Abs File -> [Text] -> Text -> IO RunResult
-runShellFileWithMode runMode shell env0 scriptPath args stdinInput =
-  runShellFileWithMode' runMode shell env0 scriptPath args stdinInput
+runShellFileWithMode =
+  runShellFileWithMode'
 
 runShellFileWithMode' :: ShellRunMode -> Shell -> [(String, String)] -> Path Abs File -> [Text] -> Text -> IO RunResult
 runShellFileWithMode' runMode shell env0 scriptPath args stdinInput = do
@@ -181,14 +180,14 @@ effectiveRunMode runMode script =
 
 scriptMayExit :: Text -> Bool
 scriptMayExit script =
-  any (`elem` ["exit", "exec"]) (map normalizeToken (T.words script))
+  any ((`elem` ["exit", "exec"]) . normalizeToken) (T.words script)
   where
     normalizeToken = T.takeWhile isAlpha . T.dropWhile (not . isAlpha)
 
 splitEnv :: Text -> Text -> (Text, Text)
 splitEnv markerText output =
   let ls = T.splitOn "\n" output
-      idxs = findIndices (== markerText) ls
+      idxs = elemIndices markerText ls
    in case NE.nonEmpty idxs of
         Nothing -> (output, "")
         Just neIdxs ->

@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.IO
@@ -26,7 +25,8 @@ import Language.Fish.Translator.Pipeline
     pipelineOf,
     wrapErrexitIfEnabled,
   )
-import Language.Fish.Translator.Variables (tokenToLiteralText)
+import Language.Fish.Translator.Statement (statusConjunction)
+import Language.Fish.Translator.Token (tokensHaveBang)
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------
@@ -40,7 +40,7 @@ translatePipeline bang cmds =
         [] -> Stmt (Command "true" [])
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-           in if hasBang bang then Stmt (Not pipe) else Stmt pipe
+           in if tokensHaveBang bang then Stmt (Not pipe) else Stmt pipe
 
 translatePipelineM :: [Token] -> [Token] -> TranslateM FishStatement
 translatePipelineM bang cmds = do
@@ -51,7 +51,7 @@ translatePipelineM bang cmds = do
     (c : cs) -> do
       let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
       pipe' <- applyPipefailIfEnabled pipe
-      let cmd = if hasBang bang then Not pipe' else pipe'
+      let cmd = if tokensHaveBang bang then Not pipe' else pipe'
       cmd' <- wrapErrexitIfEnabled cmd
       pure (Stmt cmd')
 
@@ -62,14 +62,8 @@ translateTokenToMaybeStatusCmd token =
     T_Condition {} -> Just (translateTokenToStatusCmd token)
     T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmd inner
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
-    T_AndIf _ l r ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
-    T_OrIf _ l r ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
+    T_AndIf _ l r -> Just (statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
+    T_OrIf _ l r -> Just (statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
     _ -> Nothing
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
@@ -79,7 +73,4 @@ translatePipelineToStatus bang cmds =
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-           in if hasBang bang then Not pipe else pipe
-
-hasBang :: [Token] -> Bool
-hasBang = any (\tok -> tokenToLiteralText tok == "!")
+           in if tokensHaveBang bang then Not pipe else pipe

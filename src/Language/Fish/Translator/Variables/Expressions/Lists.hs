@@ -1,6 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Language.Fish.Translator.Variables.Expressions.Lists
   ( translateTokenToListExprWith,
     translateTokenToListExprMWith,

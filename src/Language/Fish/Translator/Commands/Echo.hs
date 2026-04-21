@@ -102,9 +102,9 @@ translateEcho plainArgs redirs =
            in Command "printf" (renderArgs (argExpr (ExprLiteral fmt) : argExpr msgExpr : redirs))
       | otherwise ->
           let optExprs =
-                if echoHadOptions opts && not (echoNewline opts)
-                  then [argExpr (ExprLiteral "-n")]
-                  else []
+                [ argExpr (ExprLiteral "-n")
+                  | echoHadOptions opts && not (echoNewline opts)
+                ]
               argExprs = map translateTokenToArg rest
            in Command "echo" (renderArgs (optExprs ++ argExprs ++ redirs))
     _ ->
@@ -124,9 +124,9 @@ translateEchoM plainArgs redirs =
       | otherwise -> do
           MkHoisted pre argExprs <- translateArgsM rest
           let optExprs =
-                if echoHadOptions opts && not (echoNewline opts)
-                  then [argExpr (ExprLiteral "-n")]
-                  else []
+                [ argExpr (ExprLiteral "-n")
+                  | echoHadOptions opts && not (echoNewline opts)
+                ]
           hoistM pre (Command "echo" (renderArgs (optExprs ++ argExprs ++ redirs)))
     _ -> do
       MkHoisted pre argExprs <- translateArgsM plainArgs

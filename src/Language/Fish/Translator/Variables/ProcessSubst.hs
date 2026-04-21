@@ -36,14 +36,14 @@ procSubExprM :: String -> NonEmpty FishStatement -> TranslateM (FishExpr TStr)
 procSubExprM dir body =
   case dir of
     "<" -> pure (ExprProcessSubst body)
-    ">" -> ensureProcSubOutHelper *> pure (ExprJoinList (procSubOutHelperList body))
+    ">" -> ensureProcSubOutHelper $> ExprJoinList (procSubOutHelperList body)
     _ -> pure (ExprProcessSubst body)
 
 procSubListExprM :: String -> NonEmpty FishStatement -> TranslateM (FishExpr (TList TStr))
 procSubListExprM dir body =
   case dir of
     "<" -> pure (ExprListLiteral [ExprProcessSubst body])
-    ">" -> ensureProcSubOutHelper *> pure (procSubOutHelperList body)
+    ">" -> ensureProcSubOutHelper $> procSubOutHelperList body
     _ -> pure (ExprListLiteral [ExprProcessSubst body])
 
 procSubDirVar :: Text

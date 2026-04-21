@@ -51,8 +51,7 @@ propertyPrettyTests =
       QC.testProperty "Switch pretty has N case lines and one end" $
         let genCase = do
               pat <- ExprLiteral <$> genTextNoQuote
-              body <- genNonEmptyStmts
-              pure (MkCaseItem (pat NE.:| []) body)
+              MkCaseItem (pat NE.:| []) <$> genNonEmptyStmts
          in QC.forAll (QC.listOf1 genCase) $ \items ->
               let switchCmd = Stmt (Switch (ExprLiteral "x") (NE.fromList items) [])
                   out = renderFish [switchCmd]

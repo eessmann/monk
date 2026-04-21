@@ -44,8 +44,8 @@ translateDoubleQuotedExprMWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
   [Token] ->
   HoistedM (FishExpr TStr)
-translateDoubleQuotedExprMWith translateToken =
-  translateDoubleQuotedExprHoistedWith translateToken
+translateDoubleQuotedExprMWith =
+  translateDoubleQuotedExprHoistedWith
 
 translateDoubleQuotedExprHoistedWith ::
   (Token -> HoistedM (FishExpr TStr)) ->

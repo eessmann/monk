@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator
@@ -63,7 +62,8 @@ import Language.Fish.Translator.Redirections
   )
 import Language.Fish.Translator.Simplify (simplifyFishStatement)
 import Language.Fish.Translator.Statement
-  ( translateSubshellStatement,
+  ( jobConjunctionFromPipelines,
+    translateSubshellStatement,
   )
 import Language.Fish.Translator.Variables
 import Polysemy.State (gets)
@@ -203,12 +203,12 @@ translateToken token =
       T_AndIf _ l r -> do
         lp <- pipelineOf <$> translateTokenToStatusCmdM l
         rp <- pipelineOf <$> translateTokenToStatusCmdM r
-        conj <- wrapErrexitOnConjunction (MkFishJobConjunction Nothing lp [JCAnd rp])
+        conj <- wrapErrexitOnConjunction (jobConjunctionFromPipelines ConjAnd lp rp)
         pure (Stmt (JobConj conj))
       T_OrIf _ l r -> do
         lp <- pipelineOf <$> translateTokenToStatusCmdM l
         rp <- pipelineOf <$> translateTokenToStatusCmdM r
-        conj <- wrapErrexitOnConjunction (MkFishJobConjunction Nothing lp [JCOr rp])
+        conj <- wrapErrexitOnConjunction (jobConjunctionFromPipelines ConjOr lp rp)
         pure (Stmt (JobConj conj))
       T_Backgrounded _ bgToken -> do
         cmd <- translateTokenToStatusCmdM bgToken

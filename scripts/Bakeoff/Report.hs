@@ -16,7 +16,7 @@ import Path (Abs, Dir, File, Path, Rel, toFilePath)
 import Path.IO qualified as PathIO
 import System.FilePath (dropTrailingPathSeparator)
 
-data HyperfineEnvelope = MkHyperfineEnvelope
+newtype HyperfineEnvelope = MkHyperfineEnvelope
   { results :: [HyperfineEntry]
   }
   deriving stock (Eq, Show, Generic)
@@ -65,8 +65,8 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
       "- Output dir: `" <> dirText (metaOutputDir meta) <> "`",
       "- Host: `" <> metaHostOs meta <> "/" <> metaHostArch meta <> "`",
       "- Monk executable: `" <> fileText (toolsMonkExecutable (metaTools meta)) <> "`",
-      "- Babelfish: `" <> fileText (toolsBabelfishPath (metaTools meta)) <> "` (" <> toolsBabelfishVersion (metaTools meta) <> ")",
-      "- Fish: `" <> fileText (toolsFishPath (metaTools meta)) <> "` (" <> toolsFishVersion (metaTools meta) <> ")"
+      "- Babelfish: `" <> fileText (toolsBabelfishPath (metaTools meta)) <> "` (" <> toolVersionText (toolsBabelfishVersion (metaTools meta)) <> ")",
+      "- Fish: `" <> fileText (toolsFishPath (metaTools meta)) <> "` (" <> toolVersionText (toolsFishVersion (metaTools meta)) <> ")"
     ]
       <> hyperfineRunLine
       <> [ "",
@@ -96,7 +96,7 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
     hyperfineRunLine =
       case toolsHyperfineVersion (metaTools meta) of
         Nothing -> []
-        Just version -> ["- Hyperfine: `" <> version <> "`"]
+        Just version -> ["- Hyperfine: `" <> toolVersionText version <> "`"]
     skipSection
       | null skipCounts = []
       | otherwise =
@@ -230,8 +230,8 @@ renderBenchmark summary =
     <> [""]
 
 formatSeconds :: Double -> Text
-formatSeconds value =
-  showFFloat 3 value
+formatSeconds =
+  showFFloat 3
 
 renderCommandStatus :: CommandStatus -> Text
 renderCommandStatus = \case
@@ -267,3 +267,7 @@ relFileText =
 dirText :: Path b Dir -> Text
 dirText =
   toText . dropTrailingPathSeparator . toFilePath
+
+toolVersionText :: ToolVersion -> Text
+toolVersionText =
+  unToolVersion

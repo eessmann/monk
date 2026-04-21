@@ -1,4 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Commands.CommandTokens.Status
@@ -18,10 +17,17 @@ import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTok
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
 import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
-import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime, pipelineOf)
+import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime)
 import Language.Fish.Translator.Redirections (translateRedirectToken)
-import Language.Fish.Translator.Statement (statusCommandBlock)
-import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Statement
+  ( statusCommandBlock,
+    statusConjunction,
+  )
+import Language.Fish.Translator.Token
+  ( stripSeparatorTokens,
+    tokenToLiteralText,
+    tokensHaveBang,
+  )
 import Language.Fish.Translator.Variables
   ( translateAssignmentWithFlags,
     translateArithmetic,
@@ -50,7 +56,7 @@ translatePipelineToStatus bang cmds =
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
-           in if hasBang bang then Not pipe else pipe
+           in if tokensHaveBang bang then Not pipe else pipe
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
 translateTokenToMaybeStatusCmd token =
@@ -61,17 +67,11 @@ translateTokenToMaybeStatusCmd token =
     T_Subshell _ tokens -> Just (translateSubshellStatus tokens)
     T_Redirecting _ redirs inner ->
       let cmd = translateTokenToStatusCmd inner
-          redirExprs = renderArgs (catMaybes (map translateRedirectToken redirs))
+          redirExprs = renderArgs (mapMaybe translateRedirectToken redirs)
        in Just (attachRedirsToStatus redirExprs cmd)
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
-    T_AndIf _ l r ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
-    T_OrIf _ l r ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
+    T_AndIf _ l r -> Just (statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
+    T_OrIf _ l r -> Just (statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
     _ -> Nothing
 
 translateTokensToStatusCmd :: [Token] -> FishCommand TStatus
@@ -84,14 +84,8 @@ translateTokensToStatusCmd tokens =
     [T_Pipeline _ b c] -> translatePipelineToStatus b c
     [T_BraceGroup _ innerTokens] -> translateStatusBlock innerTokens
     [T_Subshell _ innerTokens] -> translateSubshellStatus innerTokens
-    [T_AndIf _ l r] ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])
-    [T_OrIf _ l r] ->
-      let lp = pipelineOf (translateTokenToStatusCmd l)
-          rp = pipelineOf (translateTokenToStatusCmd r)
-       in JobConj (MkFishJobConjunction Nothing lp [JCOr rp])
+    [T_AndIf _ l r] -> statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
+    [T_OrIf _ l r] -> statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
     (c : args) -> Command (tokenToLiteralText c) (map translateTokenToExprOrRedirect args)
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
@@ -119,20 +113,17 @@ translateTimeReserved name args
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime True (c : cs))
-           in if hasBang bang then Not pipe else pipe
-
-hasBang :: [Token] -> Bool
-hasBang = any (\tok -> tokenToLiteralText tok == "!")
+           in if tokensHaveBang bang then Not pipe else pipe
 
 translateStatusBlock :: [Token] -> FishCommand TStatus
 translateStatusBlock tokens =
   statusCommandBlock
-    (mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens))
+    (mapMaybe translateTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
 
 translateSubshellStatus :: [Token] -> FishCommand TStatus
 translateSubshellStatus tokens =
   statusCommandBlock
-    (mapMaybe translateTokenToMaybeStatusCmd (filter (not . isSeparatorToken) tokens))
+    (mapMaybe translateTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirsToStatus redirs cmd =
@@ -148,8 +139,3 @@ attachRedirsToStatus redirs cmd =
       case redirs of
         [] -> other
         _ -> Begin (Stmt other NE.:| []) redirs
-
-isSeparatorToken :: Token -> Bool
-isSeparatorToken tok =
-  let txt = tokenToLiteralText tok
-   in txt == ";" || txt == "\n"

@@ -16,15 +16,7 @@ module Monk.Translation
     translationStatements,
     renderTranslation,
     flattenStatements,
-    defaultConfig,
-    strictConfig,
-    TranslateConfig (..),
-    TranslateError (..),
     TranslateState,
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
-    warnMessage,
     stateWarnings,
     stateErrexitEnabled,
     statePipefailEnabled,
@@ -35,6 +27,7 @@ module Monk.Translation
     parseBashFile,
     parseBashScript,
     projectName,
+    module Monk.Translation.Types,
   )
 where
 
@@ -44,18 +37,12 @@ import Language.Fish.Inline (Translation (..), WarnFn, inlineStatements)
 import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator qualified as Translator
 import Language.Fish.Translator.Monad
-  ( TranslateConfig (..),
-    TranslateError (..),
-    TranslateState,
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
-    defaultConfig,
+  ( TranslateState,
     stateErrexitEnabled,
     statePipefailEnabled,
     stateWarnings,
-    warnMessage,
   )
+import Monk.Translation.Types
 import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 
 -- | Result of a successful translation.
@@ -137,7 +124,3 @@ flattenStatements stmt =
 -- | Project name used in CLI and benchmark labels.
 projectName :: Text
 projectName = "monk"
-
--- | Strict translation settings that fail on unsupported constructs.
-strictConfig :: TranslateConfig
-strictConfig = defaultConfig {strictMode = True}

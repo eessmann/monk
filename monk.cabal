@@ -79,6 +79,7 @@ library
                      , Monk.AST
                      , Monk.Source
                      , Monk.Translation
+                     , Monk.Translation.Types
                      , Language.Fish.Inline
                      , Monk.Diagnostics
   build-depends:       containers
@@ -191,6 +192,10 @@ library monk-bakeoff-lib
                      , Bakeoff.Shell
                      , Bakeoff.Tools
                      , Bakeoff.Types
+  other-modules:       Bakeoff.Execution.Diff
+                     , Bakeoff.Execution.Runtime
+                     , Bakeoff.Execution.Shared
+                     , Bakeoff.Execution.Translation
   build-depends:       monk
                      , monk:monk-harness-support
                      , aeson ^>= 2.2
@@ -243,6 +248,7 @@ test-suite monk-test
                      , Integration
                      , Unit.Inline
                      , Unit.Bakeoff
+                     , Unit.Diagnostics
                      , Unit.Harness
                      , Unit.Polysemy
                      , Unit.Pipefail

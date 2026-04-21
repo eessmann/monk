@@ -1,5 +1,3 @@
-{-# LANGUAGE LambdaCase #-}
-
 module Language.Fish.Translator.Commands.Status
   ( translateTokensToStatusCmd,
     translateTokenToStatusCmd,
@@ -25,15 +23,18 @@ import Language.Fish.Translator.Monad (TranslateM, TranslationContext (..), cont
 import Language.Fish.Translator.Pipeline
   ( applyPipefailIfEnabled,
     jobPipelineFromListWithTime,
-    pipelineOf,
   )
 import Language.Fish.Translator.Redirections (translateRedirectTokenM)
 import Language.Fish.Translator.Statement
   ( statusCommandBlock,
+    statusConjunction,
     toNonEmptyStmtList,
     translateSubshellStatusCommand,
   )
-import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Token
+  ( stripSeparatorTokens,
+    tokensHaveBang,
+  )
 import Language.Fish.Translator.Variables (translateArithmeticStatusM)
 import Polysemy.State (gets)
 import ShellCheck.AST
@@ -47,7 +48,7 @@ translateTokensToStatusCmdM tokens =
     [] -> pure (Command "true" [])
     [tok] -> translateTokenToStatusCmdM tok
     _ -> do
-      let toks = filter (not . isSeparatorToken) tokens
+      let toks = stripSeparatorTokens tokens
       cmds <- mapM translateTokenToStatusCmdM toks
       case NE.nonEmpty (map Stmt cmds) of
         Just body -> pure (Begin body [])
@@ -83,14 +84,10 @@ translateTokenToStatusCmdM tok =
       pure (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd))
     T_Arithmetic _ exprTok ->
       translateArithmeticStatusM exprTok
-    T_AndIf _ l r -> do
-      lp <- pipelineOf <$> translateTokenToStatusCmdM l
-      rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp]))
-    T_OrIf _ l r -> do
-      lp <- pipelineOf <$> translateTokenToStatusCmdM l
-      rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (JobConj (MkFishJobConjunction Nothing lp [JCOr rp]))
+    T_AndIf _ l r ->
+      translateStatusConjunction ConjAnd l r
+    T_OrIf _ l r ->
+      translateStatusConjunction ConjOr l r
     _ ->
       pure (Command "true" [])
 
@@ -103,7 +100,7 @@ translatePipelineToStatusM bang cmds = do
     (c : cs) -> do
       let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
       pipe' <- applyPipefailIfEnabled pipe
-      pure (if hasBang bang then Not pipe' else pipe')
+      pure (if tokensHaveBang bang then Not pipe' else pipe')
 
 translateTokenToMaybeStatusCmdM :: Token -> TranslateM (Maybe (FishCommand TStatus))
 translateTokenToMaybeStatusCmdM token =
@@ -120,14 +117,10 @@ translateTokenToMaybeStatusCmdM token =
       let MkHoisted pre mRedirs = sequenceA parts
       pure (Just (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd)))
     T_Pipeline _ bang cmds -> Just <$> translatePipelineToStatusM bang cmds
-    T_AndIf _ l r -> do
-      lp <- pipelineOf <$> translateTokenToStatusCmdM l
-      rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCAnd rp])))
-    T_OrIf _ l r -> do
-      lp <- pipelineOf <$> translateTokenToStatusCmdM l
-      rp <- pipelineOf <$> translateTokenToStatusCmdM r
-      pure (Just (JobConj (MkFishJobConjunction Nothing lp [JCOr rp])))
+    T_AndIf _ l r ->
+      Just <$> translateStatusConjunction ConjAnd l r
+    T_OrIf _ l r ->
+      Just <$> translateStatusConjunction ConjOr l r
     _ -> pure Nothing
 
 stmtToStatusCommand :: FishStatement -> FishCommand TStatus
@@ -171,23 +164,21 @@ commandToStatus cmd =
     Return {} -> Just cmd
     _ -> Nothing
 
-isSeparatorToken :: Token -> Bool
-isSeparatorToken tok =
-  let txt = tokenToLiteralText tok
-   in txt == ";" || txt == "\n"
-
-hasBang :: [Token] -> Bool
-hasBang = any (\tok -> tokenToLiteralText tok == "!")
-
 translateStatusBlockM :: [Token] -> TranslateM (FishCommand TStatus)
 translateStatusBlockM tokens = do
-  cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
+  cmds <- mapM translateTokenToStatusCmdM (stripSeparatorTokens tokens)
   pure (statusCommandBlock cmds)
 
 translateSubshellStatusM :: [Token] -> TranslateM (FishCommand TStatus)
 translateSubshellStatusM tokens = do
-  cmds <- mapM translateTokenToStatusCmdM (filter (not . isSeparatorToken) tokens)
+  cmds <- mapM translateTokenToStatusCmdM (stripSeparatorTokens tokens)
   translateSubshellStatusCommand cmds
+
+translateStatusConjunction :: Conjunction -> Token -> Token -> TranslateM (FishCommand TStatus)
+translateStatusConjunction conjunction lhs rhs =
+  statusConjunction conjunction
+    <$> translateTokenToStatusCmdM lhs
+    <*> translateTokenToStatusCmdM rhs
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirsToStatus redirs cmd =

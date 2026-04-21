@@ -6,7 +6,6 @@
 -- Recursive source discovery and source-path rewriting helpers.
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 module Monk.Source
   ( SourceMode (..),
@@ -19,12 +18,12 @@ module Monk.Source
   )
 where
 
-import Control.Monad (foldM)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
+import Control.Monad (foldM)
 import Language.Fish.AST
 import Monk.Translation
   ( TranslateConfig,
@@ -114,7 +113,7 @@ rewriteSources translations tr =
   map (rewriteStatement sourceRewrite) (trStatements tr)
   where
     sourceRewrite txt =
-      case M.lookup txt (trSourceMap tr) >>= id of
+      case join (M.lookup txt (trSourceMap tr)) of
         Just resolved
           | M.member resolved translations ->
               toText (replaceExtension (toString txt) "fish")
@@ -168,7 +167,7 @@ tokenChildren = \case
   T_SimpleCommand _ assignments cmdToks -> assignments <> cmdToks
   T_Pipeline _ _ cmds -> cmds
   T_IfExpression _ conditionBranches elseBranch ->
-    concatMap (\(cond, body) -> cond <> body) conditionBranches <> elseBranch
+    concatMap (uncurry (<>)) conditionBranches <> elseBranch
   T_WhileExpression _ cond body -> cond <> body
   T_UntilExpression _ cond body -> cond <> body
   T_Arithmetic _ exprTok -> [exprTok]

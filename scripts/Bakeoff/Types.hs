@@ -6,6 +6,7 @@ module Bakeoff.Types
     SelectionSource (..),
     SkipReason (..),
     ToolName (..),
+    ToolVersion (..),
     CommandStatus (..),
     DiffStatus (..),
     BakeoffConfig (..),
@@ -65,6 +66,12 @@ data ToolName
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+newtype ToolVersion = MkToolVersion
+  { unToolVersion :: Text
+  }
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 data CommandStatus
   = CommandSucceeded
   | CommandFailed
@@ -106,9 +113,9 @@ data ResolvedTools = MkResolvedTools
     toolsBabelfishPath :: Path Abs File,
     toolsFishPath :: Path Abs File,
     toolsHyperfinePath :: Maybe (Path Abs File),
-    toolsBabelfishVersion :: Text,
-    toolsFishVersion :: Text,
-    toolsHyperfineVersion :: Maybe Text
+    toolsBabelfishVersion :: ToolVersion,
+    toolsFishVersion :: ToolVersion,
+    toolsHyperfineVersion :: Maybe ToolVersion
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)

@@ -17,11 +17,20 @@ import Bakeoff.Selection
     summarizeFixtureMetadata,
   )
 import Bakeoff.Shell (ShellRunMode (..))
+import Bakeoff.Tools
+  ( ToolPreflightFailure (..),
+    ToolPreflightIssue (..),
+    renderToolPreflightFailure,
+    toolPreflightWarnings,
+  )
 import Bakeoff.Types
 import Path
   ( Abs,
+    Dir,
     File,
     Path,
+    Rel,
+    parseAbsDir,
     parseRelDir,
     parseRelFile,
     toFilePath,
@@ -82,8 +91,8 @@ unitBakeoffTests =
                   toolsBabelfishPath = integrationPath,
                   toolsFishPath = integrationPath,
                   toolsHyperfinePath = Nothing,
-                  toolsBabelfishVersion = "unknown",
-                  toolsFishVersion = "unknown",
+                  toolsBabelfishVersion = MkToolVersion "unknown",
+                  toolsFishVersion = MkToolVersion "unknown",
                   toolsHyperfineVersion = Nothing
                 }
             plan = makeBenchmarkPlan [benchmarkFixture, skippedFixture] tools
@@ -115,8 +124,8 @@ unitBakeoffTests =
                         toolsBabelfishPath = monkBin,
                         toolsFishPath = monkBin,
                         toolsHyperfinePath = Nothing,
-                        toolsBabelfishVersion = "unknown",
-                        toolsFishVersion = "unknown",
+                        toolsBabelfishVersion = MkToolVersion "unknown",
+                        toolsFishVersion = MkToolVersion "unknown",
                         toolsHyperfineVersion = Nothing
                       },
                   metaConfig =
@@ -182,7 +191,35 @@ unitBakeoffTests =
             summary = renderSummaryMarkdown meta [report] []
         assertContains summary "- Babelfish translation: succeeded=0, failed=1, timed_out=0, skipped=0"
         assertContains summary "- Fixtures with any runtime diff: 1"
-        assertContains summary "- `test/fixtures/integration/source-recursive.bash`: babelfish translation failed"
+        assertContains summary "- `test/fixtures/integration/source-recursive.bash`: babelfish translation failed",
+      H.testCase "renderToolPreflightFailure gives actionable missing-tool guidance" $ do
+        let failure =
+              MkToolPreflightFailure
+                [ MkToolPreflightIssue
+                    { preflightToolName = "babelfish",
+                      preflightMessage = "not found on PATH.",
+                      preflightAction = "Install it or pass `--babelfish` /path/to/babelfish."
+                    }
+                ]
+            rendered = renderToolPreflightFailure failure
+        assertContains rendered "Bake-off tool preflight failed."
+        assertContains rendered "--babelfish"
+        assertContains rendered "not found on PATH.",
+      H.testCase "toolPreflightWarnings explains skipped benchmarks when hyperfine is missing" $ do
+        cwd <- PathIO.getCurrentDir
+        let cfg = sampleBakeoffConfig cwd True
+            tools =
+              MkResolvedTools
+                { toolsMonkExecutable = cwd </> unsafeRelFile "app/Main.hs",
+                  toolsBabelfishPath = cwd </> unsafeRelFile "app/Main.hs",
+                  toolsFishPath = cwd </> unsafeRelFile "app/Main.hs",
+                  toolsHyperfinePath = Nothing,
+                  toolsBabelfishVersion = MkToolVersion "unknown",
+                  toolsFishVersion = MkToolVersion "unknown",
+                  toolsHyperfineVersion = Nothing
+                }
+            warnings = toolPreflightWarnings cfg tools
+        warnings @?= ["hyperfine was not found, so benchmark runs will be skipped. Install hyperfine or rerun with --no-benchmark."]
     ]
 
 repoFile :: FilePath -> IO (Path Abs File)
@@ -199,3 +236,33 @@ assertContains haystack needle =
 
 unreachable :: IO a
 unreachable = error "unreachable"
+
+sampleBakeoffConfig :: Path Abs Dir -> Bool -> BakeoffConfig
+sampleBakeoffConfig cwd benchmarksEnabled =
+  MkBakeoffConfig
+    { bakeoffCwd = cwd,
+      bakeoffOutputDir = unsafeAbsDir "/tmp/monk-bakeoff-tests/",
+      bakeoffForce = False,
+      bakeoffGroups = [],
+      bakeoffFiles = [],
+      bakeoffFileLists = [],
+      bakeoffCompatibleFileLists = [],
+      bakeoffJobs = Nothing,
+      bakeoffTranslationTimeoutSeconds = 30,
+      bakeoffRuntimeTimeoutSeconds = 30,
+      bakeoffBenchmarksEnabled = benchmarksEnabled,
+      bakeoffHyperfineRuns = 10,
+      bakeoffHyperfineWarmup = 1,
+      bakeoffBabelfishPathHint = Nothing,
+      bakeoffFishPathHint = Nothing,
+      bakeoffHyperfinePathHint = Nothing,
+      bakeoffBabelfishVersionOverride = Nothing
+    }
+
+unsafeAbsDir :: FilePath -> Path Abs Dir
+unsafeAbsDir =
+  either (error . show) id . parseAbsDir
+
+unsafeRelFile :: FilePath -> Path Rel File
+unsafeRelFile =
+  either (error . show) id . parseRelFile

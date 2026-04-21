@@ -45,15 +45,14 @@ resolveFixtureSelection ::
   IO [FixtureSpec]
 resolveFixtureSelection cwd groups files fileLists compatibleLists = do
   discovered <- discoverFixtures cwd
-  selectedByGroup <-
-    pure $
-      if not selectorsPresent
-        then groupSelections discovered defaultGroups SelectionDefault
-        else
-          groupSelections
-            discovered
-            (if null groups then [] else expandGroups groups)
-            SelectionGroup
+  let selectedByGroup =
+        if not selectorsPresent
+          then groupSelections discovered defaultGroups SelectionDefault
+          else
+            groupSelections
+              discovered
+              (if null groups then [] else expandGroups groups)
+              SelectionGroup
   selectedByFile <- traverse (\path -> mkExplicitSelection cwd (SelectionFile path) path) files
   selectedByFileList <- concat <$> traverse (loadSelectionFile cwd SelectionFileList) fileLists
   selectedByCompatible <- concat <$> traverse (loadSelectionFile cwd SelectionCompatible) compatibleLists

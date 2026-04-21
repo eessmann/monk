@@ -26,9 +26,9 @@ parseReadArgsDetailed [] fs vs issues unsupported raw =
       exact = isJust (exactReadDelim parsed)
       needsSplitNote = not exact && (ReadArray `elem` fs || length vs > 1)
       delimiterNote =
-        if any isDelimiterFlag fs && not exact
-          then ["read delimiter semantics may differ between bash and fish"]
-          else []
+        [ "read delimiter semantics may differ between bash and fish"
+          | any isDelimiterFlag fs && not exact
+        ]
       issues' =
         if needsSplitNote
           then issues <> ["read IFS splitting semantics may differ between bash and fish"] <> delimiterNote
@@ -81,8 +81,8 @@ parseReadArgValue ::
   (Text -> ReadFlag) ->
   Text ->
   ReadParseResult
-parseReadArgValue xs fs vs issues unsupported raw mkFlag errMsg =
-  parseReadArgValueAllowEmpty False xs fs vs issues unsupported raw mkFlag errMsg
+parseReadArgValue =
+  parseReadArgValueAllowEmpty False
 
 parseReadArgValueAllowEmpty ::
   Bool ->
@@ -127,7 +127,7 @@ consumeShortFlags ::
   [ReadFlag] ->
   Bool ->
   Either Text ([ReadFlag], Bool, Maybe (Bool, Text -> ReadFlag, Text))
-consumeShortFlags chars0 fs0 raw0 = go chars0 fs0 raw0
+consumeShortFlags = go
   where
     go [] fs raw = Right (fs, raw, Nothing)
     go (c : cs) fs raw =

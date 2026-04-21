@@ -95,6 +95,11 @@ The bake-off is now a separate executable and private internal library:
   - `Bakeoff.Process`
   - `Bakeoff.Report`
   - `Bakeoff.Benchmark`
+  - `Bakeoff.Execution`
+  - `Bakeoff.Execution.Translation`
+  - `Bakeoff.Execution.Runtime`
+  - `Bakeoff.Execution.Diff`
+  - `Bakeoff.Execution.Shared`
   - `Bakeoff.Tools`
   - `Bakeoff.Runner`
   - `Bakeoff.Types`
@@ -109,12 +114,14 @@ Responsibilities are split as follows:
   - External process execution, JSON IO, stderr normalization, and diff artifact emission.
 - `Bakeoff.Benchmark`
   - Hyperfine plan construction and benchmark execution/loading.
+- `Bakeoff.Execution.*`
+  - Shake orchestration split into translation, runtime, diff, and shared execution helpers.
 - `Bakeoff.Tools`
-  - Tool resolution, version capture, and git metadata.
+  - Tool preflight, version capture, benchmark warnings, and git metadata.
 - `Bakeoff.Report`
   - Markdown summary rendering and hyperfine summary loading.
 - `Bakeoff.Runner`
-  - Shake orchestration over the bake-off pipeline.
+  - Top-level bake-off setup, preflight messaging, and summary generation.
 
 This keeps `shake`, `aeson`, and other bake-off-only dependencies out of the main `monk` library and CLI targets.
 
@@ -127,4 +134,4 @@ The refactor is considered healthy when all of the following hold:
 - `cabal run monk-bakeoff -- --compatible --no-benchmark ...`
 - one full local `monk-bakeoff` run with metadata-based skips respected
 
-As of 2026-04-16, this architecture pass satisfies those gates on the current machine.
+As of 2026-04-20, this architecture pass satisfies the build/test/lint gates on the current machine; bake-off tool preflight is also verified for invalid explicit paths.

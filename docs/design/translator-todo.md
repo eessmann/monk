@@ -1,6 +1,6 @@
 # Bash to Fish Translator - Active Backlog
 
-Last refreshed: 2026-04-16
+Last refreshed: 2026-04-20
 
 This file is the active backlog for Monk's translator work.
 
@@ -10,10 +10,9 @@ This file is the active backlog for Monk's translator work.
 
 Current local baseline:
 
-- Passing `MONK_INTEGRATION=1 cabal test` run with 232 tests.
-- Passing `cabal run monk-bakeoff -- --compatible --no-benchmark` smoke run over 18 fixtures with 0 Monk translation failures and 0 Monk runtime failures.
-- The gated suite now includes focused runtime fixtures for subshell status contexts that depend on parent variables, exact `read -d` helpers, and pipefail helpers.
-- The current phase also landed typed diagnostics, helper deduplication, public API narrowing, and simplifier cleanup.
+- Passing `MONK_INTEGRATION=1 cabal test` run with 245 tests.
+- The gated suite now includes focused regression coverage for the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, and bake-off tool preflight messaging.
+- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, and repo-wide `hlint` cleanup.
 
 ## Current Position
 

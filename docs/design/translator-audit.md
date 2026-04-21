@@ -1,4 +1,4 @@
-# Translator Audit (2026-04-16)
+# Translator Audit (2026-04-20)
 
 This audit evaluates Monk as a conservative Bash-to-Fish migrator.
 
@@ -15,8 +15,7 @@ Current evidence used for this audit:
 - the public API and diagnostics layers under `src/Monk/`
 - the current unit, golden, property, integration, and real-world tests
 - the bake-off runner under `scripts/`
-- a passing local `MONK_INTEGRATION=1 cabal test` run with 232 tests
-- a passing `--compatible --no-benchmark` bake-off smoke run over 18 fixtures with 0 Monk translation/runtime failures
+- a passing local `MONK_INTEGRATION=1 cabal test` run with 245 tests
 - the current bake-off workflow and documentation
 
 ## Current Assessment
@@ -34,6 +33,7 @@ The current subshell policy is consistent:
 The diagnostics model is also materially stronger than before:
 
 - warnings are typed (`WarningCode`, `WarningSeverity`, optional detail, optional range)
+- `Monk.Translation.Types` is now the single public owner of translation config, warning metadata, and warning text/severity mapping
 - CLI and reporting layers render user-facing text from those typed diagnostics
 - tests now assert stable warning codes/severities directly instead of relying on string heuristics
 

@@ -108,8 +108,8 @@ translateTokenToExprMWith ::
   (Token -> TranslateM FishStatement) ->
   Token ->
   HoistedM (FishExpr TStr)
-translateTokenToExprMWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken =
-  translateTokenToExprPlanWith translateDollarBracedWithPrelude commandSubstExprStr translateSubstToken
+translateTokenToExprMWith =
+  translateTokenToExprPlanWith
 
 translateTokenToExprPlanWith ::
   (Token -> HoistedM (FishExpr TStr)) ->
@@ -181,8 +181,8 @@ translateTokenToExprOrRedirectMWith ::
   (Token -> HoistedM (FishExpr (TList TStr))) ->
   Token ->
   HoistedM ExprOrRedirect
-translateTokenToExprOrRedirectMWith translateTokenToListExprM =
-  translateTokenToExprOrRedirectHoistedWith translateTokenToListExprM
+translateTokenToExprOrRedirectMWith =
+  translateTokenToExprOrRedirectHoistedWith
 
 translateTokenToArgWith ::
   (Token -> FishExpr (TList TStr)) ->

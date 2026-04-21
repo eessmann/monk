@@ -77,7 +77,7 @@ translateCaseExpression translateStmt switchExpr cases = do
   MkHoisted preSwitch switchArg <- translateTokenToExprM switchExpr
   caseItems <- mapM (translateCaseItem translateStmt) cases
   let prePatterns = concatMap fst caseItems
-      filtered = catMaybes (map snd caseItems)
+      filtered = mapMaybe snd caseItems
       prelude = preSwitch <> prePatterns
       prelude' = filter (not . isEmptyStatement) prelude
   pure $

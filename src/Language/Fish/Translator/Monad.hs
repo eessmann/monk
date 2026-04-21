@@ -1,5 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Monad
@@ -48,28 +46,23 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.AST
 import Language.Fish.Translator.Hoist (Hoisted (..))
+import Monk.Translation.Types
+  ( TranslateConfig (..),
+    TranslateError (..),
+    Warning (..),
+    WarningCode (..),
+    WarningSeverity (..),
+    defaultConfig,
+    warnMessage,
+    warningCodeSeverity,
+  )
 import Polysemy (Sem, run)
-import Polysemy.Error (Error, runError, throw)
+import Polysemy.Error (Error, catch, runError, throw)
 import Polysemy.Input (Input, input, runInputConst)
 import Polysemy.Reader (Reader, ask, runReader)
 import Polysemy.State (State, get, gets, modify, runState)
-import Polysemy.Writer (Writer, runWriter, tell)
 import ShellCheck.AST (Id, Token, getId)
 import ShellCheck.Interface (Position (..))
-
--- | Configuration flags controlling translation behavior
-data TranslateConfig = MkTranslateConfig
-  { -- | Fail on unsupported constructs
-    strictMode :: Bool
-  }
-  deriving stock (Show, Eq)
-
--- | Default translation settings used by the public API.
-defaultConfig :: TranslateConfig
-defaultConfig =
-  MkTranslateConfig
-    { strictMode = False
-    }
 
 -- | Context flags describing where we are in the script
 data TranslationContext = MkTranslationContext
@@ -79,51 +72,12 @@ data TranslationContext = MkTranslationContext
   }
   deriving stock (Show, Eq)
 
-data WarningSeverity
-  = WarnHigh
-  | WarnMedium
-  | WarnLow
-  deriving stock (Eq, Ord, Show)
-
-data WarningCode
-  = UnsupportedConstruct
-  | BestEffortSubshell
-  | ExecFdRedirect
-  | BackgroundTracking
-  | SetOptionIssue
-  | ReadIssue
-  | ShoptIgnored
-  | TrapIssue
-  | ShiftIssue
-  | ReadonlyNotEnforced
-  | DeclareIssue
-  | ScopeIssue
-  | UnsetIssue
-  | ForArithmeticIssue
-  | ArithmeticIssue
-  deriving stock (Eq, Ord, Show)
-
 data HelperId
   = HelperPipefail
   | HelperBackground
   | HelperReadRuntime
   | HelperProcSubOut
   deriving stock (Eq, Ord, Show)
-
--- | Structured warning payload used for both surfaced diagnostics and strict errors.
-data Warning = MkWarning
-  { warnCode :: WarningCode,
-    warnSeverity :: WarningSeverity,
-    warnDetail :: Maybe Text,
-    warnRange :: Maybe SourceRange
-  }
-  deriving stock (Show, Eq)
-
--- | Translation errors for unsupported or invalid constructs
-data TranslateError
-  = Unsupported Warning
-  | InternalError Text
-  deriving stock (Show, Eq)
 
 -- | Mutable translation state
 data TranslateState = MkTranslateState
@@ -143,7 +97,6 @@ type TranslateEffs =
   [ Input (M.Map Id SourceRange),
     Reader TranslateConfig,
     State TranslateState,
-    Writer [Warning],
     Error TranslateError
   ]
 
@@ -176,15 +129,13 @@ runTranslateWithPositions cfg positions m =
       result =
         run
           . runError
-          . runWriter
           . runState initState
           . runReader cfg
           . runInputConst ranges
           $ m
    in case result of
         Left err -> Left err
-        Right (warns, (st, a)) ->
-          Right (a, st {warnings = warnings st <> warns})
+        Right (st, a) -> Right (a, st)
 
 evalTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError a
 evalTranslate cfg m = fmap fst (runTranslate cfg m)
@@ -197,64 +148,21 @@ evalTranslateWithPositions ::
 evalTranslateWithPositions cfg positions m =
   fmap fst (runTranslateWithPositions cfg positions m)
 
-warnMessage :: Warning -> Text
-warnMessage MkWarning {warnCode, warnDetail} =
-  case (warnCode, warnDetail) of
-    (UnsupportedConstruct, Just detail) -> detail
-    (UnsupportedConstruct, Nothing) -> "Unsupported construct"
-    (BestEffortSubshell, _) -> "Subshell does not isolate environment in fish; best-effort translation emitted"
-    (ExecFdRedirect, _) -> "exec with file descriptor redirection may require manual adjustment in fish"
-    (BackgroundTracking, _) -> "Monk-managed background job IDs are only guaranteed for translated wait; PID-specific uses such as kill $! require manual review"
-    (SetOptionIssue, Just detail) -> detail
-    (SetOptionIssue, Nothing) -> "Bash set options require manual review"
-    (ReadIssue, Just detail) -> detail
-    (ReadIssue, Nothing) -> "read semantics may differ between bash and fish"
-    (ShoptIgnored, _) -> "shopt has no fish equivalent; ignored"
-    (TrapIssue, Just detail) -> detail
-    (TrapIssue, Nothing) -> "trap handling requires manual review"
-    (ShiftIssue, Just detail) -> detail
-    (ShiftIssue, Nothing) -> "shift translation requires manual review"
-    (ReadonlyNotEnforced, _) -> "readonly/declare -r has no direct fish equivalent; emitted set without enforcing readonly"
-    (DeclareIssue, Just detail) -> detail
-    (DeclareIssue, Nothing) -> "declare translation requires manual review"
-    (ScopeIssue, Just detail) -> detail
-    (ScopeIssue, Nothing) -> "scope translation requires manual review"
-    (UnsetIssue, Just detail) -> detail
-    (UnsetIssue, Nothing) -> "unset translation requires manual review"
-    (ForArithmeticIssue, Just detail) -> detail
-    (ForArithmeticIssue, Nothing) -> "arithmetic for-loop translation requires manual review"
-    (ArithmeticIssue, Just detail) -> detail
-    (ArithmeticIssue, Nothing) -> "arithmetic translation may lose side effects"
-
-warningSeverity :: WarningCode -> WarningSeverity
-warningSeverity = \case
-  UnsupportedConstruct -> WarnHigh
-  BestEffortSubshell -> WarnHigh
-  ExecFdRedirect -> WarnMedium
-  BackgroundTracking -> WarnHigh
-  SetOptionIssue -> WarnHigh
-  ReadIssue -> WarnMedium
-  ShoptIgnored -> WarnHigh
-  TrapIssue -> WarnMedium
-  ShiftIssue -> WarnMedium
-  ReadonlyNotEnforced -> WarnHigh
-  DeclareIssue -> WarnMedium
-  ScopeIssue -> WarnMedium
-  UnsetIssue -> WarnMedium
-  ForArithmeticIssue -> WarnMedium
-  ArithmeticIssue -> WarnHigh
-
 mkWarning :: WarningCode -> Maybe Text -> Maybe SourceRange -> Warning
 mkWarning code detail range =
   MkWarning
     { warnCode = code,
-      warnSeverity = warningSeverity code,
+      warnSeverity = warningCodeSeverity code,
       warnDetail = detail,
       warnRange = range
     }
 
 currentRange :: TranslateM (Maybe SourceRange)
 currentRange = gets (listToMaybe . rangeStack)
+
+appendWarning :: Warning -> TranslateM ()
+appendWarning warning =
+  modify (\st -> st {warnings = warnings st <> [warning]})
 
 stateWarnings :: TranslateState -> [Warning]
 stateWarnings = warnings
@@ -268,7 +176,7 @@ statePipefailEnabled = pipefailEnabled
 addWarning :: WarningCode -> Maybe Text -> TranslateM ()
 addWarning code detail = do
   range <- currentRange
-  tell [mkWarning code detail range]
+  appendWarning (mkWarning code detail range)
 
 addWarningOnce :: WarningCode -> Maybe Text -> TranslateM ()
 addWarningOnce code detail = do
@@ -286,7 +194,7 @@ unsupported code detail = do
   let warning = mkWarning code detail range
   if strictMode cfg
     then throw (Unsupported warning)
-    else tell [warning]
+    else appendWarning warning
 
 noteUnsupported :: WarningCode -> Maybe Text -> TranslateM FishStatement
 noteUnsupported code detail = do
@@ -312,25 +220,41 @@ ensureHelper helper stmts = do
               }
         )
 
-withFunctionScope :: TranslateM a -> TranslateM a
-withFunctionScope action = do
-  st <- get
-  let ctx = context st
-      newCtx = ctx {inFunction = True, localVars = Set.empty}
-  modify (\s -> s {context = newCtx})
-  result <- action
-  modify (\s -> s {context = ctx})
+withScopedField ::
+  (TranslateState -> a) ->
+  (a -> TranslateState -> TranslateState) ->
+  (a -> a) ->
+  TranslateM b ->
+  TranslateM b
+withScopedField getField setField updateField action = do
+  original <- gets getField
+  modify (setField (updateField original))
+  let restore = modify (setField original)
+  result <-
+    catch
+      action
+      ( \err -> do
+          restore
+          throw err
+      )
+  restore
   pure result
 
+withScopedContext :: (TranslationContext -> TranslationContext) -> TranslateM a -> TranslateM a
+withScopedContext =
+  withScopedField context (\ctx st -> st {context = ctx})
+
+withScopedRange :: SourceRange -> TranslateM a -> TranslateM a
+withScopedRange range =
+  withScopedField rangeStack (\ranges st -> st {rangeStack = ranges}) (range :)
+
+withFunctionScope :: TranslateM a -> TranslateM a
+withFunctionScope =
+  withScopedContext (\ctx -> ctx {inFunction = True, localVars = Set.empty})
+
 withCommandSubstScope :: TranslateM a -> TranslateM a
-withCommandSubstScope action = do
-  st <- get
-  let ctx = context st
-      newCtx = ctx {inCommandSubst = True}
-  modify (\s -> s {context = newCtx})
-  result <- action
-  modify (\s -> s {context = ctx})
-  pure result
+withCommandSubstScope =
+  withScopedContext (\ctx -> ctx {inCommandSubst = True})
 
 addLocalVars :: [Text] -> TranslateM ()
 addLocalVars names =
@@ -352,11 +276,7 @@ withTokenRange tok action = do
   let mRange = M.lookup tokId ranges
   case mRange of
     Nothing -> action
-    Just range -> do
-      modify (\st -> st {rangeStack = range : rangeStack st})
-      result <- action
-      modify (\st -> st {rangeStack = drop 1 (rangeStack st)})
-      pure result
+    Just range -> withScopedRange range action
 
 isErrexitEnabled :: TranslateM Bool
 isErrexitEnabled = gets errexitEnabled

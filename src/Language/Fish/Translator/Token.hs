@@ -5,6 +5,9 @@ module Language.Fish.Translator.Token
     tokenRawText,
     tokenHasExpansion,
     wordHasExpansion,
+    isSeparatorToken,
+    stripSeparatorTokens,
+    tokensHaveBang,
   )
 where
 
@@ -49,3 +52,14 @@ wordHasExpansion = any isExpansionPart
       T_DollarBraceCommandExpansion {} -> True
       T_ProcSub {} -> True
       _ -> False
+
+isSeparatorToken :: Token -> Bool
+isSeparatorToken tok =
+  let literal = tokenToLiteralText tok
+   in literal == ";" || literal == "\n"
+
+stripSeparatorTokens :: [Token] -> [Token]
+stripSeparatorTokens = filter (not . isSeparatorToken)
+
+tokensHaveBang :: [Token] -> Bool
+tokensHaveBang = any ((== "!") . tokenToLiteralText)

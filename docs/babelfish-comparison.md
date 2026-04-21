@@ -155,6 +155,13 @@ cabal run monk-bakeoff -- --out-dir /tmp/monk-babelfish
 
 The bake-off code lives under `scripts/` and builds as a separate Cabal target so Shake/Aeson/process tooling does not affect the main `monk` library or executable.
 
+Tool prerequisites:
+
+- `babelfish` and `fish` are required for all bake-off runs
+- `hyperfine` is optional and only needed when benchmark runs are enabled
+- `--babelfish`, `--fish`, and `--hyperfine` accept explicit tool paths
+- the runner performs tool preflight before Shake starts and reports actionable path/install guidance if a required tool is missing
+
 The runner writes:
 
 - `meta.json`
@@ -173,7 +180,7 @@ cabal run monk-bakeoff -- --babelfish-version 1.2.1
 
 The runner normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
 It respects fixture sidecar files: `<name>.args`, `<name>.stdin`, `<name>.mode`, `<name>.platforms`, `<name>.prereqs`, and `<name>.recursive`.
-If `hyperfine` is installed, the runner also records CLI timing runs. Configure them with flags:
+If `hyperfine` is installed, the runner also records CLI timing runs. If it is missing, the runner now emits an explicit preflight note and skips benchmark targets. Configure benchmark runs with:
 
 ```bash
 cabal run monk-bakeoff -- --no-benchmark

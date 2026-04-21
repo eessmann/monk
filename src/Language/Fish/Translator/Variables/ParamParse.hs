@@ -1,5 +1,3 @@
-{-# LANGUAGE OverloadedStrings #-}
-
 module Language.Fish.Translator.Variables.ParamParse
   ( translateDollarBracedWith,
     translateDollarBracedStrWith,
