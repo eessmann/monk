@@ -5,7 +5,9 @@ module Unit.Bakeoff
   )
 where
 
+import Control.Exception (bracket)
 import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import Bakeoff.Benchmark (makeBenchmarkPlan)
 import Bakeoff.Fixture (FixtureMetadata (..))
@@ -37,6 +39,14 @@ import Path
     (</>),
   )
 import Path.IO qualified as PathIO
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    doesDirectoryExist,
+    removeDirectoryRecursive,
+    removeFile,
+  )
+import System.IO qualified as IO
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -57,6 +67,27 @@ unitBakeoffTests =
             specGroup fixture @?= FixtureGroupIntegration
             specSelectionSources fixture @?= [SelectionFile fixturePath]
           other -> H.assertFailure ("expected one selected fixture, got " <> show (length other)),
+      H.testCase "resolveFixtureSelection resolves selector entries relative to the list file" $ do
+        withTempDir "monk-bakeoff-selection" $ \tmpDir -> do
+          fixtureDirRel <- parseRelDir "fixtures/"
+          fixtureRel <- parseRelFile "fixtures/custom-script.bash"
+          listDirRel <- parseRelDir "lists/nested/"
+          listRel <- parseRelFile "lists/nested/fixtures.txt"
+          let fixtureDir = tmpDir </> fixtureDirRel
+              fixturePath = tmpDir </> fixtureRel
+              listDir = tmpDir </> listDirRel
+              listPath = tmpDir </> listRel
+              selectorContents = "../../fixtures/custom-script.bash\n"
+          createDirectoryIfMissing True (toFilePath fixtureDir)
+          createDirectoryIfMissing True (toFilePath listDir)
+          TIO.writeFile (toFilePath fixturePath) "#!/usr/bin/env bash\n"
+          TIO.writeFile (toFilePath listPath) selectorContents
+          fixtures <- resolveFixtureSelection tmpDir [] [] [listPath] []
+          case fixtures of
+            [fixture] -> do
+              specPath fixture @?= fixturePath
+              specSelectionSources fixture @?= [SelectionFileList listPath]
+            other -> H.assertFailure ("expected one selected fixture, got " <> show (length other)),
       H.testCase "makeBenchmarkPlan excludes skipped fixtures" $ do
         cwd <- PathIO.getCurrentDir
         benchmarkRel <- parseRelFile "benchmark/fixtures/small.bash"
@@ -227,6 +258,21 @@ repoFile rel = do
   cwd <- PathIO.getCurrentDir
   relPath <- parseRelFile rel
   pure (cwd </> relPath)
+
+withTempDir :: String -> (Path Abs Dir -> IO a) -> IO a
+withTempDir prefix action = do
+  tmpDir <- PathIO.getTempDir
+  let create = do
+        (path, handle) <- IO.openTempFile (toFilePath tmpDir) prefix
+        IO.hClose handle
+        removeFile path
+        createDirectory path
+        pure path
+  bracket create cleanup (PathIO.resolveDir' >=> action)
+  where
+    cleanup path = do
+      exists <- doesDirectoryExist path
+      when exists (removeDirectoryRecursive path)
 
 assertContains :: Text -> Text -> H.Assertion
 assertContains haystack needle =

@@ -203,10 +203,18 @@ loadFileList path = do
   contents <- TIO.readFile (toFilePath path)
   traverse resolveLine (filter isEntryLine (lines contents))
   where
+    baseDir = FP.takeDirectory (toFilePath path)
+
     isEntryLine line =
       let stripped = T.strip line
        in not (T.null stripped) && not ("#" `T.isPrefixOf` stripped)
-    resolveLine line = PathIO.resolveFile' (toString (T.strip line))
+    resolveLine line =
+      let raw = toString (T.strip line)
+          candidate =
+            if FP.isRelative raw
+              then FP.combine baseDir raw
+              else raw
+       in PathIO.resolveFile' candidate
 
 summarizeFixtureMetadata :: FixtureMetadata -> FixtureMetadataSummary
 summarizeFixtureMetadata MkFixtureMetadata {..} =

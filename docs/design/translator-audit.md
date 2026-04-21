@@ -1,4 +1,4 @@
-# Translator Audit (2026-04-20)
+# Translator Audit (2026-04-21)
 
 This audit evaluates Monk as a conservative Bash-to-Fish migrator.
 
@@ -15,7 +15,8 @@ Current evidence used for this audit:
 - the public API and diagnostics layers under `src/Monk/`
 - the current unit, golden, property, integration, and real-world tests
 - the bake-off runner under `scripts/`
-- a passing local `MONK_INTEGRATION=1 cabal test` run with 245 tests
+- passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 255 tests
+- a successful local `cabal bench` run
 - the current bake-off workflow and documentation
 
 ## Current Assessment
@@ -46,19 +47,19 @@ Helper emission is likewise in better shape:
 
 | Area | Status | Diagnostics | Current Evidence | Notes |
 | --- | --- | --- | --- | --- |
-| `set -e` / `pipefail` | best-effort | warnings on unsupported option surfaces; no warning on covered helper paths | focused runtime integration, background wait fixtures, properties, and real-world `echo-args` coverage | still conservative around compound-list edge cases |
+| `set -e` / `pipefail` | best-effort | warnings on unsupported option surfaces; no warning on covered helper paths | focused runtime integration, background wait fixtures, properties, and real-world `echo-args` coverage | grouped `&&` / `||`, negated pipelines, and conditional enable/disable boundaries now have focused fixtures, but the area is still conservative overall |
 | Subshells `(...)` | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit plus focused runtime integration on status-context regressions | environment isolation is still not preserved |
 | Command-substitution subshells | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit coverage | no longer silently collapse to `true` |
 | Side-effecting parameter expansion in args / redirections / `case` | exact on covered forms | no warning on covered forms | focused runtime integration plus unit coverage | one of the strongest semantic areas now |
 | Arrays and 0-based to 1-based indexing | exact on covered forms | no warning | unit, property, and runtime evidence | stable area |
 | `read -d` covered helper path | exact on covered forms | no warning on covered helper-backed forms | focused runtime integration plus unit coverage | covered surface includes empty delimiters, arrays, multi-variable assignment, supported mixed flag clusters, and numeric `-u` helper-backed reads |
-| Residual `read` fallback surface | best-effort | `ReadIssue` warnings | unit coverage | no-var delimiter reads, non-numeric `-u`, and unsupported clusters remain warning-driven |
+| Residual `read` fallback surface | best-effort | `ReadIssue` warnings | direct unit coverage | no-var delimiter reads, non-numeric `-u`, and unsupported clusters remain warning-driven |
 | Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration | simple cases are covered directly |
 | Process substitution `<(...)` | exact on covered forms | no dedicated warning | focused runtime integration | current simple surface is in good shape |
 | Process substitution `>(...)` | best-effort | no dedicated warning | helper-backed lowering, unit coverage, Linux-gated fixtures | explicit Linux runtime evidence is still the promotion gate |
-| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph unit coverage plus runtime integration | cwd-relative and parent-relative resolution are both exercised |
+| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph unit coverage, relocated bundle coverage, plus runtime integration | cwd-relative and parent-relative resolution are both exercised, and `--recursive --sources separate --output FILE` now rewrites literal children relative to the emitted bundle |
 | Background jobs / translated `wait` | exact on covered translated-wait surface / best-effort otherwise | warning on PID-specific `$!` follow-ons | focused runtime integration | `kill $!`-style PID assumptions remain manual-review territory |
-| `trap` | best-effort | typed warnings for unsupported forms | unit diagnostics plus simple `EXIT` runtime integration | option-heavy behavior is still conservative |
+| `trap` | best-effort overall / exact on covered `EXIT`, reset, and normalized real-signal forms | typed warnings for pseudo-signals and unsupported option surfaces | unit diagnostics plus simple `EXIT` runtime integration | option-heavy behavior is still conservative, and pseudo-signals no longer lower to invalid fish handlers |
 | `readonly` / `declare -r` | best-effort | stable readonly warning | unit coverage plus incidental runtime evidence | fish has no readonly enforcement |
 | `shopt` | unsupported | stable warning | direct unit coverage | lowered to `true` |
 | `coproc` | unsupported | stable warning / strict failure | direct unit coverage | intentionally unsupported |
@@ -67,7 +68,7 @@ Helper emission is likewise in better shape:
 
 1. Residual warning-driven `read` branches should stay narrow and explicit until they gain exact evidence.
 2. Helper-backed `>(...)` still needs explicit Linux runtime evidence before it should be upgraded beyond best-effort.
-3. `set -e` / `pipefail` should continue to be treated as conservative around compound-list edge cases, even though the covered runtime surface is much better than before.
+3. `set -e` / `pipefail` should continue to be treated as conservative overall, even though grouped conjunctions, negated pipelines, and toggle boundaries now have focused runtime evidence.
 4. Non-literal `source`, option-heavy `trap`, `shopt`, and `coproc` should remain warning-driven unless a clearly exact strategy is worth the complexity.
 
 ## Documentation Contract

@@ -1,6 +1,6 @@
 # Bash to Fish Translator - Active Backlog
 
-Last refreshed: 2026-04-20
+Last refreshed: 2026-04-21
 
 This file is the active backlog for Monk's translator work.
 
@@ -10,9 +10,9 @@ This file is the active backlog for Monk's translator work.
 
 Current local baseline:
 
-- Passing `MONK_INTEGRATION=1 cabal test` run with 245 tests.
+- Passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 255 tests.
 - The gated suite now includes focused regression coverage for the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, and bake-off tool preflight messaging.
-- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, and repo-wide `hlint` cleanup.
+- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, repo-wide `hlint` cleanup, recursive separate-output bundling, trap hardening, and selector-file relative resolution.
 
 ## Current Position
 
@@ -27,11 +27,11 @@ Monk is a correctness-first conservative migrator, not a prove-exact transpiler.
 
 ### P0: Keep the remaining best-effort surfaces conservative and explicit
 
-- [ ] Expand evidence around residual `set -e` / `pipefail` compound-list edge cases.
-- [ ] Keep the remaining warning-driven `read` surface narrow and well-documented.
-  - [ ] no-variable delimiter reads
-  - [ ] non-numeric `-u` values
-  - [ ] unsupported flag clusters
+- [x] Expand evidence around residual `set -e` / `pipefail` compound-list edge cases.
+- [x] Keep the remaining warning-driven `read` surface narrow and well-documented.
+  - [x] no-variable delimiter reads
+  - [x] non-numeric `-u` values
+  - [x] unsupported flag clusters
 - [ ] Record explicit Linux runtime evidence for helper-backed `>(...)` before upgrading it beyond best-effort.
 
 ### P1: Preserve documentation and diagnostics discipline
@@ -49,7 +49,7 @@ Monk is a correctness-first conservative migrator, not a prove-exact transpiler.
 
 ### P2: Optimization work only with measurement
 
-- [ ] Re-run `cabal bench` once the local Cabal benchmark setup is healthy again.
+- [x] Re-run `cabal bench` once the local Cabal benchmark setup is healthy again.
 - [ ] Extend simplifier and helper cleanups only when the rewrite is semantics-preserving and benchmarked.
 
 ## Evidence Required Before Closing Items
@@ -76,6 +76,9 @@ The following milestones were completed in the correctness-first pass and are ke
 - [x] `((expr))` status semantics and arithmetic side effects are modeled on the covered surface
 - [x] `until` now negates the whole compound condition list
 - [x] `case` pattern lowering preserves glob semantics on the covered surface
+- [x] Recursive separate `source` output now supports output-rooted bundles and rewrites literal child paths relative to the emitted bundle
+- [x] Bake-off selector files now resolve relative entries from the selector file directory instead of the process cwd
+- [x] `trap` now clears Monk-generated handlers on covered reset forms and degrades pseudo-signals to explicit manual-review notes instead of invalid fish
 - [x] Shared subshell policy now applies across statement, status, and command-substitution contexts
   - [x] normal mode emits the stable `BestEffortSubshell` warning and lowers to non-isolating `begin ... end`
   - [x] `--strict` fails on subshells in all covered contexts

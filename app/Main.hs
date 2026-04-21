@@ -30,8 +30,8 @@ import Monk.Translation
   )
 import Options.Applicative
 import ShellCheck.Interface (PositionedComment)
-import System.Directory (canonicalizePath)
-import System.FilePath (replaceExtension)
+import System.Directory (canonicalizePath, createDirectoryIfMissing)
+import System.FilePath qualified as FP
 import System.IO (hPutStrLn)
 
 data Options = MkOptions
@@ -121,24 +121,66 @@ outputInline opts graph rootPath =
 
 outputSeparate :: Options -> SourceGraph -> FilePath -> IO ()
 outputSeparate opts graph rootPath =
-  case M.lookup rootPath (sgTranslations graph) of
+  let translations =
+        case (optRecursive opts, optOutput opts) of
+          (True, Just rootOutput) -> planSeparateOutputs rootOutput rootPath graph
+          _ -> sgTranslations graph
+   in case M.lookup rootPath translations of
     Nothing -> emitWarn opts "warning: no translation output"
     Just rootTr -> do
-      writeOutput opts (renderFish (rewriteSources (sgTranslations graph) rootTr))
+      writeOutput opts (renderFish (rewriteSources translations rootTr))
       when (optRecursive opts) $ do
         let writeRoot = isNothing (optOutput opts)
-        forM_ (M.elems (sgTranslations graph)) $ \tr -> do
-          let outPath = replaceExtension (trPath tr) "fish"
-              rendered = renderFish (rewriteSources (sgTranslations graph) tr)
-              shouldWrite = writeRoot || trPath tr /= rootPath
+        forM_ (M.toList translations) $ \(sourcePath, tr) -> do
+          let outPath = translationOutputPath tr
+              rendered = renderFish (rewriteSources translations tr)
+              shouldWrite = writeRoot || sourcePath /= rootPath
           when shouldWrite $
-            writeFileText outPath rendered
+            writeFileTextEnsuringDir outPath rendered
 
 writeOutput :: Options -> Text -> IO ()
 writeOutput opts output =
   case optOutput opts of
     Nothing -> putText output
-    Just path -> writeFileText path output
+    Just path -> writeFileTextEnsuringDir path output
+
+writeFileTextEnsuringDir :: FilePath -> Text -> IO ()
+writeFileTextEnsuringDir path contents = do
+  createDirectoryIfMissing True (FP.takeDirectory path)
+  writeFileText path contents
+
+translationOutputPath :: Translation -> FilePath
+translationOutputPath translation =
+  FP.replaceExtension (trPath translation) "fish"
+
+planSeparateOutputs :: FilePath -> FilePath -> SourceGraph -> M.Map FilePath Translation
+planSeparateOutputs rootOutput rootPath graph =
+  let translations = sgTranslations graph
+      sourceRoot = commonAncestorDir (sgOrder graph)
+      outputRootDir = FP.takeDirectory rootOutput
+   in M.mapWithKey (relocate sourceRoot outputRootDir) translations
+  where
+    relocate sourceRoot outputRootDir sourcePath translation
+      | sourcePath == rootPath = translation {trPath = rootOutput}
+      | otherwise =
+          let relativeSourcePath = FP.makeRelative sourceRoot sourcePath
+              outputPath = FP.combine outputRootDir (FP.replaceExtension relativeSourcePath "fish")
+           in translation {trPath = outputPath}
+
+commonAncestorDir :: [FilePath] -> FilePath
+commonAncestorDir = \case
+  [] -> "."
+  (path : rest) ->
+    foldl' sharedDirectory (FP.takeDirectory path) (map FP.takeDirectory rest)
+  where
+    sharedDirectory left right =
+      let commonSegments =
+            map fst $
+              takeWhile (uncurry (==)) $
+                zip (FP.splitDirectories (FP.normalise left)) (FP.splitDirectories (FP.normalise right))
+       in case commonSegments of
+            [] -> "."
+            segments -> FP.joinPath segments
 
 emitParseWarnings :: [PositionedComment] -> IO ()
 emitParseWarnings = mapM_ (hPutStrLn stderr . toString . renderParseComment)

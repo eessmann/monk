@@ -11,6 +11,7 @@ This guide covers the warning classes and best-effort areas that most often need
 ## `set -e` / `pipefail`
 
 - Treat Monk's `set -e` and `pipefail` lowering as conservative, especially around compound-list edge cases.
+- The focused runtime suite now covers grouped `&&` / `||` bodies, negated pipeline status, and conditional enable/disable boundaries, so those specific branches are less speculative than before.
 - Translated background jobs / `$!` / `wait` now use Monk-managed job tokens and have focused parity coverage, but PID-specific follow-ons such as `kill $!` still deserve manual review.
 - Monk targets Bash's default non-`inherit_errexit` behavior inside command substitutions. If a translated substitution still needs bespoke control flow, rewrite it as explicit Fish `if` / `begin ... end` logic.
 
@@ -36,8 +37,8 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## `trap`
 
-- Simple `trap '...' EXIT` lowers to a Fish process-exit handler and has focused runtime coverage.
-- Unsupported trap options and more complex signal forms still warn for manual review.
+- Covered `trap '...' EXIT`, normalized real-signal handlers such as `SIGINT`, and `trap - SIGNAL...` reset forms now lower without generating invalid fish.
+- Bash pseudo-signals such as `ERR`, `DEBUG`, and `RETURN`, along with option-heavy forms, still warn for manual review.
 - When cleanup ordering matters, prefer an explicit helper function and `--on-process-exit %self` in hand-edited Fish.
 
 ## Subshell Isolation
@@ -62,11 +63,12 @@ This guide covers the warning classes and best-effort areas that most often need
 
 - Recursive translation only inlines literal source paths.
 - Literal recursive source resolution now tries the working-directory-relative path first and then falls back to the parent source file directory.
+- `--recursive --sources separate --output FILE` now emits a self-contained bundle rooted at the output path and rewrites literal child sources relative to that bundle.
 - Dynamic source paths remain manual-review territory.
 
 ## Cleanup Workflow
 
 - Run Monk and review the typed warnings, not only the rendered script.
 - Re-run the translated script against representative Bash inputs.
-- Use `MONK_INTEGRATION=1 cabal test` as the current project-level regression gate; the current local baseline is a passing 245-test run that includes the focused subshell-status fixtures, generalized covered `read -d` fixtures, recursive source coverage, public diagnostics-contract tests, bake-off preflight coverage, and curated real-world parity fixtures.
+- Use `hlint .`, `cabal test`, and `MONK_INTEGRATION=1 cabal test` as the current project-level regression gates.
 - Treat `docs/design/translator-audit.md` as the fidelity source of truth when deciding whether a warning can be ignored.

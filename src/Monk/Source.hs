@@ -38,7 +38,7 @@ import ShellCheck.AST
 import ShellCheck.ASTLib (getLiteralStringDef)
 import ShellCheck.Interface (PositionedComment, prComments, prRoot)
 import System.Directory (canonicalizePath, doesFileExist)
-import System.FilePath (isRelative, replaceExtension, takeDirectory, (</>))
+import System.FilePath (isRelative, makeRelative, replaceExtension, takeDirectory, (</>))
 
 data SourceMode
   = SourceInline
@@ -112,12 +112,21 @@ rewriteSources :: M.Map FilePath Translation -> Translation -> [FishStatement]
 rewriteSources translations tr =
   map (rewriteStatement sourceRewrite) (trStatements tr)
   where
+    currentOutputDir = takeDirectory (translationOutputPath tr)
+
     sourceRewrite txt =
       case join (M.lookup txt (trSourceMap tr)) of
         Just resolved
-          | M.member resolved translations ->
-              toText (replaceExtension (toString txt) "fish")
+          | Just target <- M.lookup resolved translations ->
+              let targetOutputPath = translationOutputPath target
+                  defaultOutputPath = replaceExtension resolved "fish"
+               in if targetOutputPath == defaultOutputPath
+                    then toText (replaceExtension (toString txt) "fish")
+                    else toText (makeRelative currentOutputDir targetOutputPath)
         _ -> txt
+
+    translationOutputPath translation =
+      replaceExtension (trPath translation) "fish"
 
 collectSourceMap :: FilePath -> Maybe Token -> IO (M.Map Text (Maybe FilePath))
 collectSourceMap path mRoot = do

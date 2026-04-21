@@ -25,19 +25,26 @@ parseReadArgsDetailed [] fs vs issues unsupported raw =
   let parsed = MkReadParseResult fs vs [] unsupported raw
       exact = isJust (exactReadDelim parsed)
       needsSplitNote = not exact && (ReadArray `elem` fs || length vs > 1)
+      fdIssues =
+        [ "read -u requires a numeric file descriptor; manual review required"
+          | any invalidFdFlag fs
+        ]
       delimiterNote =
         [ "read delimiter semantics may differ between bash and fish"
           | any isDelimiterFlag fs && not exact
         ]
       issues' =
         if needsSplitNote
-          then issues <> ["read IFS splitting semantics may differ between bash and fish"] <> delimiterNote
-          else issues <> delimiterNote
+          then issues <> fdIssues <> ["read IFS splitting semantics may differ between bash and fish"] <> delimiterNote
+          else issues <> fdIssues <> delimiterNote
    in parsed {readIssues = issues'}
   where
     isDelimiterFlag = \case
       ReadDelimiter {} -> True
       ReadNull -> True
+      _ -> False
+    invalidFdFlag = \case
+      ReadFD fd -> isNothing (parseFdValue fd)
       _ -> False
 parseReadArgsDetailed (x : xs) fs vs issues unsupported raw =
   case tokenToLiteralText x of

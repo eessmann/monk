@@ -5,6 +5,7 @@ module Language.Fish.Translator.Builtins.Trap
   )
 where
 
+import Data.Char (isDigit)
 import Data.Text qualified as T
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
@@ -13,6 +14,7 @@ import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),
     addWarning,
+    noteUnsupported,
   )
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
@@ -27,64 +29,179 @@ translateTrapCommand args =
     [] -> do
       addWarning TrapIssue (Just "trap with no arguments is not supported")
       pure (Stmt (Command "trap" []))
-    (cmdTok : signalToks) -> do
-      let cmdExpr = translateTokenToExpr cmdTok
-          rawSignals = map tokenToLiteralText signalToks
-      if any isTrapOption rawSignals
-        then do
-          addWarning TrapIssue (Just "trap options are not supported; emitting raw trap command")
-          pure (Stmt (Command "trap" (map translateTokenToExprOrRedirect args)))
-        else do
-          let signals = if null rawSignals then ["EXIT"] else rawSignals
-              trapStmts = concatMap (trapStatementsForSignal cmdExpr) signals
-          pure (wrapStmtList trapStmts)
+    [singleTok]
+      | isTrapQueryForm [tokenToLiteralText singleTok] -> emitRawOptions
+    (cmdTok : signalToks)
+      | tokenToLiteralText cmdTok == "-" ->
+          wrapTrapStatements =<< traverse clearTrapForSignal (defaultSignals signalToks)
+      | isTrapQueryForm (map tokenToLiteralText args) ->
+          emitRawOptions
+      | isTrapOption (tokenToLiteralText cmdTok) || any (isTrapOption . tokenToLiteralText) signalToks ->
+          emitRawOptions
+      | otherwise -> do
+          let cmdExpr = translateTokenToExpr cmdTok
+          wrapTrapStatements =<< traverse (setTrapForSignal cmdExpr) (defaultSignals signalToks)
   where
     isTrapOption sig = sig `elem` ["-p", "-l", "--"]
 
-    trapStatementsForSignal :: FishExpr TStr -> Text -> [FishStatement]
-    trapStatementsForSignal cmd sig =
-      [ Stmt (Set [SetGlobal] (trapBodyVar sig) (ExprListLiteral [cmd])),
-        Stmt (trapForSignal sig)
-      ]
+    emitRawOptions = do
+      addWarning TrapIssue (Just "trap options are not supported; emitting raw trap command")
+      pure (Stmt (Command "trap" (map translateTokenToExprOrRedirect args)))
 
-    trapForSignal :: Text -> FishCommand TUnit
-    trapForSignal sig
-      | isExitSignal sig =
+    isTrapQueryForm = \case
+      ["-p"] -> True
+      ["-l"] -> True
+      _ -> False
+
+    defaultSignals signalToks =
+      let rawSignals = map tokenToLiteralText signalToks
+       in if null rawSignals then ["EXIT"] else rawSignals
+
+    wrapTrapStatements stmtLists =
+      pure (wrapStmtList (concat stmtLists))
+
+    setTrapForSignal :: FishExpr TStr -> Text -> TranslateM [FishStatement]
+    setTrapForSignal cmd sig =
+      case classifySignal sig of
+        TrapSupported trapSignal ->
+          pure
+            [ Stmt (Set [SetGlobal] (trapBodyVar trapSignal) (ExprListLiteral [cmd])),
+              Stmt (trapFunction trapSignal)
+            ]
+        TrapUnsupported detail -> do
+          note <- noteUnsupported TrapIssue (Just detail)
+          pure [note]
+
+    clearTrapForSignal :: Text -> TranslateM [FishStatement]
+    clearTrapForSignal sig =
+      case classifySignal sig of
+        TrapSupported trapSignal ->
+          pure
+            [ Stmt
+                ( Command
+                    "functions"
+                    [ ExprVal (ExprLiteral "-e"),
+                      ExprVal (ExprLiteral (trapFunctionName trapSignal))
+                    ]
+                ),
+              Stmt
+                ( Command
+                    "set"
+                    [ ExprVal (ExprLiteral "-e"),
+                      ExprVal (ExprLiteral (trapBodyVar trapSignal))
+                    ]
+                )
+            ]
+        TrapUnsupported detail -> do
+          note <- noteUnsupported TrapIssue (Just detail)
+          pure [note]
+
+    trapFunction :: TrapSignal -> FishCommand TUnit
+    trapFunction trapSignal
+      | trapSignal == TrapExit =
           Function
             MkFishFunction
-              { funcName = "__monk_trap_exit",
+              { funcName = trapFunctionName trapSignal,
                 funcFlags = [FuncOnProcessExit "%self"],
                 funcParams = [],
-                funcBody = trapHandlerBody sig
+                funcBody = trapHandlerBody trapSignal
               }
       | otherwise =
           Function
             MkFishFunction
-              { funcName = "__monk_trap_sig_" <> normalizeSignal sig,
+              { funcName = trapFunctionName trapSignal,
                 funcFlags =
                   [ FuncUnknownFlag "--on-signal",
-                    FuncUnknownFlag (normalizeSignal sig)
+                    FuncUnknownFlag (trapSignalValue trapSignal)
                   ],
                 funcParams = [],
-                funcBody = trapHandlerBody sig
+                funcBody = trapHandlerBody trapSignal
               }
 
-    trapHandlerBody :: Text -> NonEmpty FishStatement
-    trapHandlerBody sig =
-      Stmt (Eval (ExprVariable (VarScalar (trapBodyVar sig)))) NE.:| []
+    trapHandlerBody :: TrapSignal -> NonEmpty FishStatement
+    trapHandlerBody trapSignal =
+      Stmt (Eval (ExprVariable (VarScalar (trapBodyVar trapSignal)))) NE.:| []
 
-    trapBodyVar :: Text -> Text
-    trapBodyVar sig = "__monk_trap_body_" <> signalKey sig
+    trapFunctionName :: TrapSignal -> Text
+    trapFunctionName = \case
+      TrapExit -> "__monk_trap_exit"
+      TrapSignal sig -> "__monk_trap_sig_" <> sig
 
-    signalKey :: Text -> Text
-    signalKey sig
-      | isExitSignal sig = "exit"
-      | otherwise = T.toLower (normalizeSignal sig)
+    trapBodyVar :: TrapSignal -> Text
+    trapBodyVar trapSignal = "__monk_trap_body_" <> trapSignalKey trapSignal
+
+    trapSignalKey :: TrapSignal -> Text
+    trapSignalKey = \case
+      TrapExit -> "exit"
+      TrapSignal sig -> T.toLower sig
+
+    trapSignalValue :: TrapSignal -> Text
+    trapSignalValue = \case
+      TrapExit -> "EXIT"
+      TrapSignal sig -> sig
+
+    classifySignal :: Text -> TrapSignalClassification
+    classifySignal sig
+      | isExitSignal sig = TrapSupported TrapExit
+      | isPseudoSignal normalized =
+          TrapUnsupported ("trap signal " <> normalized <> " has no fish equivalent; manual review required")
+      | isNumericSignal normalized = TrapSupported (TrapSignal normalized)
+      | normalized `elem` supportedSignals = TrapSupported (TrapSignal normalized)
+      | otherwise =
+          TrapUnsupported ("trap signal " <> normalized <> " has no fish equivalent; manual review required")
+      where
+        normalized = normalizeSignal sig
 
     isExitSignal sig =
       let upper = T.toUpper sig
        in upper == "EXIT" || upper == "0"
 
+    isPseudoSignal sig = sig `elem` ["ERR", "DEBUG", "RETURN"]
+
+    isNumericSignal sig = not (T.null sig) && T.all isDigit sig
+
     normalizeSignal sig =
       let upper = T.toUpper sig
        in fromMaybe upper (T.stripPrefix "SIG" upper)
+
+    supportedSignals =
+      [ "ABRT",
+        "ALRM",
+        "BUS",
+        "CHLD",
+        "CONT",
+        "FPE",
+        "HUP",
+        "ILL",
+        "INFO",
+        "INT",
+        "IO",
+        "KILL",
+        "PIPE",
+        "PROF",
+        "QUIT",
+        "SEGV",
+        "STOP",
+        "SYS",
+        "TERM",
+        "TRAP",
+        "TSTP",
+        "TTIN",
+        "TTOU",
+        "URG",
+        "USR1",
+        "USR2",
+        "VTALRM",
+        "WINCH",
+        "XCPU",
+        "XFSZ"
+      ]
+
+data TrapSignal
+  = TrapExit
+  | TrapSignal Text
+  deriving stock (Eq, Show)
+
+data TrapSignalClassification
+  = TrapSupported TrapSignal
+  | TrapUnsupported Text

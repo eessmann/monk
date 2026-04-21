@@ -218,6 +218,28 @@ unitPolysemyTests =
         (out, st) <- translateWithState "trap 'echo hi' -p"
         assertHasWarning "trap options are not supported; emitting raw trap command" st
         out @?= "trap 'echo hi' '-p'",
+      H.testCase "trap pseudo-signals warn and avoid invalid fish handlers" $ do
+        (out, st) <- translateWithState "trap 'echo hi' ERR"
+        assertHasWarning "trap signal ERR has no fish equivalent; manual review required" st
+        H.assertBool "expected warning note in output" ("manual review required" `T.isInfixOf` out)
+        H.assertBool "unexpected invalid ERR signal handler" (not ("--on-signal ERR" `T.isInfixOf` out)),
+      H.testCase "non-numeric read fd stays warning-driven" $ do
+        (out, st) <- translateWithState "read -u fd value"
+        assertHasWarning "read -u requires a numeric file descriptor; manual review required" st
+        H.assertBool "expected warning note in output" ("manual review required" `T.isInfixOf` out)
+        H.assertBool
+          "expected best-effort fd read lowering"
+          ( "read --fd 'fd' value" `T.isInfixOf` out
+              || "read --fd 'fd' 'value'" `T.isInfixOf` out
+              || "read -u fd value" `T.isInfixOf` out
+              || "read -u 'fd' value" `T.isInfixOf` out
+              || "read '-u' 'fd' 'value'" `T.isInfixOf` out
+          ),
+      H.testCase "unsupported clustered read flags stay raw and warning-driven" $ do
+        (out, st) <- translateWithState "read -rz value"
+        assertHasWarning "Unsupported read flag: -z" st
+        H.assertBool "expected warning note in output" ("Unsupported read flag: -z" `T.isInfixOf` out)
+        H.assertBool "expected raw read fallback" ("read '-rz' 'value'" `T.isInfixOf` out),
       H.testCase "shift negative count warns with comment" $ do
         (out, st) <- translateWithState "shift -1"
         assertHasWarning "shift count must be non-negative; emitting comment" st

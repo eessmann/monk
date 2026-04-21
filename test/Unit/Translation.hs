@@ -427,5 +427,18 @@ unitTranslationTests =
         T.isInfixOf "set --global __monk_trap_body_exit 'echo first'" out H.@? "expected EXIT body capture"
         T.isInfixOf "set --global __monk_trap_body_int 'echo first'" out H.@? "expected INT body capture"
         T.isInfixOf "set --global __monk_trap_body_exit 'echo second'" out H.@? "expected EXIT body overwrite"
-        H.assertBool "unexpected INT body overwrite" (not (T.isInfixOf "set --global __monk_trap_body_int 'echo second'" out))
+        H.assertBool "unexpected INT body overwrite" (not (T.isInfixOf "set --global __monk_trap_body_int 'echo second'" out)),
+      H.testCase "Trap clear removes Monk-generated handlers" $ do
+        out <- translateScript "trap - EXIT INT"
+        out @?=
+          T.intercalate
+            "\n"
+            [ "functions '-e' '__monk_trap_exit'",
+              "set '-e' '__monk_trap_body_exit'",
+              "functions '-e' '__monk_trap_sig_INT'",
+              "set '-e' '__monk_trap_body_int'"
+            ],
+      H.testCase "Trap normalizes SIG-prefixed signals" $ do
+        out <- translateScript "trap 'echo hi' SIGINT"
+        T.isInfixOf "function __monk_trap_sig_INT --on-signal INT" out H.@? "expected SIGINT to normalize to INT"
     ]
