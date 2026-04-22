@@ -8,11 +8,11 @@ module Language.Fish.Translator.Variables.Common
 where
 
 import Prelude hiding (gets)
+import Control.Monad.State.Strict (gets)
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Monad (TranslationContext (..), TranslateM, context, isLocalVar)
 import Language.Fish.Translator.Token (tokenRawText)
-import Polysemy.State (gets)
 import ShellCheck.AST (Token)
 import ShellCheck.ASTLib (getBracedReference)
 

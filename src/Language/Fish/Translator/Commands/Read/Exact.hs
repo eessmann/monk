@@ -6,6 +6,7 @@ module Language.Fish.Translator.Commands.Read.Exact
 where
 
 import Prelude hiding (gets)
+import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Language.Fish.AST
@@ -25,7 +26,6 @@ import Language.Fish.Translator.Monad
     TranslationContext (..),
     TranslateState (..),
   )
-import Polysemy.State (gets)
 
 translateReadExactM :: ExactReadDelim -> TranslateM (FishCommand TStatus)
 translateReadExactM spec = do

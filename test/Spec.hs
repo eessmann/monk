@@ -11,11 +11,11 @@ import Unit.Bakeoff
 import Unit.Diagnostics
 import Unit.Harness
 import Unit.Inline
-import Unit.Polysemy
 import Unit.Pipefail
 import Unit.Pretty
 import Unit.Refactor
 import Unit.Source
+import Unit.TranslatorMonad
 import Unit.Translation
 
 main :: IO ()
@@ -33,7 +33,7 @@ tests =
       unitHarnessTests,
       unitBakeoffTests,
       unitRefactorTests,
-      unitPolysemyTests,
+      unitTranslatorMonadTests,
       unitPipefailTests,
       propertyPrettyTests,
       propertyTranslationTests,

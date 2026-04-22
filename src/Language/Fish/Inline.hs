@@ -24,7 +24,7 @@ data Translation = MkTranslation
     trPath :: FilePath,
     -- | Translated fish statements.
     trStatements :: [FishStatement],
-    -- | Translator state captured for diagnostics and source mapping.
+    -- | Translator state captured for diagnostics and warning reporting.
     trState :: TranslateState,
     -- | Mapping from literal source paths to resolved files.
     trSourceMap :: M.Map Text (Maybe FilePath)

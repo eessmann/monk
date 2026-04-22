@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Unit.Polysemy
-  ( unitPolysemyTests,
+module Unit.TranslatorMonad
+  ( unitTranslatorMonadTests,
   )
 where
 
@@ -27,10 +27,10 @@ import Monk.AST (SourcePos (..), SourceRange (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
-unitPolysemyTests :: TestTree
-unitPolysemyTests =
+unitTranslatorMonadTests :: TestTree
+unitTranslatorMonadTests =
   testGroup
-    "Polysemy effects"
+    "Translator monad"
     [ H.testCase "Unsupported warning is ranged and not duplicated" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi"
         case translateParseResult defaultConfig result of
@@ -54,6 +54,9 @@ unitPolysemyTests =
           Left (Unsupported warning) -> do
             warnCode warning @?= UnsupportedConstruct
             warnMessage warning @?= "Coprocess (coproc)"
+            case warnRange warning of
+              Just range -> srcLine (rangeStart range) @?= 1
+              Nothing -> H.assertFailure "expected warning range in strict mode"
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right _ -> H.assertFailure "expected error in strict mode",
       H.testCase "Warnings accumulate in order" $ do
@@ -77,6 +80,14 @@ unitPolysemyTests =
           @?= ["local used outside a function; fish will treat it as local to the current scope"],
       H.testCase "Warnings keep their own source ranges across statements" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi\ntrap"
+        case translateParseResult defaultConfig result of
+          Left err -> H.assertFailure ("unexpected error: " <> show err)
+          Right translation -> do
+            let warns = stateWarnings (translationState translation)
+                starts = mapMaybe (fmap rangeStart . warnRange) warns
+            map srcLine starts @?= [1, 2],
+      H.testCase "Nested translation restores outer ranges for later warnings" $ do
+        result <- parseBashScript "spec.sh" "f() { coproc echo hi; }\ntrap"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation -> do

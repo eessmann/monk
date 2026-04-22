@@ -12,6 +12,7 @@ module Language.Fish.Translator.Pipeline
   )
 where
 
+import Control.Monad.State.Strict qualified as State
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
 import Language.Fish.Translator.Monad
@@ -22,7 +23,6 @@ import Language.Fish.Translator.Monad
     isPipefailEnabled,
   )
 import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
-import Polysemy.State qualified as State
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =

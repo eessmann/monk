@@ -18,7 +18,7 @@ category:            Translate Bash to Fish shell
 build-type:          Simple
 extra-doc-files:     README.md
                      CHANGELOG.md
-tested-with:         GHC == {9.12.2}
+tested-with:         GHC == {9.12.2, 9.14.1}
 
 source-repository head
   type:                git
@@ -31,8 +31,7 @@ common common-options
                      , prettyprinter ^>= 1.7
                      , extra ^>= 1.8
                      , safe-exceptions ^>= 0.1.7
-                     , polysemy ^>= 1.9
-                     , polysemy-plugin ^>= 0.4
+                     , mtl ^>= 2.3
 
   -- Use relude as the Prelude via mixins.
   mixins:              base hiding (Prelude)
@@ -48,7 +47,6 @@ common common-options
                        -Wredundant-constraints
                        -Wnoncanonical-monad-instances
                        -fhide-source-paths
-                       -fplugin=Polysemy.Plugin
                        -Wmissing-export-lists
                        -Wpartial-fields
                        -Wmissing-deriving-strategies
@@ -250,7 +248,7 @@ test-suite monk-test
                      , Unit.Bakeoff
                      , Unit.Diagnostics
                      , Unit.Harness
-                     , Unit.Polysemy
+                     , Unit.TranslatorMonad
                      , Unit.Pipefail
                      , Unit.Pretty
                      , Unit.Refactor

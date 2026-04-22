@@ -1,10 +1,13 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Monad
   ( TranslateM,
+    MonadTranslate,
     Hoisted (..),
     HoistedM,
-    TranslateEffs,
     TranslateState (..),
     TranslateConfig (..),
     defaultConfig,
@@ -41,7 +44,7 @@ module Language.Fish.Translator.Monad
   )
 where
 
-import Prelude hiding (Reader, State, ask, get, gets, modify, runReader, runState)
+import Control.Monad.Except (MonadError, catchError, throwError)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.AST
@@ -56,11 +59,6 @@ import Monk.Translation.Types
     warnMessage,
     warningCodeSeverity,
   )
-import Polysemy (Sem, run)
-import Polysemy.Error (Error, catch, runError, throw)
-import Polysemy.Input (Input, input, runInputConst)
-import Polysemy.Reader (Reader, ask, runReader)
-import Polysemy.State (State, get, gets, modify, runState)
 import ShellCheck.AST (Id, Token, getId)
 import ShellCheck.Interface (Position (..))
 
@@ -79,11 +77,16 @@ data HelperId
   | HelperProcSubOut
   deriving stock (Eq, Ord, Show)
 
+data TranslateEnv = MkTranslateEnv
+  { envConfig :: TranslateConfig,
+    envTokenRanges :: M.Map Id SourceRange
+  }
+  deriving stock (Show, Eq)
+
 -- | Mutable translation state
 data TranslateState = MkTranslateState
   { warnings :: [Warning],
     context :: TranslationContext,
-    tokenRanges :: M.Map Id SourceRange,
     rangeStack :: [SourceRange],
     errexitEnabled :: Bool,
     pipefailEnabled :: Bool,
@@ -93,14 +96,15 @@ data TranslateState = MkTranslateState
   }
   deriving stock (Show, Eq)
 
-type TranslateEffs =
-  [ Input (M.Map Id SourceRange),
-    Reader TranslateConfig,
-    State TranslateState,
-    Error TranslateError
-  ]
+type MonadTranslate m =
+  ( MonadReader TranslateEnv m,
+    MonadState TranslateState m,
+    MonadError TranslateError m
+  )
 
-type TranslateM = Sem TranslateEffs
+newtype TranslateM a = MkTranslateM
+  (ReaderT TranslateEnv (StateT TranslateState (Either TranslateError)) a)
+  deriving newtype (Functor, Applicative, Monad, MonadReader TranslateEnv, MonadState TranslateState, MonadError TranslateError)
 
 type HoistedM a = TranslateM (Hoisted a)
 
@@ -112,13 +116,17 @@ runTranslateWithPositions ::
   M.Map Id (Position, Position) ->
   TranslateM a ->
   Either TranslateError (a, TranslateState)
-runTranslateWithPositions cfg positions m =
+runTranslateWithPositions cfg positions (MkTranslateM m) =
   let ranges = toSourceRanges positions
+      env =
+        MkTranslateEnv
+          { envConfig = cfg,
+            envTokenRanges = ranges
+          }
       initState =
         MkTranslateState
           { warnings = [],
             context = MkTranslationContext False False Set.empty,
-            tokenRanges = ranges,
             rangeStack = [],
             errexitEnabled = False,
             pipefailEnabled = False,
@@ -126,16 +134,7 @@ runTranslateWithPositions cfg positions m =
             warningOnceCodes = Set.empty,
             preamble = []
           }
-      result =
-        run
-          . runError
-          . runState initState
-          . runReader cfg
-          . runInputConst ranges
-          $ m
-   in case result of
-        Left err -> Left err
-        Right (st, a) -> Right (a, st)
+   in runStateT (runReaderT m env) initState
 
 evalTranslate :: TranslateConfig -> TranslateM a -> Either TranslateError a
 evalTranslate cfg m = fmap fst (runTranslate cfg m)
@@ -157,10 +156,10 @@ mkWarning code detail range =
       warnRange = range
     }
 
-currentRange :: TranslateM (Maybe SourceRange)
+currentRange :: MonadState TranslateState m => m (Maybe SourceRange)
 currentRange = gets (listToMaybe . rangeStack)
 
-appendWarning :: Warning -> TranslateM ()
+appendWarning :: MonadState TranslateState m => Warning -> m ()
 appendWarning warning =
   modify (\st -> st {warnings = warnings st <> [warning]})
 
@@ -173,12 +172,12 @@ stateErrexitEnabled = errexitEnabled
 statePipefailEnabled :: TranslateState -> Bool
 statePipefailEnabled = pipefailEnabled
 
-addWarning :: WarningCode -> Maybe Text -> TranslateM ()
+addWarning :: MonadState TranslateState m => WarningCode -> Maybe Text -> m ()
 addWarning code detail = do
   range <- currentRange
   appendWarning (mkWarning code detail range)
 
-addWarningOnce :: WarningCode -> Maybe Text -> TranslateM ()
+addWarningOnce :: MonadState TranslateState m => WarningCode -> Maybe Text -> m ()
 addWarningOnce code detail = do
   st <- get
   if Set.member code (warningOnceCodes st)
@@ -187,26 +186,26 @@ addWarningOnce code detail = do
       modify (\s -> s {warningOnceCodes = Set.insert code (warningOnceCodes s)})
       addWarning code detail
 
-unsupported :: WarningCode -> Maybe Text -> TranslateM ()
+unsupported :: MonadTranslate m => WarningCode -> Maybe Text -> m ()
 unsupported code detail = do
-  cfg <- ask
+  cfg <- asks envConfig
   range <- currentRange
   let warning = mkWarning code detail range
   if strictMode cfg
-    then throw (Unsupported warning)
+    then throwError (Unsupported warning)
     else appendWarning warning
 
-noteUnsupported :: WarningCode -> Maybe Text -> TranslateM FishStatement
+noteUnsupported :: MonadTranslate m => WarningCode -> Maybe Text -> m FishStatement
 noteUnsupported code detail = do
   unsupported code detail
   pure (Comment ("NOTE: " <> warnMessage (mkWarning code detail Nothing)))
 
-unsupportedStmt :: WarningCode -> Maybe Text -> TranslateM FishStatement
+unsupportedStmt :: MonadTranslate m => WarningCode -> Maybe Text -> m FishStatement
 unsupportedStmt code detail = do
   unsupported code detail
   pure (Comment ("Unsupported: " <> warnMessage (mkWarning code detail Nothing)))
 
-ensureHelper :: HelperId -> [FishStatement] -> TranslateM ()
+ensureHelper :: MonadState TranslateState m => HelperId -> [FishStatement] -> m ()
 ensureHelper helper stmts = do
   st <- get
   if Set.member helper (registeredHelpers st)
@@ -221,42 +220,57 @@ ensureHelper helper stmts = do
         )
 
 withScopedField ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
   (TranslateState -> a) ->
   (a -> TranslateState -> TranslateState) ->
   (a -> a) ->
-  TranslateM b ->
-  TranslateM b
+  m b ->
+  m b
 withScopedField getField setField updateField action = do
   original <- gets getField
   modify (setField (updateField original))
   let restore = modify (setField original)
   result <-
-    catch
+    catchError
       action
       ( \err -> do
           restore
-          throw err
+          throwError err
       )
   restore
   pure result
 
-withScopedContext :: (TranslationContext -> TranslationContext) -> TranslateM a -> TranslateM a
+withScopedContext ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
+  (TranslationContext -> TranslationContext) ->
+  m a ->
+  m a
 withScopedContext =
   withScopedField context (\ctx st -> st {context = ctx})
 
-withScopedRange :: SourceRange -> TranslateM a -> TranslateM a
+withScopedRange ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
+  SourceRange ->
+  m a ->
+  m a
 withScopedRange range =
   withScopedField rangeStack (\ranges st -> st {rangeStack = ranges}) (range :)
 
-withFunctionScope :: TranslateM a -> TranslateM a
+withFunctionScope ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
+  m a ->
+  m a
 withFunctionScope =
   withScopedContext (\ctx -> ctx {inFunction = True, localVars = Set.empty})
 
-withCommandSubstScope :: TranslateM a -> TranslateM a
+withCommandSubstScope ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
+  m a ->
+  m a
 withCommandSubstScope =
   withScopedContext (\ctx -> ctx {inCommandSubst = True})
 
-addLocalVars :: [Text] -> TranslateM ()
+addLocalVars :: MonadState TranslateState m => [Text] -> m ()
 addLocalVars names =
   modify
     ( \s ->
@@ -264,35 +278,39 @@ addLocalVars names =
          in s {context = ctx {localVars = Set.union (localVars ctx) (Set.fromList names)}}
     )
 
-isLocalVar :: Text -> TranslateM Bool
+isLocalVar :: MonadState TranslateState m => Text -> m Bool
 isLocalVar name = do
   ctx <- gets context
   pure (Set.member name (localVars ctx))
 
-withTokenRange :: Token -> TranslateM a -> TranslateM a
+withTokenRange ::
+  (MonadReader TranslateEnv m, MonadState TranslateState m, MonadError TranslateError m) =>
+  Token ->
+  m a ->
+  m a
 withTokenRange tok action = do
   let tokId = getId tok
-  ranges <- input
+  ranges <- asks envTokenRanges
   let mRange = M.lookup tokId ranges
   case mRange of
     Nothing -> action
     Just range -> withScopedRange range action
 
-isErrexitEnabled :: TranslateM Bool
+isErrexitEnabled :: MonadState TranslateState m => m Bool
 isErrexitEnabled = gets errexitEnabled
 
-isPipefailEnabled :: TranslateM Bool
+isPipefailEnabled :: MonadState TranslateState m => m Bool
 isPipefailEnabled = gets pipefailEnabled
 
-setErrexitEnabled :: Bool -> TranslateM ()
+setErrexitEnabled :: MonadState TranslateState m => Bool -> m ()
 setErrexitEnabled enabled =
   modify (\st -> st {errexitEnabled = enabled})
 
-setPipefailEnabled :: Bool -> TranslateM ()
+setPipefailEnabled :: MonadState TranslateState m => Bool -> m ()
 setPipefailEnabled enabled =
   modify (\st -> st {pipefailEnabled = enabled})
 
-preambleStatements :: TranslateM [FishStatement]
+preambleStatements :: MonadState TranslateState m => m [FishStatement]
 preambleStatements = gets preamble
 
 toSourceRanges :: M.Map Id (Position, Position) -> M.Map Id SourceRange

@@ -10,6 +10,7 @@ module Language.Fish.Translator.Commands.Status
 where
 
 import Prelude hiding (gets)
+import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Language.Fish.AST
@@ -36,7 +37,6 @@ import Language.Fish.Translator.Token
     tokensHaveBang,
   )
 import Language.Fish.Translator.Variables (translateArithmeticStatusM)
-import Polysemy.State (gets)
 import ShellCheck.AST
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus

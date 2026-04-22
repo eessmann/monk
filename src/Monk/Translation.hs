@@ -49,7 +49,7 @@ import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 data TranslationResult = MkTranslationResult
   { -- | Root fish statement produced by the translator.
     translationStatement :: FishStatement,
-    -- | Final translation state containing warnings and source mapping.
+    -- | Final translation state containing warnings and translator flags.
     translationState :: TranslateState
   }
   deriving stock (Show, Eq)

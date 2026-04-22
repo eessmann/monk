@@ -8,6 +8,7 @@ where
 
 import Prelude hiding (gets)
 import Control.Monad (foldM)
+import Control.Monad.State.Strict (gets)
 import Data.Text qualified as T
 import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStmtList)
@@ -24,7 +25,6 @@ import Language.Fish.Translator.Variables
   ( translateAssignmentWithFlagsM,
     tokenToLiteralText,
   )
-import Polysemy.State (gets)
 import ShellCheck.AST
 
 data DeclareFlags = MkDeclareFlags

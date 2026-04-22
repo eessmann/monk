@@ -64,7 +64,7 @@ The following milestones were completed in the correctness-first pass and are ke
 
 ### Core translator architecture
 
-- [x] Polysemy-based translation monad with source-range tracking, warnings, and strict-mode failures
+- [x] `mtl`-based translation monad with source-range tracking, warnings, and strict-mode failures
 - [x] Modular translator split across `Variables`, `Commands`, `Control`, `IO`, `Redirections`, and related helper modules
 - [x] Public library split into `Monk.Translation`, `Monk.AST`, `Monk.Source`, and a thin `Monk` facade
 - [x] Bake-off moved into a separate private library/executable under `scripts/`

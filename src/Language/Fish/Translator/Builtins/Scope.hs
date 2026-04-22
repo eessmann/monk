@@ -8,6 +8,7 @@ module Language.Fish.Translator.Builtins.Scope
 where
 
 import Prelude hiding (gets)
+import Control.Monad.State.Strict (gets)
 import Data.Set qualified as Set
 import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStmtList)
@@ -25,7 +26,6 @@ import Language.Fish.Translator.Variables
     translateAssignmentWithFlagsM,
     tokenToLiteralText,
   )
-import Polysemy.State (gets)
 import ShellCheck.AST
 
 translateLocalCommand :: [Token] -> TranslateM FishStatement

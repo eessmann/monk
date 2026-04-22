@@ -19,6 +19,7 @@ jobs:
         cabal: ["3.16.1"]
         ghc:
           - "9.12.2"
+          - "9.14.1"
 
     steps:
     - uses: actions/checkout@v5

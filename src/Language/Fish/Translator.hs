@@ -9,6 +9,7 @@ module Language.Fish.Translator
 where
 
 import Prelude hiding (gets)
+import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
@@ -45,6 +46,7 @@ import Language.Fish.Translator.Monad
     WarningCode (..),
     addWarning,
     isErrexitEnabled,
+    preambleStatements,
     runTranslateWithPositions,
     unsupportedStmt,
     withTokenRange,
@@ -66,7 +68,6 @@ import Language.Fish.Translator.Statement
     translateSubshellStatement,
   )
 import Language.Fish.Translator.Variables
-import Polysemy.State (gets)
 import ShellCheck.AST
 import ShellCheck.Interface (ParseResult (..), Position)
 
@@ -77,7 +78,7 @@ import ShellCheck.Interface (ParseResult (..), Position)
 translateRoot :: Root -> TranslateM FishStatement
 translateRoot (Root topToken) = do
   stmt <- translateToken topToken
-  pre <- gets preamble
+  pre <- preambleStatements
   pure (simplifyFishStatement (wrapStmtList (pre <> [stmt])))
 
 translateRootWithPositions ::
