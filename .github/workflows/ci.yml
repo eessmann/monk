@@ -70,6 +70,12 @@ jobs:
       run: |
         cabal test all
 
+    - name: Linux process substitution evidence
+      env:
+        MONK_INTEGRATION: "1"
+      run: |
+        cabal test monk-test --test-options='-p procsub-output'
+
     - name: Documentation
       run: |
         cabal haddock

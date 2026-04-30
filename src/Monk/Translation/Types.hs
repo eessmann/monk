@@ -12,6 +12,7 @@ module Monk.Translation.Types
     WarningCode (..),
     Warning (..),
     TranslateError (..),
+    allWarningCodes,
     warningCodeSeverity,
     warnMessage,
   )
@@ -58,6 +59,26 @@ data WarningCode
   | ArithmeticIssue
   deriving stock (Eq, Ord, Show)
 
+-- | All public warning codes, in constructor order.
+allWarningCodes :: [WarningCode]
+allWarningCodes =
+  [ UnsupportedConstruct,
+    BestEffortSubshell,
+    ExecFdRedirect,
+    BackgroundTracking,
+    SetOptionIssue,
+    ReadIssue,
+    ShoptIgnored,
+    TrapIssue,
+    ShiftIssue,
+    ReadonlyNotEnforced,
+    DeclareIssue,
+    ScopeIssue,
+    UnsetIssue,
+    ForArithmeticIssue,
+    ArithmeticIssue
+  ]
+
 -- | Structured warning payload used for surfaced diagnostics and strict errors.
 data Warning = MkWarning
   { warnCode :: WarningCode,
@@ -73,49 +94,55 @@ data TranslateError
   | InternalError Text
   deriving stock (Show, Eq)
 
+data WarningDetailPolicy
+  = PreferDetail
+  | IgnoreDetail
+
+data WarningDescriptor = MkWarningDescriptor
+  { warningDefaultSeverity :: WarningSeverity,
+    warningDefaultMessage :: Text,
+    warningDetailPolicy :: WarningDetailPolicy
+  }
+
+warningDescriptor :: WarningCode -> WarningDescriptor
+warningDescriptor = \case
+  UnsupportedConstruct ->
+    MkWarningDescriptor WarnHigh "Unsupported construct" PreferDetail
+  BestEffortSubshell ->
+    MkWarningDescriptor WarnHigh "Subshell does not isolate environment in fish; best-effort translation emitted" IgnoreDetail
+  ExecFdRedirect ->
+    MkWarningDescriptor WarnMedium "exec with file descriptor redirection may require manual adjustment in fish" IgnoreDetail
+  BackgroundTracking ->
+    MkWarningDescriptor WarnHigh "Monk-managed background job IDs are only guaranteed for translated wait; PID-specific uses such as kill $! require manual review" IgnoreDetail
+  SetOptionIssue ->
+    MkWarningDescriptor WarnHigh "Bash set options require manual review" PreferDetail
+  ReadIssue ->
+    MkWarningDescriptor WarnMedium "read semantics may differ between bash and fish" PreferDetail
+  ShoptIgnored ->
+    MkWarningDescriptor WarnHigh "shopt has no fish equivalent; ignored" IgnoreDetail
+  TrapIssue ->
+    MkWarningDescriptor WarnMedium "trap handling requires manual review" PreferDetail
+  ShiftIssue ->
+    MkWarningDescriptor WarnMedium "shift translation requires manual review" PreferDetail
+  ReadonlyNotEnforced ->
+    MkWarningDescriptor WarnHigh "readonly/declare -r has no direct fish equivalent; emitted set without enforcing readonly" IgnoreDetail
+  DeclareIssue ->
+    MkWarningDescriptor WarnMedium "declare translation requires manual review" PreferDetail
+  ScopeIssue ->
+    MkWarningDescriptor WarnMedium "scope translation requires manual review" PreferDetail
+  UnsetIssue ->
+    MkWarningDescriptor WarnMedium "unset translation requires manual review" PreferDetail
+  ForArithmeticIssue ->
+    MkWarningDescriptor WarnMedium "arithmetic for-loop translation requires manual review" PreferDetail
+  ArithmeticIssue ->
+    MkWarningDescriptor WarnHigh "arithmetic translation may lose side effects" PreferDetail
+
 warningCodeSeverity :: WarningCode -> WarningSeverity
-warningCodeSeverity = \case
-  UnsupportedConstruct -> WarnHigh
-  BestEffortSubshell -> WarnHigh
-  ExecFdRedirect -> WarnMedium
-  BackgroundTracking -> WarnHigh
-  SetOptionIssue -> WarnHigh
-  ReadIssue -> WarnMedium
-  ShoptIgnored -> WarnHigh
-  TrapIssue -> WarnMedium
-  ShiftIssue -> WarnMedium
-  ReadonlyNotEnforced -> WarnHigh
-  DeclareIssue -> WarnMedium
-  ScopeIssue -> WarnMedium
-  UnsetIssue -> WarnMedium
-  ForArithmeticIssue -> WarnMedium
-  ArithmeticIssue -> WarnHigh
+warningCodeSeverity = warningDefaultSeverity . warningDescriptor
 
 warnMessage :: Warning -> Text
 warnMessage MkWarning {warnCode, warnDetail} =
-  case (warnCode, warnDetail) of
-    (UnsupportedConstruct, Just detail) -> detail
-    (UnsupportedConstruct, Nothing) -> "Unsupported construct"
-    (BestEffortSubshell, _) -> "Subshell does not isolate environment in fish; best-effort translation emitted"
-    (ExecFdRedirect, _) -> "exec with file descriptor redirection may require manual adjustment in fish"
-    (BackgroundTracking, _) -> "Monk-managed background job IDs are only guaranteed for translated wait; PID-specific uses such as kill $! require manual review"
-    (SetOptionIssue, Just detail) -> detail
-    (SetOptionIssue, Nothing) -> "Bash set options require manual review"
-    (ReadIssue, Just detail) -> detail
-    (ReadIssue, Nothing) -> "read semantics may differ between bash and fish"
-    (ShoptIgnored, _) -> "shopt has no fish equivalent; ignored"
-    (TrapIssue, Just detail) -> detail
-    (TrapIssue, Nothing) -> "trap handling requires manual review"
-    (ShiftIssue, Just detail) -> detail
-    (ShiftIssue, Nothing) -> "shift translation requires manual review"
-    (ReadonlyNotEnforced, _) -> "readonly/declare -r has no direct fish equivalent; emitted set without enforcing readonly"
-    (DeclareIssue, Just detail) -> detail
-    (DeclareIssue, Nothing) -> "declare translation requires manual review"
-    (ScopeIssue, Just detail) -> detail
-    (ScopeIssue, Nothing) -> "scope translation requires manual review"
-    (UnsetIssue, Just detail) -> detail
-    (UnsetIssue, Nothing) -> "unset translation requires manual review"
-    (ForArithmeticIssue, Just detail) -> detail
-    (ForArithmeticIssue, Nothing) -> "arithmetic for-loop translation requires manual review"
-    (ArithmeticIssue, Just detail) -> detail
-    (ArithmeticIssue, Nothing) -> "arithmetic translation may lose side effects"
+  let descriptor = warningDescriptor warnCode
+   in case (warningDetailPolicy descriptor, warnDetail) of
+        (PreferDetail, Just detail) -> detail
+        _ -> warningDefaultMessage descriptor

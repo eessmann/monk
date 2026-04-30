@@ -114,47 +114,58 @@ data IntegrationFixture = MkIntegrationFixture
   }
 
 integrationTest :: IntegrationFixture -> TestTree
-integrationTest MkIntegrationFixture {ifName, ifPath} = H.testCase ifName $ do
+integrationTest MkIntegrationFixture {ifName, ifPath} = H.testCaseSteps ifName $ \step -> do
   runnable <- shouldRunIntegration
   case runnable of
-    Left _reason -> pure ()
+    Left reason -> step ("skipped: " <> reason)
     Right () -> do
       fixturePath <- PathIO.resolveFile' ifPath
-      supportedPlatform <- fixtureSupportsCurrentPlatform fixturePath
-      prereqsMet <- fixturePrereqsAvailable fixturePath
-      when (supportedPlatform && prereqsMet) $ do
-        bashSrc <- TIO.readFile ifPath
-        translation <- translateScriptText fixturePath bashSrc
-        args <- loadFixtureArgs fixturePath
-        runMode <- loadFixtureMode fixturePath
-        stdinInput <- loadFixtureStdin fixturePath
-        case translation of
-          Left err -> H.assertFailure err
-          Right fishSrc -> do
-            baseEnv <- prepareEnv
-            baseBash <- runShell ShellBash baseEnv ""
-            baseFish <- runShell ShellFish baseEnv ""
-            bashRes <- runShellWithMode runMode ShellBash baseEnv bashSrc args stdinInput
-            fishRes <- runShellWithMode runMode ShellFish baseEnv fishSrc args stdinInput
-            let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
-                fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
-            rrExit bashRes @?= rrExit fishRes
-            rrStdout bashRes @?= rrStdout fishRes
-            rrStderr bashRes @?= rrStderr fishRes
-            bashDelta @?= fishDelta
+      platforms <- loadFixturePlatforms fixturePath
+      missingPrereqs <- fixtureMissingPrereqs fixturePath
+      case fixturePlatformSkipReason (toText SysInfo.os) platforms of
+        Just reason -> step (toString reason)
+        Nothing
+          | not (null missingPrereqs) ->
+              step ("skipped: missing prerequisites: " <> toString (T.intercalate ", " missingPrereqs))
+          | otherwise -> do
+              bashSrc <- TIO.readFile ifPath
+              translation <- translateScriptText fixturePath bashSrc
+              args <- loadFixtureArgs fixturePath
+              runMode <- loadFixtureMode fixturePath
+              stdinInput <- loadFixtureStdin fixturePath
+              case translation of
+                Left err -> H.assertFailure err
+                Right fishSrc -> do
+                  baseEnv <- prepareEnv
+                  baseBash <- runShell ShellBash baseEnv ""
+                  baseFish <- runShell ShellFish baseEnv ""
+                  bashRes <- runShellWithMode runMode ShellBash baseEnv bashSrc args stdinInput
+                  fishRes <- runShellWithMode runMode ShellFish baseEnv fishSrc args stdinInput
+                  let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
+                      fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
+                  rrExit bashRes @?= rrExit fishRes
+                  rrStdout bashRes @?= rrStdout fishRes
+                  rrStderr bashRes @?= rrStderr fishRes
+                  bashDelta @?= fishDelta
 
-fixturePrereqsAvailable :: Path Abs File -> IO Bool
-fixturePrereqsAvailable path = do
+fixtureMissingPrereqs :: Path Abs File -> IO [Text]
+fixtureMissingPrereqs path = do
   prereqs <- loadFixturePrereqs path
-  and <$> mapM (fmap isJust . findExecutable . toString) prereqs
+  filterM (fmap isNothing . findExecutable . toString) prereqs
 
-fixtureSupportsCurrentPlatform :: Path Abs File -> IO Bool
-fixtureSupportsCurrentPlatform path = do
-  mPlatforms <- loadFixturePlatforms path
-  pure $
-    case mPlatforms of
-      Nothing -> True
-      Just platforms -> toText SysInfo.os `elem` platforms
+fixturePlatformSkipReason :: Text -> Maybe [Text] -> Maybe Text
+fixturePlatformSkipReason currentPlatform mPlatforms =
+  case mPlatforms of
+    Nothing -> Nothing
+    Just platforms
+      | currentPlatform `elem` platforms -> Nothing
+      | otherwise ->
+          Just
+            ( "skipped: platform "
+                <> currentPlatform
+                <> " not in fixture platforms: "
+                <> T.intercalate ", " platforms
+            )
 
 translateScriptText :: Path Abs File -> Text -> IO (Either String Text)
 translateScriptText path script = do

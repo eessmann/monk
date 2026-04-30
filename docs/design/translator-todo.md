@@ -1,6 +1,6 @@
 # Bash to Fish Translator - Active Backlog
 
-Last refreshed: 2026-04-21
+Last refreshed: 2026-04-30
 
 This file is the active backlog for Monk's translator work.
 
@@ -10,9 +10,9 @@ This file is the active backlog for Monk's translator work.
 
 Current local baseline:
 
-- Passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 255 tests.
-- The gated suite now includes focused regression coverage for the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, and bake-off tool preflight messaging.
-- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, repo-wide `hlint` cleanup, recursive separate-output bundling, trap hardening, and selector-file relative resolution.
+- Passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 257 tests.
+- The gated suite now includes focused regression coverage for the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, bake-off tool preflight messaging, and Linux-gated process-substitution output fixtures.
+- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, repo-wide `hlint` cleanup, recursive separate-output bundling, trap hardening, selector-file relative resolution, and a dedicated Ubuntu CI evidence step for helper-backed `>(...)`.
 
 ## Current Position
 
@@ -33,6 +33,8 @@ Monk is a correctness-first conservative migrator, not a prove-exact transpiler.
   - [x] non-numeric `-u` values
   - [x] unsupported flag clusters
 - [ ] Record explicit Linux runtime evidence for helper-backed `>(...)` before upgrading it beyond best-effort.
+  - [x] Add a dedicated Ubuntu CI selector for the Linux-gated `procsub-output*` fixtures.
+  - [ ] Close this item after that evidence step passes on Ubuntu.
 
 ### P1: Preserve documentation and diagnostics discipline
 
@@ -56,7 +58,7 @@ Monk is a correctness-first conservative migrator, not a prove-exact transpiler.
 
 - Add a focused runtime fixture or bake-off result for semantic changes, not only translation-shape tests.
 - Add direct unit coverage when changing warning codes, warning severities, or helper registration behavior.
-- Treat Linux as the acceptance source of truth for helper-backed `>(...)`.
+- Treat Linux as the acceptance source of truth for helper-backed `>(...)`; close that item only after the dedicated Ubuntu CI evidence step passes.
 
 ## Archive
 

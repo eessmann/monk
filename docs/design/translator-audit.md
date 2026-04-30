@@ -1,4 +1,4 @@
-# Translator Audit (2026-04-21)
+# Translator Audit (2026-04-30)
 
 This audit evaluates Monk as a conservative Bash-to-Fish migrator.
 
@@ -15,7 +15,8 @@ Current evidence used for this audit:
 - the public API and diagnostics layers under `src/Monk/`
 - the current unit, golden, property, integration, and real-world tests
 - the bake-off runner under `scripts/`
-- passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 255 tests
+- passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 257 tests
+- a dedicated Ubuntu CI step for the Linux-gated helper-backed `>(...)` fixtures
 - a successful local `cabal bench` run
 - the current bake-off workflow and documentation
 
@@ -37,6 +38,7 @@ The diagnostics model is also materially stronger than before:
 - `Monk.Translation.Types` is now the single public owner of translation config, warning metadata, and warning text/severity mapping
 - CLI and reporting layers render user-facing text from those typed diagnostics
 - tests now assert stable warning codes/severities directly instead of relying on string heuristics
+- warning severity and default-message metadata now share one descriptor table, with `allWarningCodes` exposing the public code list for contract checks
 
 Helper emission is likewise in better shape:
 
@@ -56,7 +58,7 @@ Helper emission is likewise in better shape:
 | Residual `read` fallback surface | best-effort | `ReadIssue` warnings | direct unit coverage | no-var delimiter reads, non-numeric `-u`, and unsupported clusters remain warning-driven |
 | Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration | simple cases are covered directly |
 | Process substitution `<(...)` | exact on covered forms | no dedicated warning | focused runtime integration | current simple surface is in good shape |
-| Process substitution `>(...)` | best-effort | no dedicated warning | helper-backed lowering, unit coverage, Linux-gated fixtures | explicit Linux runtime evidence is still the promotion gate |
+| Process substitution `>(...)` | exact on covered Linux fixtures / best-effort overall | no dedicated warning | helper-backed lowering, unit coverage, Linux-gated fixtures, dedicated Ubuntu CI selector | the covered fixture set is the only exact surface once the Ubuntu evidence step passes; broader async/FIFO cases remain conservative |
 | Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph unit coverage, relocated bundle coverage, plus runtime integration | cwd-relative and parent-relative resolution are both exercised, and `--recursive --sources separate --output FILE` now rewrites literal children relative to the emitted bundle |
 | Background jobs / translated `wait` | exact on covered translated-wait surface / best-effort otherwise | warning on PID-specific `$!` follow-ons | focused runtime integration | `kill $!`-style PID assumptions remain manual-review territory |
 | `trap` | best-effort overall / exact on covered `EXIT`, reset, and normalized real-signal forms | typed warnings for pseudo-signals and unsupported option surfaces | unit diagnostics plus simple `EXIT` runtime integration | option-heavy behavior is still conservative, and pseudo-signals no longer lower to invalid fish handlers |
@@ -67,7 +69,7 @@ Helper emission is likewise in better shape:
 ## Highest-Priority Remaining Gaps
 
 1. Residual warning-driven `read` branches should stay narrow and explicit until they gain exact evidence.
-2. Helper-backed `>(...)` still needs explicit Linux runtime evidence before it should be upgraded beyond best-effort.
+2. Helper-backed `>(...)` still needs the dedicated Ubuntu evidence step to pass before its covered fixtures should be marked closed in the active backlog.
 3. `set -e` / `pipefail` should continue to be treated as conservative overall, even though grouped conjunctions, negated pipelines, and toggle boundaries now have focused runtime evidence.
 4. Non-literal `source`, option-heavy `trap`, `shopt`, and `coproc` should remain warning-driven unless a clearly exact strategy is worth the complexity.
 

@@ -32,7 +32,8 @@ This guide covers the warning classes and best-effort areas that most often need
 ## Process Substitution
 
 - `<(...)` has direct runtime coverage for simple cases, but larger pipelines should still be exercised in Fish.
-- `>(...)` now uses a generated FIFO helper, but it remains a manual-review surface until explicit Linux runtime evidence is recorded for the helper-backed path.
+- `>(...)` now uses a generated FIFO helper. The current simple, pipeline, and variable-sink fixtures are the covered Linux evidence surface once the dedicated Ubuntu CI step passes.
+- Broader async/FIFO-heavy `>(...)` shapes remain manual-review surfaces until they have their own focused runtime evidence.
 - If the translated output feeds another command asynchronously, prefer rewriting it as explicit `mktemp` / producer / consumer steps in hand-edited Fish.
 
 ## `trap`

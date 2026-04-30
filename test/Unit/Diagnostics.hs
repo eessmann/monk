@@ -5,6 +5,7 @@ module Unit.Diagnostics
   )
 where
 
+import Data.Text qualified as T
 import Monk.AST (SourcePos (..), SourceRange (..))
 import Monk.Diagnostics
   ( WarningCounts (..),
@@ -21,6 +22,7 @@ import Monk.Translation.Types
     Warning (..),
     WarningCode (..),
     WarningSeverity (..),
+    allWarningCodes,
     defaultConfig,
     strictConfig,
     warnMessage,
@@ -40,6 +42,28 @@ unitDiagnosticsTests =
         warningCodeSeverity BestEffortSubshell @?= WarnHigh
         warningCodeSeverity ReadIssue @?= WarnMedium
         warningCodeSeverity TrapIssue @?= WarnMedium,
+      H.testCase "all warning codes are listed for contract checks" $ do
+        allWarningCodes
+          @?= [ UnsupportedConstruct,
+                BestEffortSubshell,
+                ExecFdRedirect,
+                BackgroundTracking,
+                SetOptionIssue,
+                ReadIssue,
+                ShoptIgnored,
+                TrapIssue,
+                ShiftIssue,
+                ReadonlyNotEnforced,
+                DeclareIssue,
+                ScopeIssue,
+                UnsetIssue,
+                ForArithmeticIssue,
+                ArithmeticIssue
+              ]
+        forM_ allWarningCodes $ \code ->
+          H.assertBool
+            ("missing default warning message for " <> show code)
+            (not (T.null (warnMessage (MkWarning code (warningCodeSeverity code) Nothing Nothing)))),
       H.testCase "warnMessage keeps stable defaults and detail overrides" $ do
         warnMessage (MkWarning ReadIssue WarnMedium Nothing Nothing)
           @?= "read semantics may differ between bash and fish"
