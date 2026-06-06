@@ -15,7 +15,7 @@ import Language.Fish.Translator.Commands.Read.Parse
   )
 import Language.Fish.Translator.Commands.Read.Types (ReadParseResult (..))
 import Language.Fish.Translator.Monad (TranslateM)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types (FishCommand (Command, Read), FishType (TStatus))
 import Language.Fish.Translator.Variables (translateTokenToExprOrRedirect)
 import ShellCheck.AST (Token)
 

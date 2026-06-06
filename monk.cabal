@@ -163,6 +163,7 @@ library
                      , Language.Fish.Translator.Commands.Status
                      , Language.Fish.Translator.Commands.Tests
                      , Language.Fish.Translator.Commands.Time
+                     , Language.Fish.Translator.Construction
                      , Language.Fish.Translator.Control
                      , Language.Fish.Translator.Syntax
                      , Language.Fish.Translator.ForArithmetic

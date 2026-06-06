@@ -10,8 +10,8 @@ where
 import Data.Char (isDigit)
 import Data.Text qualified as T
 import Language.Fish.Translator.Commands.Read.Types
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Types (ReadFlag (..))
 import ShellCheck.AST
 
 parseReadArgs :: [Token] -> [ReadFlag] -> [Text] -> Bool -> ([ReadFlag], [Text], Bool)

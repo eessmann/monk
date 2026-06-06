@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator.Variables.ProcessSubst
@@ -11,16 +12,23 @@ module Language.Fish.Translator.Variables.ProcessSubst
 where
 
 import Data.List.NonEmpty qualified as NE
+import Language.Fish.DSL qualified as DSL
 import Language.Fish.Pretty (renderFish)
+import Language.Fish.Translator.Args
+  ( Arg,
+    argRedirect,
+    attachArgsToCommand,
+    attachArgsToStatement,
+  )
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
     WarningCode (..),
-    ensureHelper,
+    ensureHelperScript,
     unsupported,
   )
 import Language.Fish.Translator.Pipeline (jobPipelineFromList)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 
 procSubExpr :: String -> NonEmpty FishStatement -> FishExpr TStr
 procSubExpr dir body =
@@ -109,31 +117,31 @@ procSubOutRedirectCommand producer consumer =
 
 ensureProcSubOutHelper :: TranslateM ()
 ensureProcSubOutHelper =
-  ensureHelper HelperProcSubOut [procSubOutHelperStmt]
+  ensureHelperScript HelperProcSubOut (DSL.script [procSubOutHelperStmt])
 
-procSubOutHelperStmt :: FishStatement
+procSubOutHelperStmt :: DSL.Stmt
 procSubOutHelperStmt =
-  Stmt
-    ( Function
-        MkFishFunction
-          { funcName = "__monk_procsub_out",
-            funcFlags = [],
-            funcParams = ["body"],
-            funcBody =
-              procSubSetDirStmt
-                NE.:| [ procSubSetFifoStmt,
-                        procSubRmFifoStmt,
-                        procSubMkfifoStmt,
-                        procSubBackgroundStmt
-                          procSubEvalBodyStmt
-                          [ procSubCaptureStatusStmt,
-                            procSubRmFifoStmt,
-                            procSubRmdirStmt,
-                            procSubReturnStatusStmt
+  DSL.stmt
+    ( DSL.function
+        "__monk_procsub_out"
+        []
+        ["body"]
+        ( DSL.block
+            ( procSubSetDirStmtDsl
+                NE.:| [ procSubSetFifoStmtDsl,
+                        procSubRmFifoStmtDsl,
+                        procSubMkfifoStmtDsl,
+                        procSubBackgroundStmtDsl
+                          procSubEvalBodyStmtDsl
+                          [ procSubCaptureStatusStmtDsl,
+                            procSubRmFifoStmtDsl,
+                            procSubRmdirStmtDsl,
+                            procSubReturnStatusStmtDsl
                           ],
-                        procSubPrintFifoStmt
+                        procSubPrintFifoStmtDsl
                       ]
-          }
+            )
+        )
     )
 
 procSubSetDirStmt :: FishStatement
@@ -221,18 +229,18 @@ procSubBodyStmt body =
     [stmt] -> stmt
     stmts -> Stmt (Begin (NE.fromList stmts) [])
 
-procSubInputRedirect :: ExprOrRedirect
+procSubInputRedirect :: Arg
 procSubInputRedirect =
-  RedirectVal
+  argRedirect
     ( MkRedirect
         RedirectStdin
         RedirectIn
         (RedirectFile (ExprVariable (VarScalar procSubFifoVar)))
     )
 
-procSubFileOutputRedirect :: ExprOrRedirect
+procSubFileOutputRedirect :: Arg
 procSubFileOutputRedirect =
-  RedirectVal
+  argRedirect
     ( MkRedirect
         RedirectStdout
         RedirectOut
@@ -241,7 +249,7 @@ procSubFileOutputRedirect =
 
 procSubProducerFileStmt :: FishCommand TStatus -> FishStatement
 procSubProducerFileStmt =
-  Stmt . attachRedirectsToCommand [procSubFileOutputRedirect]
+  Stmt . attachArgsToCommand [procSubFileOutputRedirect]
 
 procSubCatFileCommand :: FishCommand TStatus
 procSubCatFileCommand =
@@ -258,7 +266,7 @@ procSubPipelineFileStmt consumer =
    in Stmt (Pipeline pipe)
 
 procSubConsumerStmt :: FishStatement -> FishStatement
-procSubConsumerStmt = attachRedirectsToStatement [procSubInputRedirect]
+procSubConsumerStmt = attachArgsToStatement [procSubInputRedirect]
 
 procSubBackgroundStmt :: FishStatement -> [FishStatement] -> FishStatement
 procSubBackgroundStmt rhsStmt cleanupStmts =
@@ -269,10 +277,6 @@ procSubBackgroundStmt rhsStmt cleanupStmts =
             []
         )
     )
-
-procSubEvalBodyStmt :: FishStatement
-procSubEvalBodyStmt =
-  Stmt (Command "eval" [ExprVal (ExprVariable (VarScalar "body"))])
 
 procSubCaptureStatusStmt :: FishStatement
 procSubCaptureStatusStmt =
@@ -313,10 +317,102 @@ procSubEchoFifoStmt =
         [ExprVal (ExprVariable (VarScalar procSubFifoVar))]
     )
 
-procSubPrintFifoStmt :: FishStatement
-procSubPrintFifoStmt =
-  Stmt
-    ( Printf
-        (ExprLiteral "%s\n")
-        [ExprVariable (VarScalar procSubFifoVar)]
+procSubSetDirStmtDsl :: DSL.Stmt
+procSubSetDirStmtDsl =
+  DSL.stmt
+    ( DSL.set
+        [DSL.SetLocal]
+        procSubDirVar
+        (DSL.commandSubst (DSL.stmt (DSL.command "mktemp" [DSL.arg (DSL.str "-d")]) NE.:| []))
+    )
+
+procSubSetFifoStmtDsl :: DSL.Stmt
+procSubSetFifoStmtDsl =
+  DSL.stmt
+    ( DSL.set
+        [DSL.SetLocal]
+        procSubFifoVar
+        (DSL.list [DSL.concatStr (DSL.var procSubDirVar) (DSL.str "/fifo")])
+    )
+
+procSubRmFifoStmtDsl :: DSL.Stmt
+procSubRmFifoStmtDsl =
+  DSL.stmt
+    ( DSL.command
+        "rm"
+        [ DSL.arg (DSL.str "-f"),
+          DSL.arg (DSL.var procSubFifoVar)
+        ]
+    )
+
+procSubRmdirStmtDsl :: DSL.Stmt
+procSubRmdirStmtDsl =
+  DSL.stmt
+    ( DSL.command
+        "rmdir"
+        [DSL.arg (DSL.var procSubDirVar)]
+    )
+
+procSubMkfifoStmtDsl :: DSL.Stmt
+procSubMkfifoStmtDsl =
+  DSL.stmt
+    ( DSL.command
+        "mkfifo"
+        [DSL.arg (DSL.var procSubFifoVar)]
+    )
+
+procSubBackgroundStmtDsl :: DSL.Stmt -> [DSL.Stmt] -> DSL.Stmt
+procSubBackgroundStmtDsl rhsStmt cleanupStmts =
+  DSL.stmt
+    ( DSL.background
+        (DSL.beginBlock (DSL.block (rhsStmt NE.:| cleanupStmts)))
+    )
+
+procSubEvalBodyStmtDsl :: DSL.Stmt
+procSubEvalBodyStmtDsl =
+  DSL.stmt
+    ( DSL.command
+        "eval"
+        [ DSL.arg (DSL.var "body"),
+          DSL.redirect DSL.stdin DSL.input (DSL.fileTarget (DSL.var procSubFifoVar))
+        ]
+    )
+
+procSubCaptureStatusStmtDsl :: DSL.Stmt
+procSubCaptureStatusStmtDsl =
+  DSL.stmt
+    ( DSL.set
+        [DSL.SetLocal]
+        procSubStatusVar
+        ( DSL.commandSubst
+            ( DSL.stmt
+                ( DSL.command
+                    "printf"
+                    [ DSL.arg (DSL.str "%s"),
+                      DSL.arg DSL.specialStatus
+                    ]
+                )
+                NE.:| []
+            )
+        )
+    )
+
+procSubReturnStatusStmtDsl :: DSL.Stmt
+procSubReturnStatusStmtDsl =
+  DSL.stmt
+    ( DSL.command
+        "fish"
+        [ DSL.arg (DSL.str "--no-config"),
+          DSL.arg (DSL.str "-c"),
+          DSL.arg (DSL.str "exit $argv[1]"),
+          DSL.arg (DSL.var procSubStatusVar)
+        ]
+    )
+
+procSubPrintFifoStmtDsl :: DSL.Stmt
+procSubPrintFifoStmtDsl =
+  DSL.stmt
+    ( DSL.printf
+        (DSL.str "%s\n")
+        [DSL.var procSubFifoVar]
     )

@@ -31,6 +31,7 @@ module Language.Fish.Translator.Monad
     noteUnsupported,
     unsupportedStmt,
     ensureHelper,
+    ensureHelperScript,
     withFunctionScope,
     withCommandSubstScope,
     addLocalVars,
@@ -47,6 +48,8 @@ where
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
+import Language.Fish.DSL qualified as DSL
+import Language.Fish.Translator.Construction (toRawScript)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Syntax
 import Monk.Translation.Types
@@ -219,6 +222,10 @@ ensureHelper helper stmts = do
                 preamble = preamble s <> stmts
               }
         )
+
+ensureHelperScript :: (MonadState TranslateState m) => HelperId -> DSL.Script -> m ()
+ensureHelperScript helper =
+  ensureHelper helper . toRawScript
 
 withScopedField ::
   (MonadState TranslateState m, MonadError TranslateError m) =>

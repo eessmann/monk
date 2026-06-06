@@ -79,6 +79,7 @@ The following milestones were completed in the correctness-first pass and are ke
 - [x] Repeated redirect-attachment helpers are centralized behind the translator syntax boundary
 - [x] Command-substitution and status-context redirection planning now share one parser/lowerer and carry typed DSL `Arg` values until final raw attachment
 - [x] Unsupported status-context tokens now lower warning-driven to `false` instead of silently succeeding as `true`; `--strict` fails through the normal warning path
+- [x] Generated helper/runtime construction now has a single DSL-to-raw lowering boundary, and direct `Language.Fish.Translator.Syntax` imports are ratcheted down to 42 modules
 - [ ] Continue shrinking `Language.Fish.Translator.Syntax` by moving command, expression, and runtime-helper islands onto typed DSL construction helpers
 - [x] Bake-off moved into a separate private library/executable under `scripts/`
 

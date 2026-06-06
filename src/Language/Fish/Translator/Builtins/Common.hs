@@ -8,7 +8,7 @@ where
 
 import Data.Text qualified as T
 import Language.Fish.Translator.Names (isValidVarName)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types (FishStatement (StmtList))
 
 parseAssignmentLiteral :: Text -> Maybe (Text, Text)
 parseAssignmentLiteral txt = do

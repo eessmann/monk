@@ -6,71 +6,55 @@ module Language.Fish.Translator.Pipefail
 where
 
 import Data.List.NonEmpty qualified as NE
+import Language.Fish.DSL qualified as DSL
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
-    ensureHelper,
+    ensureHelperScript,
   )
-import Language.Fish.Translator.Syntax
 
 ensurePipefailHelper :: TranslateM ()
 ensurePipefailHelper =
-  ensureHelper HelperPipefail [pipefailHelper]
+  ensureHelperScript HelperPipefail (DSL.script [pipefailHelper])
 
-pipefailHelper :: FishStatement
+pipefailHelper :: DSL.Stmt
 pipefailHelper =
   let statusVar = "__monk_pipe_status"
       statusInit =
-        Stmt
-          ( Set
-              [SetLocal]
+        DSL.stmt
+          ( DSL.set
+              [DSL.SetLocal]
               statusVar
-              (ExprListLiteral [ExprLiteral "0"])
+              (DSL.list [DSL.str "0"])
           )
       testCmd =
-        Command
+        DSL.command
           "test"
-          [ ExprVal (ExprVariable (VarAll "s")),
-            ExprVal (ExprLiteral "-ne"),
-            ExprVal (ExprLiteral "0")
+          [ DSL.arg (DSL.vars "s"),
+            DSL.arg (DSL.str "-ne"),
+            DSL.arg (DSL.str "0")
           ]
-      cond =
-        MkFishJobList
-          ( MkFishJobConjunction
-              Nothing
-              (MkFishJobPipeline False [] (Stmt testCmd) [] False)
-              []
-              NE.:| []
-          )
       setStatus =
-        Stmt
-          ( Set
+        DSL.stmt
+          ( DSL.set
               []
               statusVar
-              (ExprVariable (VarAll "s"))
+              (DSL.vars "s")
           )
-      ifStmt = Stmt (If cond (setStatus NE.:| []) [] [])
+      ifStmt = DSL.stmt (DSL.if_ (DSL.condition testCmd) (DSL.block (setStatus NE.:| [])) [] [])
       forStmt =
-        Stmt
-          ( For
+        DSL.stmt
+          ( DSL.for
               "s"
-              (ExprVariable (VarAll "argv"))
-              (ifStmt NE.:| [])
+              (DSL.vars "argv")
+              (DSL.block (ifStmt NE.:| []))
               []
           )
       returnStmt =
-        Stmt
-          ( Command
+        DSL.stmt
+          ( DSL.command
               "return"
-              [ExprVal (ExprVariable (VarAll statusVar))]
+              [DSL.arg (DSL.vars statusVar)]
           )
       body = statusInit NE.:| [forStmt, returnStmt]
-   in Stmt
-        ( Function
-            MkFishFunction
-              { funcName = "__monk_pipefail",
-                funcFlags = [],
-                funcParams = [],
-                funcBody = body
-              }
-        )
+   in DSL.stmt (DSL.function "__monk_pipefail" [] [] (DSL.block body))

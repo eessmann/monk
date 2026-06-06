@@ -10,8 +10,8 @@ where
 import Control.Monad.State.Strict (gets)
 import Data.Text qualified as T
 import Language.Fish.Translator.Monad (TranslateM, TranslationContext (..), context, isLocalVar)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenRawText)
+import Language.Fish.Translator.Types (SetFlag (..))
 import ShellCheck.AST (Token)
 import ShellCheck.ASTLib (getBracedReference)
 import Prelude hiding (gets)

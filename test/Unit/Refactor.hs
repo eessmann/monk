@@ -40,7 +40,7 @@ unitRefactorTests =
       H.testCase "Translator implementation modules do not import raw AST, DSL internals, or transitional facade" $ do
         repoRoot <- makeAbsolute "."
         files <- translatorImplementationFiles repoRoot
-        offenders <- fmap concat (traverse forbiddenTranslatorImports files)
+        offenders <- fmap concat (traverse (forbiddenTranslatorImports repoRoot) files)
         offenders H.@?= [],
       H.testCase "Translator syntax boundary import footprint does not grow" $ do
         repoRoot <- makeAbsolute "."
@@ -66,6 +66,13 @@ unitRefactorTests =
       H.testCase "Public Fish DSL export list hides unsafe constructors and lowerers" $ do
         repoRoot <- makeAbsolute "."
         contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "DSL.hs")
+        let exports = dslExportList contents
+            forbidden = ["Unsafe", "lower"]
+            offenders = filter (`T.isInfixOf` exports) forbidden
+        offenders H.@?= [],
+      H.testCase "Translator construction boundary export list hides unsafe constructors" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Construction.hs")
         let exports = dslExportList contents
             forbidden = ["Unsafe", "lower"]
             offenders = filter (`T.isInfixOf` exports) forbidden
@@ -131,26 +138,38 @@ translatorImplementationFiles repoRoot = do
       normalise path
         == normalise (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Syntax.hs")
 
-forbiddenTranslatorImports :: FilePath -> IO [String]
-forbiddenTranslatorImports path = do
+forbiddenTranslatorImports :: FilePath -> FilePath -> IO [String]
+forbiddenTranslatorImports repoRoot path = do
   contents <- decodeUtf8 <$> readFileBS path
+  let relativePath = normalise (makeRelative repoRoot path)
   pure
     [ path <> ":" <> show lineNo <> ": " <> toString lineText
     | (lineNo, lineText) <- zip [1 :: Int ..] (T.lines contents),
-      any (`isImportUnder` lineText) forbiddenTranslatorImportRoots
+      any (`isImportUnder` lineText) alwaysForbiddenTranslatorImportRoots
+        || ( relativePath `notElem` translatorConstructionBoundaryAllowlist
+               && any (`isImportUnder` lineText) constructionBoundaryOnlyImportRoots
+           )
     ]
 
-forbiddenTranslatorImportRoots :: [Text]
-forbiddenTranslatorImportRoots =
+alwaysForbiddenTranslatorImportRoots :: [Text]
+alwaysForbiddenTranslatorImportRoots =
   [ "Language.Fish.AST",
     "Monk.AST.Raw",
-    "Language.Fish.DSL.Internal",
-    "Language.Fish.DSL.Lower",
     "Language.Fish.Translator.DSL"
   ]
 
+constructionBoundaryOnlyImportRoots :: [Text]
+constructionBoundaryOnlyImportRoots =
+  [ "Language.Fish.DSL.Internal",
+    "Language.Fish.DSL.Lower"
+  ]
+
+translatorConstructionBoundaryAllowlist :: [FilePath]
+translatorConstructionBoundaryAllowlist =
+  [normalise "src/Language/Fish/Translator/Construction.hs"]
+
 translatorSyntaxImportLimit :: Int
-translatorSyntaxImportLimit = 56
+translatorSyntaxImportLimit = 42
 
 moduleImports :: Text -> FilePath -> IO [FilePath]
 moduleImports moduleName path = do
@@ -174,9 +193,23 @@ translatorTypesImportAllowlist :: [FilePath]
 translatorTypesImportAllowlist =
   map
     normalise
-    [ "src/Language/Fish/Translator/Hoist.hs",
+    [ "src/Language/Fish/Translator/Builtins/Common.hs",
+      "src/Language/Fish/Translator/Commands/Args.hs",
+      "src/Language/Fish/Translator/Commands/CommandTokens/Dispatch.hs",
+      "src/Language/Fish/Translator/Commands/Read.hs",
+      "src/Language/Fish/Translator/Commands/Read/Exact.hs",
+      "src/Language/Fish/Translator/Commands/Read/Parse.hs",
+      "src/Language/Fish/Translator/Commands/Read/Runtime.hs",
+      "src/Language/Fish/Translator/Commands/Read/Types.hs",
+      "src/Language/Fish/Translator/Construction.hs",
+      "src/Language/Fish/Translator/Hoist.hs",
       "src/Language/Fish/Translator/Hoist/Monad.hs",
-      "src/Language/Fish/Translator/Redirections/Core.hs"
+      "src/Language/Fish/Translator/Redirections/Core.hs",
+      "src/Language/Fish/Translator/Variables/Common.hs",
+      "src/Language/Fish/Translator/Variables/Expressions/Split.hs",
+      "src/Language/Fish/Translator/Variables/Expressions/Subst.hs",
+      "src/Language/Fish/Translator/Variables/ParamParse.hs",
+      "src/Language/Fish/Translator/Variables/ProcessSubst.hs"
     ]
 
 forbiddenRawTestImports :: FilePath -> FilePath -> IO [String]

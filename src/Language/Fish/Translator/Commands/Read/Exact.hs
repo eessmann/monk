@@ -24,7 +24,7 @@ import Language.Fish.Translator.Monad
     TranslateState (..),
     TranslationContext (..),
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Prelude hiding (gets)
 
 translateReadExactM :: ExactReadDelim -> TranslateM (FishCommand TStatus)

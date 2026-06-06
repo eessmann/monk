@@ -15,8 +15,8 @@ import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Pipeline (applyPipefailIfEnabled)
 import Language.Fish.Translator.Redirections (parseRedirectTokens, parseRedirectTokensM)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Types (FishCommand, FishType (TStatus))
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------

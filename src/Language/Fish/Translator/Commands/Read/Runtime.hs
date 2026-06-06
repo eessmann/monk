@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 
 module Language.Fish.Translator.Commands.Read.Runtime
@@ -16,76 +17,82 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Language.Fish.DSL qualified as DSL
 import Language.Fish.Translator.Commands.Read.Types
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
-    ensureHelper,
+    ensureHelperScript,
   )
 import Language.Fish.Translator.Pipeline (jobPipelineFromList, pipelineOf)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 
 ensureReadDelimHelper :: TranslateM ()
 ensureReadDelimHelper =
-  ensureHelper HelperReadRuntime readRuntimeHelperStatements
+  ensureHelperScript HelperReadRuntime (DSL.script readRuntimeHelperStatements)
 
-readRuntimeHelperStatements :: [FishStatement]
+readRuntimeHelperStatements :: [DSL.Stmt]
 readRuntimeHelperStatements =
   [ readCaptureHelperStmt,
     readAssignHelperStmt
   ]
 
-readCaptureHelperStmt :: FishStatement
+readCaptureHelperStmt :: DSL.Stmt
 readCaptureHelperStmt =
-  Stmt
-    ( Function
-        MkFishFunction
-          { funcName = "__monk_read_capture_delim",
-            funcFlags = [],
-            funcParams = ["mode", "delimiter", "raw", "prompt", "silent", "timeout", "nchars"],
-            funcBody =
-              Stmt
-                ( Command
-                    "python3"
-                    [ ExprVal (ExprLiteral "-c"),
-                      ExprVal (ExprLiteral pythonDedentExecScript),
-                      ExprVal (ExprLiteral ("\n" <> readCapturePythonScript)),
-                      ExprVal (ExprVariable (VarScalar "mode")),
-                      ExprVal (ExprVariable (VarScalar "delimiter")),
-                      ExprVal (ExprVariable (VarScalar "raw")),
-                      ExprVal (ExprVariable (VarScalar "prompt")),
-                      ExprVal (ExprVariable (VarScalar "silent")),
-                      ExprVal (ExprVariable (VarScalar "timeout")),
-                      ExprVal (ExprVariable (VarScalar "nchars"))
-                    ]
-                )
+  DSL.stmt
+    ( DSL.function
+        "__monk_read_capture_delim"
+        []
+        ["mode", "delimiter", "raw", "prompt", "silent", "timeout", "nchars"]
+        ( DSL.block
+            ( pythonStmt
+                [ DSL.str ("\n" <> readCapturePythonScript),
+                  DSL.var "mode",
+                  DSL.var "delimiter",
+                  DSL.var "raw",
+                  DSL.var "prompt",
+                  DSL.var "silent",
+                  DSL.var "timeout",
+                  DSL.var "nchars"
+                ]
                 NE.:| []
-          }
+            )
+        )
     )
 
-readAssignHelperStmt :: FishStatement
+readAssignHelperStmt :: DSL.Stmt
 readAssignHelperStmt =
-  Stmt
-    ( Function
-        MkFishFunction
-          { funcName = "__monk_read_assign",
-            funcFlags = [],
-            funcParams = ["mode", "ifs", "record", "count"],
-            funcBody =
-              Stmt
-                ( Command
-                    "python3"
-                    [ ExprVal (ExprLiteral "-c"),
-                      ExprVal (ExprLiteral pythonDedentExecScript),
-                      ExprVal (ExprLiteral ("\n" <> readAssignPythonScript)),
-                      ExprVal (ExprVariable (VarScalar "mode")),
-                      ExprVal (ExprVariable (VarScalar "ifs")),
-                      ExprVal (ExprVariable (VarScalar "record")),
-                      ExprVal (ExprVariable (VarScalar "count"))
-                    ]
-                )
+  DSL.stmt
+    ( DSL.function
+        "__monk_read_assign"
+        []
+        ["mode", "ifs", "record", "count"]
+        ( DSL.block
+            ( pythonStmt
+                [ DSL.str ("\n" <> readAssignPythonScript),
+                  DSL.var "mode",
+                  DSL.var "ifs",
+                  DSL.var "record",
+                  DSL.var "count"
+                ]
                 NE.:| []
-          }
+            )
+        )
+    )
+
+pythonStmt :: [DSL.Expr 'TStr] -> DSL.Stmt
+pythonStmt args =
+  DSL.stmt
+    ( DSL.command
+        "python3"
+        ( map
+            DSL.arg
+            ( [ DSL.str "-c",
+                DSL.str pythonDedentExecScript
+              ]
+                <> args
+            )
+        )
     )
 
 currentIfsExpr :: FishExpr (TList TStr)
