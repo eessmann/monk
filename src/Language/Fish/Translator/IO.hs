@@ -26,8 +26,8 @@ import Language.Fish.Translator.Pipeline
     wrapErrexitIfEnabled,
   )
 import Language.Fish.Translator.Statement (statusConjunction)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokensHaveBang)
+import Language.Fish.Translator.Types
 import ShellCheck.AST
 
 --------------------------------------------------------------------------------

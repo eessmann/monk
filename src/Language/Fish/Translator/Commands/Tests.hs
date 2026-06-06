@@ -24,8 +24,8 @@ import Language.Fish.Translator.Cond
   )
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenHasExpansion, tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( translateTokenToExpr,
     translateTokenToExprM,

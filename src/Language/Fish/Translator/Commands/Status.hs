@@ -39,11 +39,11 @@ import Language.Fish.Translator.Statement
     toNonEmptyStmtList,
     translateSubshellStatusCommand,
   )
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokensHaveBang,
   )
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables (translateArithmeticStatusM, translateTokenToListExprM)
 import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST

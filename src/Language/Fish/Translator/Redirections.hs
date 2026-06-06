@@ -18,7 +18,7 @@ import Language.Fish.Translator.Redirections.Core
     translateFdRedirectMWith,
     translateFdRedirectWith,
   )
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
     translateTokenToExpr,

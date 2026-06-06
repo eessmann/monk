@@ -23,12 +23,12 @@ import Language.Fish.Translator.Statement
   ( statusCommandBlock,
     statusConjunction,
   )
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokenToLiteralText,
     tokensHaveBang,
   )
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( translateArithmetic,
     translateAssignmentWithFlags,

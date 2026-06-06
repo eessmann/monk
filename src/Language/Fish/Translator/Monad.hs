@@ -51,7 +51,7 @@ import Data.Set qualified as Set
 import Language.Fish.DSL qualified as DSL
 import Language.Fish.Translator.Construction (toRawScript)
 import Language.Fish.Translator.Hoist (Hoisted (..))
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Monk.Translation.Types
   ( TranslateConfig (..),
     TranslateError (..),

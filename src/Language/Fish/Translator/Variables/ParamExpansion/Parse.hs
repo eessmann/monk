@@ -13,8 +13,8 @@ module Language.Fish.Translator.Variables.ParamExpansion.Parse
 where
 
 import Data.Text qualified as T
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenRawText, tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables.Common (paramNameFrom)
 import Language.Fish.Translator.Variables.Index
   ( parseIndexSpec,

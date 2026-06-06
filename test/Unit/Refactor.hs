@@ -37,26 +37,25 @@ unitRefactorTests =
         files <- fmap concat (traverse (collectHsFiles . (repoRoot </>)) ["src", "app", "test", "scripts"])
         offenders <- fmap concat (traverse punningConstructors files)
         offenders H.@?= [],
-      H.testCase "Translator implementation modules do not import raw AST, DSL internals, or transitional facade" $ do
+      H.testCase "Translator implementation modules keep raw and lowering imports behind boundaries" $ do
         repoRoot <- makeAbsolute "."
         files <- translatorImplementationFiles repoRoot
         offenders <- fmap concat (traverse (forbiddenTranslatorImports repoRoot) files)
         offenders H.@?= [],
-      H.testCase "Translator syntax boundary import footprint does not grow" $ do
+      H.testCase "Translator syntax bridge stays retired" $ do
         repoRoot <- makeAbsolute "."
         files <- translatorImplementationFiles repoRoot
         users <- fmap concat (traverse (moduleImports "Language.Fish.Translator.Syntax") files)
         H.assertBool
-          ( "translator syntax boundary import count grew above "
+          ( "translator syntax bridge import count is above "
               <> show translatorSyntaxImportLimit
               <> ": "
               <> show users
           )
           (length users <= translatorSyntaxImportLimit),
-      H.testCase "Translator raw type facade imports stay allowlisted" $ do
+      H.testCase "Translator Args adapter avoids bridge internals" $ do
         repoRoot <- makeAbsolute "."
-        files <- translatorImplementationFiles repoRoot
-        offenders <- fmap concat (traverse (rawTypeFacadeImportOffenders repoRoot) files)
+        offenders <- forbiddenArgsAdapterImports repoRoot
         offenders H.@?= [],
       H.testCase "Test support constructs Fish through DSL except explicit raw backend tests" $ do
         repoRoot <- makeAbsolute "."
@@ -129,14 +128,7 @@ isIdentChar c = isAlphaNum c || c == '_' || c == '\''
 translatorImplementationFiles :: FilePath -> IO [FilePath]
 translatorImplementationFiles repoRoot = do
   subtree <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
-  pure
-    ( (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator.hs")
-        : filter (not . isTranslatorBoundary) subtree
-    )
-  where
-    isTranslatorBoundary path =
-      normalise path
-        == normalise (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Syntax.hs")
+  pure ((repoRoot </> "src" </> "Language" </> "Fish" </> "Translator.hs") : subtree)
 
 forbiddenTranslatorImports :: FilePath -> FilePath -> IO [String]
 forbiddenTranslatorImports repoRoot path = do
@@ -146,6 +138,9 @@ forbiddenTranslatorImports repoRoot path = do
     [ path <> ":" <> show lineNo <> ": " <> toString lineText
     | (lineNo, lineText) <- zip [1 :: Int ..] (T.lines contents),
       any (`isImportUnder` lineText) alwaysForbiddenTranslatorImportRoots
+        || ( relativePath `notElem` translatorRawTypeBoundaryAllowlist
+               && any (`isImportUnder` lineText) rawAstImportRoots
+           )
         || ( relativePath `notElem` translatorConstructionBoundaryAllowlist
                && any (`isImportUnder` lineText) constructionBoundaryOnlyImportRoots
            )
@@ -153,9 +148,14 @@ forbiddenTranslatorImports repoRoot path = do
 
 alwaysForbiddenTranslatorImportRoots :: [Text]
 alwaysForbiddenTranslatorImportRoots =
-  [ "Language.Fish.AST",
-    "Monk.AST.Raw",
+  [ "Language.Fish.Translator.Syntax",
     "Language.Fish.Translator.DSL"
+  ]
+
+rawAstImportRoots :: [Text]
+rawAstImportRoots =
+  [ "Language.Fish.AST",
+    "Monk.AST.Raw"
   ]
 
 constructionBoundaryOnlyImportRoots :: [Text]
@@ -168,8 +168,12 @@ translatorConstructionBoundaryAllowlist :: [FilePath]
 translatorConstructionBoundaryAllowlist =
   [normalise "src/Language/Fish/Translator/Construction.hs"]
 
+translatorRawTypeBoundaryAllowlist :: [FilePath]
+translatorRawTypeBoundaryAllowlist =
+  [normalise "src/Language/Fish/Translator/Types.hs"]
+
 translatorSyntaxImportLimit :: Int
-translatorSyntaxImportLimit = 42
+translatorSyntaxImportLimit = 0
 
 moduleImports :: Text -> FilePath -> IO [FilePath]
 moduleImports moduleName path = do
@@ -180,37 +184,9 @@ moduleImports moduleName path = do
       importedModule lineText == Just moduleName
     ]
 
-rawTypeFacadeImportOffenders :: FilePath -> FilePath -> IO [FilePath]
-rawTypeFacadeImportOffenders repoRoot path = do
-  users <- moduleImports "Language.Fish.Translator.Types" path
-  let relativePath = normalise (makeRelative repoRoot path)
-  pure $
-    if relativePath `elem` translatorTypesImportAllowlist
-      then []
-      else users
-
-translatorTypesImportAllowlist :: [FilePath]
-translatorTypesImportAllowlist =
-  map
-    normalise
-    [ "src/Language/Fish/Translator/Builtins/Common.hs",
-      "src/Language/Fish/Translator/Commands/Args.hs",
-      "src/Language/Fish/Translator/Commands/CommandTokens/Dispatch.hs",
-      "src/Language/Fish/Translator/Commands/Read.hs",
-      "src/Language/Fish/Translator/Commands/Read/Exact.hs",
-      "src/Language/Fish/Translator/Commands/Read/Parse.hs",
-      "src/Language/Fish/Translator/Commands/Read/Runtime.hs",
-      "src/Language/Fish/Translator/Commands/Read/Types.hs",
-      "src/Language/Fish/Translator/Construction.hs",
-      "src/Language/Fish/Translator/Hoist.hs",
-      "src/Language/Fish/Translator/Hoist/Monad.hs",
-      "src/Language/Fish/Translator/Redirections/Core.hs",
-      "src/Language/Fish/Translator/Variables/Common.hs",
-      "src/Language/Fish/Translator/Variables/Expressions/Split.hs",
-      "src/Language/Fish/Translator/Variables/Expressions/Subst.hs",
-      "src/Language/Fish/Translator/Variables/ParamParse.hs",
-      "src/Language/Fish/Translator/Variables/ProcessSubst.hs"
-    ]
+forbiddenArgsAdapterImports :: FilePath -> IO [String]
+forbiddenArgsAdapterImports repoRoot =
+  forbiddenTranslatorImports repoRoot (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Args.hs")
 
 forbiddenRawTestImports :: FilePath -> FilePath -> IO [String]
 forbiddenRawTestImports repoRoot path

@@ -13,8 +13,8 @@ import Language.Fish.Translator.Args
 import Language.Fish.Translator.Commands.Args (translateArgsM)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token (tokenHasExpansion, tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( translateTokenToArg,
     translateTokenToListExpr,

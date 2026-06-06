@@ -21,8 +21,8 @@ import Language.Fish.Translator.Monad
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (pipelineOf)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables.Arithmetic
   ( arithArgsFromText,
     arithArgsFromToken,

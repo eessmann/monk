@@ -11,7 +11,7 @@ import Language.Fish.Translator.Cond (testNonZeroCommand)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Pipeline (pipelineOf)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables.Arithmetic.Helpers
   ( arithTempNameWith,
     ensureArithArgs,

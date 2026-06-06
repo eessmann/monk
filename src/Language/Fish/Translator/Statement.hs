@@ -20,7 +20,7 @@ import Language.Fish.Translator.Monad
     noteUnsupported,
   )
 import Language.Fish.Translator.Pipeline (pipelineOf)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 
 -- | Drop empty statements and convert to NonEmpty if possible.
 toNonEmptyStmtList :: [FishStatement] -> Maybe (NonEmpty FishStatement)

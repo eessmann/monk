@@ -9,17 +9,19 @@ module Language.Fish.Translator.Args
   )
 where
 
-import Language.Fish.Translator.Syntax
-  ( Arg,
-    FishCommand,
-    FishStatement,
-    FishType (TStatus),
-    argExpr,
+import Language.Fish.DSL (Arg)
+import Language.Fish.Translator.Construction
+  ( argExpr,
     argRedirect,
     attachRedirectsToCommand,
     attachRedirectsToStatement,
     renderArg,
     renderArgs,
+  )
+import Language.Fish.Translator.Types
+  ( FishCommand,
+    FishStatement,
+    FishType (TStatus),
   )
 
 attachArgsToCommand :: [Arg] -> FishCommand TStatus -> FishCommand TStatus

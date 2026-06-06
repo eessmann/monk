@@ -23,7 +23,7 @@ import Language.Fish.Translator.Cond
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables.Arithmetic.Expr
   ( arithArgsFromTokenList,
     arithArgsPlan,

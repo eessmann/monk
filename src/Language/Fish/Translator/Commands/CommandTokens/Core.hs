@@ -47,8 +47,8 @@ import Language.Fish.Translator.Monad
     unsupported,
   )
 import Language.Fish.Translator.Redirections (parseRedirectTokens, parseRedirectTokensM)
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token (tokenHasExpansion, tokenRawText, tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables (translateTokenToArg)
 import ShellCheck.AST
 import Prelude hiding (gets)

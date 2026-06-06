@@ -37,12 +37,10 @@ The translator is organized around a typed Fish DSL handoff and small focused su
   - Recursive statement, expression, job, and redirection structures.
 - `Language.Fish.Translator`
   - Top-level statement dispatch and orchestration; the public translation handoff emits a DSL `Script` before `Monk.Translation` lowers it for rendering.
-- `Language.Fish.Translator.Syntax`
-  - Internal translator-only boundary for raw-shaped construction while remaining translator modules are migrated onto typed DSL helpers. Direct `Language.Fish.AST`, `Language.Fish.DSL.Internal`, and `Language.Fish.DSL.Lower` imports are forbidden in translator modules outside this boundary.
 - `Language.Fish.Translator.Construction`
-  - The single internal lowering boundary for translator-authored DSL values. Helper/runtime code can use public `Language.Fish.DSL` constructors and lower through this module without importing DSL internals directly.
+  - The single internal lowering and adapter boundary for translator-authored DSL values and raw-to-DSL bridge helpers. Helper/runtime code can use public `Language.Fish.DSL` constructors and lower through this module without importing DSL internals directly.
 - `Language.Fish.Translator.Types`
-  - Narrow raw-type facade used by low-level helpers so fewer translator modules depend directly on the broader syntax bridge.
+  - The single translator raw AST facade. Translator implementation modules import raw constructors through this module instead of importing `Language.Fish.AST` or `Monk.AST.Raw` directly.
 - `Language.Fish.Translator.Redirections`
   - Shared redirection token planning API that returns typed DSL `Arg` values for normal command and command-substitution lowering.
 - `Language.Fish.Translator.Commands.Read`

@@ -18,7 +18,7 @@ where
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Statement (statusConjunction)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import ShellCheck.AST
 
 data Cond

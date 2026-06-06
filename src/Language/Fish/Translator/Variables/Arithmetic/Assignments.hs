@@ -13,7 +13,7 @@ import Language.Fish.Translator.Monad
   ( WarningCode (..),
     unsupported,
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables.Arithmetic.Helpers
   ( UnaryFixity (..),
     arithTempName,

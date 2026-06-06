@@ -16,8 +16,8 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenRawText, tokenToLiteralText)
+import Language.Fish.Translator.Types
 import ShellCheck.AST
 
 wordIsGlob :: [Token] -> Bool

@@ -15,6 +15,8 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
+import Language.Fish.DSL (Script)
+import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Background
   ( instrumentBackgroundStatusCmd,
   )
@@ -31,6 +33,10 @@ import Language.Fish.Translator.Commands
   ( translateProcessSubstitutionConsumerM,
     translateSimpleCommandM,
     translateTokenToStatusCmdM,
+  )
+import Language.Fish.Translator.Construction
+  ( attachRedirectsToStatement,
+    statementToScript,
   )
 import Language.Fish.Translator.Control qualified as Control
 import Language.Fish.Translator.ForArithmetic (translateForArithmetic)
@@ -67,7 +73,7 @@ import Language.Fish.Translator.Statement
   ( jobConjunctionFromPipelines,
     translateSubshellStatement,
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST

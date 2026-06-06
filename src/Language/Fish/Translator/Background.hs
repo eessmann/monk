@@ -19,7 +19,7 @@ import Language.Fish.Translator.Monad
     ensureHelper,
   )
 import Language.Fish.Translator.Pipeline (pipelineOf)
-import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
+import Language.Fish.Translator.Types
 
 ensureBackgroundRuntime :: TranslateM ()
 ensureBackgroundRuntime =

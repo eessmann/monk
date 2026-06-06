@@ -75,12 +75,12 @@ The following milestones were completed in the correctness-first pass and are ke
 - [x] `Monk.AST` now exposes the typed Fish DSL; raw constructors moved behind the explicit `Monk.AST.Raw` escape hatch
 - [x] Translator handoff now emits a DSL `Script` and lowers through `Language.Fish.DSL.Lower` before rendering
 - [x] Central pipeline helpers now require `NonEmpty` stages instead of accepting empty lists with a silent `true` fallback
-- [x] Translator modules now route raw-shaped construction through `Language.Fish.Translator.Syntax` instead of importing `Language.Fish.AST` directly
-- [x] Repeated redirect-attachment helpers are centralized behind the translator syntax boundary
+- [x] Translator modules now import raw AST constructors through `Language.Fish.Translator.Types` instead of importing `Language.Fish.AST` directly
+- [x] Repeated redirect-attachment helpers are centralized behind the translator construction boundary
 - [x] Command-substitution and status-context redirection planning now share one parser/lowerer and carry typed DSL `Arg` values until final raw attachment
 - [x] Unsupported status-context tokens now lower warning-driven to `false` instead of silently succeeding as `true`; `--strict` fails through the normal warning path
-- [x] Generated helper/runtime construction now has a single DSL-to-raw lowering boundary, and direct `Language.Fish.Translator.Syntax` imports are ratcheted down to 42 modules
-- [ ] Continue shrinking `Language.Fish.Translator.Syntax` by moving command, expression, and runtime-helper islands onto typed DSL construction helpers
+- [x] Generated helper/runtime construction now has a single DSL-to-raw lowering boundary
+- [x] Retired `Language.Fish.Translator.Syntax`; translator implementation imports are split between the raw `Types` facade, public DSL constructors, and the `Construction` lowering boundary
 - [x] Bake-off moved into a separate private library/executable under `scripts/`
 
 ### Correctness fixes landed

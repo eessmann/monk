@@ -16,8 +16,8 @@ import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (wrapErrexitIfEnabled)
 import Language.Fish.Translator.Statement (isEmptyStatement, toNonEmptyStmtList)
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables (translateAssignmentWithFlags, translateAssignmentWithFlagsM)
 import ShellCheck.AST
 import Prelude hiding (gets)

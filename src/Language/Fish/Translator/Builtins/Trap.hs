@@ -15,7 +15,7 @@ import Language.Fish.Translator.Monad
     addWarning,
     noteUnsupported,
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
     translateTokenToExpr,

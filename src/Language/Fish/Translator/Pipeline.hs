@@ -22,7 +22,7 @@ import Language.Fish.Translator.Monad
     isPipefailEnabled,
   )
 import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =

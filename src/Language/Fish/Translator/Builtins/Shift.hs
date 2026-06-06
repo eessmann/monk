@@ -10,7 +10,7 @@ import Language.Fish.Translator.Monad
     WarningCode (..),
     addWarning,
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 

@@ -25,8 +25,8 @@ import Language.Fish.Translator.Statement
     noteBestEffortSubshell,
     toNonEmptyStmtList,
   )
-import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenHasExpansion, wordHasExpansion)
+import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( patternExprFromToken,
     translateArithmeticStatusM,
