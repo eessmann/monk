@@ -13,6 +13,12 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Language.Fish.Translator.Args
+  ( Arg,
+    argRedirect,
+    attachArgsToCommand,
+    attachArgsToStatement,
+  )
 import Language.Fish.Translator.Cond
   ( condFromTokenMWith,
     condFromTokenWith,
@@ -20,15 +26,30 @@ import Language.Fish.Translator.Cond
   )
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
-import Language.Fish.Translator.Monad (TranslateM, withCommandSubstScope)
+import Language.Fish.Translator.Monad
+  ( TranslateM,
+    WarningCode (..),
+    unsupported,
+    withCommandSubstScope,
+  )
 import Language.Fish.Translator.Pipeline (jobPipelineFromList)
+import Language.Fish.Translator.Redirections.Core
+  ( translateFdRedirectMWith,
+    translateFdRedirectWith,
+  )
 import Language.Fish.Translator.Statement
   ( noteBestEffortSubshell,
     statusCommandBlock,
     statusConjunction,
     translateSubshellStatusCommand,
   )
-import Language.Fish.Translator.Syntax
+import Language.Fish.Translator.Syntax hiding
+  ( Arg,
+    argExpr,
+    argRedirect,
+    renderArg,
+    renderArgs,
+  )
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokenHasExpansion,
@@ -68,14 +89,17 @@ commandSubstExprStrMWith translateStmt stmts =
         Just neBody -> ExprJoinList (ExprCommandSubst neBody)
         Nothing -> ExprLiteral ""
 
-data RedirectPlan = MkRedirectPlan [FishStatement] [ExprOrRedirect]
+data RedirectPlan = MkRedirectPlan [FishStatement] [Arg]
+
+falseStatusCommand :: FishCommand TStatus
+falseStatusCommand = Command "false" []
 
 translateSubstRedirects ::
   (Token -> FishExpr TStr) ->
   [Token] ->
-  [ExprOrRedirect]
+  [Arg]
 translateSubstRedirects translateExpr =
-  mapMaybe (fmap RedirectVal . translateSubstRedirectToken translateExpr)
+  mapMaybe (fmap argRedirect . translateSubstRedirectToken translateExpr)
 
 translateSubstRedirectsM ::
   (Token -> HoistedM (FishExpr TStr)) ->
@@ -84,7 +108,7 @@ translateSubstRedirectsM ::
 translateSubstRedirectsM translateExprM redirs = do
   parts <- mapM (translateSubstRedirectTokenM translateExprM) redirs
   let MkHoisted pre maybeRedirs = sequenceA parts
-  pure (MkRedirectPlan pre (map RedirectVal (catMaybes maybeRedirs)))
+  pure (MkRedirectPlan pre (map argRedirect (catMaybes maybeRedirs)))
 
 translateSubstRedirectToken ::
   (Token -> FishExpr TStr) ->
@@ -107,162 +131,20 @@ translateSubstFdRedirect ::
   String ->
   Token ->
   Maybe Redirect
-translateSubstFdRedirect translateExpr src = \case
-  T_IoFile _ op file -> do
-    (redirOp, dir) <- redirectOpFromToken op
-    let source = sourceFromFd src dir
-    pure (MkRedirect source redirOp (RedirectFile (translateExpr file)))
-  T_IoDuplicate _ op target -> do
-    (redirOp, dir) <- redirectOpFromToken op
-    targetRef <- redirectTargetFromDup target
-    pure (MkRedirect (sourceFromFd src dir) redirOp targetRef)
-  T_HereString _ word ->
-    pure (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile (hereStringExpr translateExpr [word])))
-  T_HereDoc _ _ _ _ toks ->
-    pure (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile (hereDocExpr translateExpr toks)))
-  _ -> Nothing
+translateSubstFdRedirect = translateFdRedirectWith
 
 translateSubstFdRedirectM ::
   (Token -> HoistedM (FishExpr TStr)) ->
   String ->
   Token ->
   TranslateM (Hoisted (Maybe Redirect))
-translateSubstFdRedirectM translateExprM src = \case
-  T_IoFile _ op file ->
-    case redirectOpFromToken op of
-      Just (redirOp, dir) -> do
-        MkHoisted pre expr <- translateExprM file
-        let source = sourceFromFd src dir
-        pure (MkHoisted pre (Just (MkRedirect source redirOp (RedirectFile expr))))
-      Nothing -> pure (MkHoisted [] Nothing)
-  T_IoDuplicate _ op target ->
-    case redirectOpFromToken op of
-      Just (redirOp, dir) ->
-        pure (MkHoisted [] (MkRedirect (sourceFromFd src dir) redirOp <$> redirectTargetFromDup target))
-      Nothing -> pure (MkHoisted [] Nothing)
-  T_HereString _ word -> do
-    MkHoisted pre expr <- hereStringExprM translateExprM [word]
-    pure (MkHoisted pre (Just (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))))
-  T_HereDoc _ _ _ _ toks -> do
-    MkHoisted pre expr <- hereDocExprM translateExprM toks
-    pure (MkHoisted pre (Just (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr))))
-  _ -> pure (MkHoisted [] Nothing)
+translateSubstFdRedirectM = translateFdRedirectMWith
 
-data RedirectDir = InputRedirect | OutputRedirect
+attachSubstRedirs :: [Arg] -> FishStatement -> FishStatement
+attachSubstRedirs = attachArgsToStatement
 
-redirectOpFromToken :: Token -> Maybe (RedirectOp, RedirectDir)
-redirectOpFromToken = \case
-  T_Less {} -> Just (RedirectIn, InputRedirect)
-  T_Greater {} -> Just (RedirectOut, OutputRedirect)
-  T_DGREAT {} -> Just (RedirectOutAppend, OutputRedirect)
-  T_CLOBBER {} -> Just (RedirectClobber, OutputRedirect)
-  T_LESSGREAT {} -> Just (RedirectReadWrite, InputRedirect)
-  T_GREATAND {} -> Just (RedirectOut, OutputRedirect)
-  T_LESSAND {} -> Just (RedirectIn, InputRedirect)
-  _ -> Nothing
-
-sourceFromFd :: String -> RedirectDir -> RedirectSource
-sourceFromFd src dir =
-  case src of
-    "" -> case dir of
-      InputRedirect -> RedirectStdin
-      OutputRedirect -> RedirectStdout
-    "&" -> RedirectBoth
-    _ | Just n <- readMaybe src -> RedirectFD n
-    _ -> RedirectStdout
-
-redirectTargetFromDup :: String -> Maybe RedirectTarget
-redirectTargetFromDup tgt =
-  case tgt of
-    "-" -> Just RedirectClose
-    _ | Just n <- readMaybe tgt -> Just (RedirectTargetFD n)
-    _ -> Nothing
-
-hereDocExpr ::
-  (Token -> FishExpr TStr) ->
-  [Token] ->
-  FishExpr TStr
-hereDocExpr = hereExpr "%s"
-
-hereStringExpr ::
-  (Token -> FishExpr TStr) ->
-  [Token] ->
-  FishExpr TStr
-hereStringExpr = hereExpr "%s\\n"
-
-hereExpr ::
-  Text ->
-  (Token -> FishExpr TStr) ->
-  [Token] ->
-  FishExpr TStr
-hereExpr fmt translateExpr toks =
-  let expr = concatHereDoc translateExpr toks
-      printfStmt =
-        Stmt
-          ( Command
-              "printf"
-              [ ExprVal (ExprLiteral fmt),
-                ExprVal expr
-              ]
-          )
-   in ExprProcessSubst (printfStmt NE.:| [])
-
-hereDocExprM ::
-  (Token -> HoistedM (FishExpr TStr)) ->
-  [Token] ->
-  HoistedM (FishExpr TStr)
-hereDocExprM = hereExprM "%s"
-
-hereStringExprM ::
-  (Token -> HoistedM (FishExpr TStr)) ->
-  [Token] ->
-  HoistedM (FishExpr TStr)
-hereStringExprM = hereExprM "%s\\n"
-
-hereExprM ::
-  Text ->
-  (Token -> HoistedM (FishExpr TStr)) ->
-  [Token] ->
-  HoistedM (FishExpr TStr)
-hereExprM fmt translateExprM toks = do
-  MkHoisted pre expr <- concatHereDocM translateExprM toks
-  let printfStmt =
-        Stmt
-          ( Command
-              "printf"
-              [ ExprVal (ExprLiteral fmt),
-                ExprVal expr
-              ]
-          )
-  pure (MkHoisted pre (ExprProcessSubst (printfStmt NE.:| [])))
-
-concatHereDoc ::
-  (Token -> FishExpr TStr) ->
-  [Token] ->
-  FishExpr TStr
-concatHereDoc _ [] = ExprLiteral ""
-concatHereDoc translateExpr (t : ts) =
-  foldl' ExprStringConcat (translateExpr t) (map translateExpr ts)
-
-concatHereDocM ::
-  (Token -> HoistedM (FishExpr TStr)) ->
-  [Token] ->
-  HoistedM (FishExpr TStr)
-concatHereDocM _ [] = pure (MkHoisted [] (ExprLiteral ""))
-concatHereDocM translateExprM toks = do
-  parts <- mapM translateExprM toks
-  let MkHoisted pre exprs = sequenceA parts
-      expr =
-        case exprs of
-          [] -> ExprLiteral ""
-          (x : xs) -> foldl' ExprStringConcat x xs
-  pure (MkHoisted pre expr)
-
-attachSubstRedirs :: [ExprOrRedirect] -> FishStatement -> FishStatement
-attachSubstRedirs = attachRedirectsToStatement
-
-attachSubstStatusRedirs :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachSubstStatusRedirs = attachRedirectsToCommand
+attachSubstStatusRedirs :: [Arg] -> FishCommand TStatus -> FishCommand TStatus
+attachSubstStatusRedirs = attachArgsToCommand
 
 wrapSubstPrelude :: [FishStatement] -> FishStatement -> FishStatement
 wrapSubstPrelude [] stmt = stmt
@@ -336,6 +218,8 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
           translateSubstCommandTokensToStatus assignments cmdToks
         T_Pipeline _ bang cmds ->
           translateSubstPipeline bang cmds
+        T_Banged _ inner ->
+          Not (translateSubstStatusCmd inner)
         T_Condition _ _ condTok ->
           translateSubstConditionToken condTok
         T_BraceGroup _ tokens ->
@@ -348,7 +232,7 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
           translateSubstConjunction ConjAnd l r
         T_OrIf _ l r ->
           translateSubstConjunction ConjOr l r
-        _ -> Command "true" []
+        _ -> falseStatusCommand
 
     translateSubstCommandTokensToStatus assignments cmdTokens =
       let baseCmd = fromMaybe (Command "true" []) (translateSubstCommandTokens cmdTokens)
@@ -360,31 +244,15 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
                in beginIfNeeded envAssigns baseCmd
 
     translateSubstPipeline bang cmds =
-      case mapMaybe translateSubstTokenToMaybeStatusCmd cmds of
+      case map translateSubstStatusCmd cmds of
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromList (c NE.:| cs))
            in if tokensHaveBang bang then Not pipe else pipe
 
-    translateSubstTokenToMaybeStatusCmd token =
-      case token of
-        T_SimpleCommand _ assignments rest ->
-          Just (translateSubstCommandTokensToStatus assignments rest)
-        T_Condition {} -> Just (translateSubstStatusCmd token)
-        T_BraceGroup _ tokens -> Just (translateSubstStatusBlock tokens)
-        T_Subshell _ tokens -> Just (translateSubstSubshellStatus tokens)
-        T_Redirecting _ redirs inner ->
-          attachSubstStatusRedirs (translateSubstRedirects translateExpr redirs) <$> translateSubstTokenToMaybeStatusCmd inner
-        T_Pipeline _ bang cmds -> Just (translateSubstPipeline bang cmds)
-        T_AndIf _ l r ->
-          Just (translateSubstConjunction ConjAnd l r)
-        T_OrIf _ l r ->
-          Just (translateSubstConjunction ConjOr l r)
-        _ -> Nothing
-
     translateSubstStatusBlock tokens =
       statusCommandBlock
-        (mapMaybe translateSubstTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
+        (map translateSubstStatusCmd (stripSeparatorTokens tokens))
 
     translateSubstSubshellStatus = translateSubstStatusBlock
 
@@ -475,6 +343,8 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
           translateSubstCommandTokensToStatusM assignments cmdToks
         T_Pipeline _ bang cmds ->
           translateSubstPipelineM bang cmds
+        T_Banged _ inner ->
+          Not <$> translateSubstStatusCmdM inner
         T_Condition _ _ condTok ->
           translateSubstConditionTokenM condTok
         T_BraceGroup _ tokens ->
@@ -488,7 +358,7 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
           translateSubstConjunctionM ConjAnd l r
         T_OrIf _ l r ->
           translateSubstConjunctionM ConjOr l r
-        _ -> pure (Command "true" [])
+        _ -> unsupportedSubstStatusCmdM tok
 
     translateSubstCommandTokensToStatusM assignments cmdToks = do
       baseCmd <- fromMaybe (Command "true" []) <$> translateSubstCommandTokensM cmdToks
@@ -500,38 +370,21 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
           pure (beginIfNeeded envAssigns baseCmd)
 
     translateSubstPipelineM bang cmds = do
-      mCmds <- mapM translateSubstTokenToMaybeStatusCmdM cmds
+      cmds' <- mapM translateSubstStatusCmdM cmds
       pure $
-        case catMaybes mCmds of
+        case cmds' of
           [] -> Command "true" []
           (c : cs) ->
             let pipe = Pipeline (jobPipelineFromList (c NE.:| cs))
              in if tokensHaveBang bang then Not pipe else pipe
 
-    translateSubstTokenToMaybeStatusCmdM token =
-      case token of
-        T_SimpleCommand _ assignments rest ->
-          Just <$> translateSubstCommandTokensToStatusM assignments rest
-        T_Condition {} -> Just <$> translateSubstStatusCmdM token
-        T_BraceGroup _ tokens -> Just <$> translateSubstStatusBlockM tokens
-        T_Subshell _ tokens -> Just <$> translateSubstSubshellStatusM tokens
-        T_Redirecting _ redirs inner -> do
-          MkRedirectPlan pre redirArgs <- translateSubstRedirectsM translateExprM redirs
-          fmap (beginIfNeeded pre . attachSubstStatusRedirs redirArgs) <$> translateSubstTokenToMaybeStatusCmdM inner
-        T_Pipeline _ bang cmds -> Just <$> translateSubstPipelineM bang cmds
-        T_AndIf _ l r ->
-          Just <$> translateSubstConjunctionM ConjAnd l r
-        T_OrIf _ l r ->
-          Just <$> translateSubstConjunctionM ConjOr l r
-        _ -> pure Nothing
-
     translateSubstStatusBlockM tokens = do
-      mCmds <- mapM translateSubstTokenToMaybeStatusCmdM (stripSeparatorTokens tokens)
-      pure (statusCommandBlock (catMaybes mCmds))
+      cmds <- mapM translateSubstStatusCmdM (stripSeparatorTokens tokens)
+      pure (statusCommandBlock cmds)
 
     translateSubstSubshellStatusM tokens = do
-      mCmds <- mapM translateSubstTokenToMaybeStatusCmdM (stripSeparatorTokens tokens)
-      translateSubshellStatusCommand (catMaybes mCmds)
+      cmds <- mapM translateSubstStatusCmdM (stripSeparatorTokens tokens)
+      translateSubshellStatusCommand cmds
 
     translateSubstConjunctionM conjunction lhs rhs =
       statusConjunction conjunction
@@ -548,3 +401,23 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
             then translateExprM t
             else hoistM [] (ExprLiteral (tokenToLiteralText t))
         literalExpr = ExprLiteral . tokenToLiteralText
+
+unsupportedSubstStatusCmdM :: Token -> TranslateM (FishCommand TStatus)
+unsupportedSubstStatusCmdM tok = do
+  unsupported UnsupportedConstruct (Just ("unsupported token in status context: " <> substStatusTokenDescription tok))
+  pure falseStatusCommand
+
+substStatusTokenDescription :: Token -> Text
+substStatusTokenDescription = \case
+  T_CaseExpression {} -> "case expression"
+  T_IfExpression {} -> "if expression"
+  T_WhileExpression {} -> "while expression"
+  T_UntilExpression {} -> "until expression"
+  T_ForIn {} -> "for loop"
+  T_SelectIn {} -> "select loop"
+  T_Function {} -> "function definition"
+  T_CoProc {} -> "coprocess (coproc)"
+  T_CoProcBody {} -> "coprocess body (coproc)"
+  T_Backgrounded {} -> "background job"
+  T_Script {} -> "script"
+  other -> T.pack (show other)

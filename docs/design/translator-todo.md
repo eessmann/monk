@@ -77,6 +77,8 @@ The following milestones were completed in the correctness-first pass and are ke
 - [x] Central pipeline helpers now require `NonEmpty` stages instead of accepting empty lists with a silent `true` fallback
 - [x] Translator modules now route raw-shaped construction through `Language.Fish.Translator.Syntax` instead of importing `Language.Fish.AST` directly
 - [x] Repeated redirect-attachment helpers are centralized behind the translator syntax boundary
+- [x] Command-substitution and status-context redirection planning now share one parser/lowerer and carry typed DSL `Arg` values until final raw attachment
+- [x] Unsupported status-context tokens now lower warning-driven to `false` instead of silently succeeding as `true`; `--strict` fails through the normal warning path
 - [ ] Continue shrinking `Language.Fish.Translator.Syntax` by moving command, expression, and runtime-helper islands onto typed DSL construction helpers
 - [x] Bake-off moved into a separate private library/executable under `scripts/`
 
@@ -94,6 +96,7 @@ The following milestones were completed in the correctness-first pass and are ke
   - [x] normal mode emits the stable `BestEffortSubshell` warning and lowers to non-isolating `begin ... end`
   - [x] `--strict` fails on subshells in all covered contexts
 - [x] Command-substitution subshells no longer silently collapse to `true`
+- [x] Unsupported compound status contexts no longer silently collapse to successful `true` in pipelines, conjunctions, conditions, or command substitutions
 
 ### Diagnostics and API cleanup
 

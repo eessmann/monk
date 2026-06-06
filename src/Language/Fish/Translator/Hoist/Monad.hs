@@ -8,7 +8,7 @@ where
 
 import Language.Fish.Translator.Hoist (Hoisted, fromPair, hoist, toPair)
 import Language.Fish.Translator.Monad (TranslateM)
-import Language.Fish.Translator.Syntax (FishStatement)
+import Language.Fish.Translator.Types (FishStatement)
 
 type HoistedM a = TranslateM (Hoisted a)
 

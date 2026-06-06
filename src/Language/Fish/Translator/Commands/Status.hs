@@ -4,7 +4,6 @@ module Language.Fish.Translator.Commands.Status
     translateTokensToStatusCmdM,
     translateTokenToStatusCmdM,
     translatePipelineToStatusM,
-    translateTokenToMaybeStatusCmdM,
     translateProcessSubstitutionConsumerM,
     stmtToStatusCommand,
   )
@@ -14,7 +13,7 @@ import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Language.Fish.Translator.Args (renderArgs)
+import Language.Fish.Translator.Args (attachArgsToCommand, attachArgsToStatement)
 import Language.Fish.Translator.Commands.CommandTokens (translateTokensToStatusCmd)
 import Language.Fish.Translator.Commands.SimpleCommand (translateSimpleCommandMWith)
 import Language.Fish.Translator.Commands.Tests (translateConditionTokenM)
@@ -50,23 +49,41 @@ import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectComman
 import ShellCheck.AST
 import Prelude hiding (gets)
 
+data StatusLowering
+  = StatusCommand (FishCommand TStatus)
+  | StatusUnsupported Text
+
+trueStatusCommand :: FishCommand TStatus
+trueStatusCommand = Command "true" []
+
+falseStatusCommand :: FishCommand TStatus
+falseStatusCommand = Command "false" []
+
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
 translateTokenToStatusCmd = translateTokensToStatusCmd . pure
 
 translateTokensToStatusCmdM :: [Token] -> TranslateM (FishCommand TStatus)
 translateTokensToStatusCmdM tokens =
   case tokens of
-    [] -> pure (Command "true" [])
+    [] -> pure trueStatusCommand
     [tok] -> translateTokenToStatusCmdM tok
     _ -> do
       let toks = stripSeparatorTokens tokens
-      cmds <- mapM translateTokenToStatusCmdM toks
-      case NE.nonEmpty (map Stmt cmds) of
-        Just body -> pure (Begin body [])
-        Nothing -> pure (Command "true" [])
+      case toks of
+        [] -> pure trueStatusCommand
+        _ -> do
+          cmds <- mapM translateTokenToStatusCmdM toks
+          case NE.nonEmpty (map Stmt cmds) of
+            Just body -> pure (Begin body [])
+            Nothing -> pure trueStatusCommand
 
 translateTokenToStatusCmdM :: Token -> TranslateM (FishCommand TStatus)
-translateTokenToStatusCmdM tok =
+translateTokenToStatusCmdM tok = do
+  lowering <- translateTokenToStatusLoweringM tok
+  statusLoweringCommand lowering
+
+translateTokenToStatusLoweringM :: Token -> TranslateM StatusLowering
+translateTokenToStatusLoweringM tok =
   case tok of
     T_SimpleCommand _ assignments cmdToks -> do
       locals <- gets (localVars . context)
@@ -77,74 +94,89 @@ translateTokenToStatusCmdM tok =
               then [localFlag]
               else [SetGlobal]
       stmt <- translateSimpleCommandMWith False scopeFlags assignments cmdToks
-      pure (stmtToStatusCommand stmt)
+      pure (StatusCommand (stmtToStatusCommand stmt))
     T_Pipeline _ bang cmds ->
-      translatePipelineToStatusM bang cmds
+      StatusCommand <$> translatePipelineToStatusM bang cmds
+    T_Banged _ inner ->
+      StatusCommand . Not <$> translateTokenToStatusCmdM inner
     T_Condition _ _ condTok ->
       do
         MkHoisted pre cmd <- translateConditionTokenM condTok
-        pure (beginIfNeeded pre cmd)
+        pure (StatusCommand (beginIfNeeded pre cmd))
     T_Subshell _ tokens ->
-      translateSubshellStatusM tokens
+      StatusCommand <$> translateSubshellStatusM tokens
     T_BraceGroup _ tokens ->
-      translateStatusBlockM tokens
+      StatusCommand <$> translateStatusBlockM tokens
     T_Redirecting _ redirs inner ->
       case exactOutputProcessSubstitution redirs of
         Just procSubBody -> do
           producer <- translateTokenToStatusCmdM inner
           consumer <- translateProcessSubstitutionConsumerM procSubBody
-          pure (procSubOutRedirectCommand producer consumer)
+          pure (StatusCommand (procSubOutRedirectCommand producer consumer))
         Nothing -> do
           cmd <- translateTokenToStatusCmdM inner
           parts <- mapM translateRedirectTokenM redirs
           let MkHoisted pre mRedirs = sequenceA parts
-          pure (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd))
+          pure (StatusCommand (beginIfNeeded pre (attachArgsToCommand (catMaybes mRedirs) cmd)))
     T_Arithmetic _ exprTok ->
-      translateArithmeticStatusM exprTok
+      StatusCommand <$> translateArithmeticStatusM exprTok
     T_AndIf _ l r ->
-      translateStatusConjunction ConjAnd l r
+      StatusCommand <$> translateStatusConjunction ConjAnd l r
     T_OrIf _ l r ->
-      translateStatusConjunction ConjOr l r
+      StatusCommand <$> translateStatusConjunction ConjOr l r
+    T_Annotation _ _ inner ->
+      translateTokenToStatusLoweringM inner
     _ ->
-      pure (Command "true" [])
+      pure (StatusUnsupported (unsupportedStatusMessage tok))
+
+statusLoweringCommand :: StatusLowering -> TranslateM (FishCommand TStatus)
+statusLoweringCommand = \case
+  StatusCommand cmd -> pure cmd
+  StatusUnsupported msg -> do
+    unsupported UnsupportedConstruct (Just msg)
+    pure falseStatusCommand
+
+statusLoweringMaybeCommand :: StatusLowering -> TranslateM (Maybe (FishCommand TStatus))
+statusLoweringMaybeCommand = \case
+  StatusCommand cmd -> pure (Just cmd)
+  StatusUnsupported _ -> pure Nothing
+
+unsupportedStatusMessage :: Token -> Text
+unsupportedStatusMessage tok =
+  "unsupported token in status context: " <> statusTokenDescription tok
+
+statusTokenDescription :: Token -> Text
+statusTokenDescription = \case
+  T_CaseExpression {} -> "case expression"
+  T_IfExpression {} -> "if expression"
+  T_WhileExpression {} -> "while expression"
+  T_UntilExpression {} -> "until expression"
+  T_ForIn {} -> "for loop"
+  T_SelectIn {} -> "select loop"
+  T_Function {} -> "function definition"
+  T_CoProc {} -> "coprocess (coproc)"
+  T_CoProcBody {} -> "coprocess body (coproc)"
+  T_Backgrounded {} -> "background job"
+  T_Script {} -> "script"
+  other -> T.pack (show other)
 
 translatePipelineToStatusM :: [Token] -> [Token] -> TranslateM (FishCommand TStatus)
 translatePipelineToStatusM bang cmds = do
   let (timed, cmds') = stripTimePrefix cmds
-  mCmds <- mapM translateTokenToMaybeStatusCmdM cmds'
-  case catMaybes mCmds of
-    [] -> pure (Command "true" [])
+  case cmds' of
+    [] -> pure trueStatusCommand
     (c : cs) -> do
-      let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
-      pipe' <- applyPipefailIfEnabled pipe
-      pure (if tokensHaveBang bang then Not pipe' else pipe')
+      stages <- traverse translateTokenToStatusCmdM (c : cs)
+      case NE.nonEmpty stages of
+        Nothing -> pure trueStatusCommand
+        Just neStages -> do
+          let pipe = Pipeline (jobPipelineFromListWithTime timed neStages)
+          pipe' <- applyPipefailIfEnabled pipe
+          pure (if tokensHaveBang bang then Not pipe' else pipe')
 
 translateTokenToMaybeStatusCmdM :: Token -> TranslateM (Maybe (FishCommand TStatus))
 translateTokenToMaybeStatusCmdM token =
-  case token of
-    T_SimpleCommand {} -> do
-      cmd <- translateTokenToStatusCmdM token
-      pure (Just cmd)
-    T_Condition {} -> Just <$> translateTokenToStatusCmdM token
-    T_BraceGroup _ tokens -> Just <$> translateStatusBlockM tokens
-    T_Subshell _ tokens -> Just <$> translateSubshellStatusM tokens
-    T_Redirecting _ redirs inner ->
-      case exactOutputProcessSubstitution redirs of
-        Just procSubBody -> do
-          producer <- translateTokenToStatusCmdM inner
-          consumer <- translateProcessSubstitutionConsumerM procSubBody
-          pure (Just (procSubOutRedirectCommand producer consumer))
-        Nothing -> do
-          cmd <- translateTokenToStatusCmdM inner
-          parts <- mapM translateRedirectTokenM redirs
-          let MkHoisted pre mRedirs = sequenceA parts
-          pure (Just (beginIfNeeded pre (attachRedirsToStatus (renderArgs (catMaybes mRedirs)) cmd)))
-    T_Pipeline _ bang cmds -> Just <$> translatePipelineToStatusM bang cmds
-    T_AndIf _ l r ->
-      Just <$> translateStatusConjunction ConjAnd l r
-    T_OrIf _ l r ->
-      Just <$> translateStatusConjunction ConjOr l r
-    _ -> pure Nothing
+  translateTokenToStatusLoweringM token >>= statusLoweringMaybeCommand
 
 stmtToStatusCommand :: FishStatement -> FishCommand TStatus
 stmtToStatusCommand stmt =
@@ -257,8 +289,7 @@ translateProcessSubstitutionConsumerTokenM tok =
           innerStmt <- translateProcessSubstitutionConsumerTokenM inner
           parts <- mapM translateRedirectTokenM redirs
           let MkHoisted pre mRedirs = sequenceA parts
-              redirExprs = renderArgs (catMaybes mRedirs)
-              attached = attachRedirsToStatement redirExprs innerStmt
+              attached = attachArgsToStatement (catMaybes mRedirs) innerStmt
           pure (consumerStatementFromList (pre <> [attached]))
     _ -> do
       mStatus <- translateTokenToMaybeStatusCmdM tok
@@ -402,9 +433,3 @@ translateStatusConjunction conjunction lhs rhs =
   statusConjunction conjunction
     <$> translateTokenToStatusCmdM lhs
     <*> translateTokenToStatusCmdM rhs
-
-attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachRedirsToStatus = attachRedirectsToCommand
-
-attachRedirsToStatement :: [ExprOrRedirect] -> FishStatement -> FishStatement
-attachRedirsToStatement = attachRedirectsToStatement

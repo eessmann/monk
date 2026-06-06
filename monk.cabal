@@ -119,6 +119,7 @@ library
                      , Language.Fish.Translator.Simplify
                      , Language.Fish.Translator.Statement
                      , Language.Fish.Translator.Token
+                     , Language.Fish.Translator.Types
                      , Language.Fish.Translator.Variables
                      , Language.Fish.Translator.Variables.Assignments
                      , Language.Fish.Translator.Variables.Arithmetic
@@ -167,6 +168,7 @@ library
                      , Language.Fish.Translator.ForArithmetic
                      , Language.Fish.Translator.IO
                      , Language.Fish.Translator.Redirections
+                     , Language.Fish.Translator.Redirections.Core
                      , Language.Bash.Parser
 
 library monk-harness-support

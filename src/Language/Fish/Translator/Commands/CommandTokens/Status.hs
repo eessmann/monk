@@ -11,7 +11,8 @@ module Language.Fish.Translator.Commands.CommandTokens.Status
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.Translator.Args (renderArgs)
+import Data.Text qualified as T
+import Language.Fish.Translator.Args (attachArgsToCommand)
 import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTokensWithoutTime)
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
@@ -40,7 +41,7 @@ import ShellCheck.AST
 --------------------------------------------------------------------------------
 
 translateCommandTokensToStatus :: [Token] -> [Token] -> FishCommand TStatus
-translateCommandTokensToStatus assignments cmdTokens = fromMaybe (Command "true" []) $ do
+translateCommandTokensToStatus assignments cmdTokens = fromMaybe trueStatusCommand $ do
   fishCmd <- translateCommandTokensWithoutTime cmdTokens
   if null assignments
     then pure fishCmd
@@ -52,10 +53,10 @@ translateCommandTokensToStatus assignments cmdTokens = fromMaybe (Command "true"
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translatePipelineToStatus bang cmds =
   let (timed, cmds') = stripTimePrefix cmds
-   in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
-        [] -> Command "true" []
-        (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
+   in case NE.nonEmpty (map translateTokenToStatusCmd cmds') of
+        Nothing -> trueStatusCommand
+        Just stages ->
+          let pipe = Pipeline (jobPipelineFromListWithTime timed stages)
            in if tokensHaveBang bang then Not pipe else pipe
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
@@ -65,10 +66,10 @@ translateTokenToMaybeStatusCmd token =
     T_Condition _ _ condTok -> Just (translateConditionToken condTok)
     T_BraceGroup _ tokens -> Just (translateStatusBlock tokens)
     T_Subshell _ tokens -> Just (translateSubshellStatus tokens)
+    T_Banged _ inner -> Just (Not (translateTokenToStatusCmd inner))
     T_Redirecting _ redirs inner ->
       let cmd = translateTokenToStatusCmd inner
-          redirExprs = renderArgs (mapMaybe translateRedirectToken redirs)
-       in Just (attachRedirsToStatus redirExprs cmd)
+       in Just (attachArgsToCommand (mapMaybe translateRedirectToken redirs) cmd)
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
     T_AndIf _ l r -> Just (statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
     T_OrIf _ l r -> Just (statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
@@ -84,8 +85,13 @@ translateTokensToStatusCmd tokens =
     [T_Pipeline _ b c] -> translatePipelineToStatus b c
     [T_BraceGroup _ innerTokens] -> translateStatusBlock innerTokens
     [T_Subshell _ innerTokens] -> translateSubshellStatus innerTokens
+    [T_Banged _ inner] -> Not (translateTokenToStatusCmd inner)
+    [T_Redirecting _ redirs inner] ->
+      attachArgsToCommand (mapMaybe translateRedirectToken redirs) (translateTokenToStatusCmd inner)
     [T_AndIf _ l r] -> statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
     [T_OrIf _ l r] -> statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
+    [T_Annotation _ _ inner] -> translateTokenToStatusCmd inner
+    [tok] | tokenIsUnsupportedStatus tok -> falseStatusCommand
     (c : args) -> Command (tokenToLiteralText c) (map translateTokenToExprOrRedirect args)
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
@@ -99,9 +105,20 @@ translateTimeReserved :: Text -> [Token] -> Maybe (FishCommand TStatus)
 translateTimeReserved name args
   | name /= "time" = Nothing
   | otherwise = case args of
-      [tok] -> translateTimedToken tok
-      _ -> Nothing
+      [] -> Nothing
+      arg1 : _
+        | isTimeOption arg1 -> Nothing
+      [tok] -> translateTimedToken tok <|> translateTimedCommand args
+      _ -> translateTimedCommand args
   where
+    isTimeOption tok =
+      T.isPrefixOf "-" (tokenToLiteralText tok)
+
+    translateTimedCommand toks =
+      case translateCommandTokensWithoutTime toks of
+        Just cmd -> Just (Pipeline (jobPipelineFromListWithTime True (cmd NE.:| [])))
+        Nothing -> Nothing
+
     translateTimedToken tok =
       case tok of
         T_Pipeline _ bang cmds -> Just (timedPipeline bang cmds)
@@ -109,21 +126,39 @@ translateTimeReserved name args
         _ -> Nothing
 
     timedPipeline bang cmds =
-      case mapMaybe translateTokenToMaybeStatusCmd cmds of
-        [] -> Command "true" []
-        (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime True (c NE.:| cs))
+      case NE.nonEmpty (map translateTokenToStatusCmd cmds) of
+        Nothing -> trueStatusCommand
+        Just stages ->
+          let pipe = Pipeline (jobPipelineFromListWithTime True stages)
            in if tokensHaveBang bang then Not pipe else pipe
 
 translateStatusBlock :: [Token] -> FishCommand TStatus
 translateStatusBlock tokens =
   statusCommandBlock
-    (mapMaybe translateTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
+    (map translateTokenToStatusCmd (stripSeparatorTokens tokens))
 
 translateSubshellStatus :: [Token] -> FishCommand TStatus
 translateSubshellStatus tokens =
   statusCommandBlock
-    (mapMaybe translateTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
+    (map translateTokenToStatusCmd (stripSeparatorTokens tokens))
 
-attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachRedirsToStatus = attachRedirectsToCommand
+trueStatusCommand :: FishCommand TStatus
+trueStatusCommand = Command "true" []
+
+falseStatusCommand :: FishCommand TStatus
+falseStatusCommand = Command "false" []
+
+tokenIsUnsupportedStatus :: Token -> Bool
+tokenIsUnsupportedStatus = \case
+  T_CaseExpression {} -> True
+  T_IfExpression {} -> True
+  T_WhileExpression {} -> True
+  T_UntilExpression {} -> True
+  T_ForIn {} -> True
+  T_SelectIn {} -> True
+  T_Function {} -> True
+  T_CoProc {} -> True
+  T_CoProcBody {} -> True
+  T_Backgrounded {} -> True
+  T_Script {} -> True
+  _ -> False

@@ -45,7 +45,7 @@ unitRefactorTests =
       H.testCase "Translator syntax boundary import footprint does not grow" $ do
         repoRoot <- makeAbsolute "."
         files <- translatorImplementationFiles repoRoot
-        users <- fmap concat (traverse syntaxBoundaryImports files)
+        users <- fmap concat (traverse (moduleImports "Language.Fish.Translator.Syntax") files)
         H.assertBool
           ( "translator syntax boundary import count grew above "
               <> show translatorSyntaxImportLimit
@@ -53,6 +53,11 @@ unitRefactorTests =
               <> show users
           )
           (length users <= translatorSyntaxImportLimit),
+      H.testCase "Translator raw type facade imports stay allowlisted" $ do
+        repoRoot <- makeAbsolute "."
+        files <- translatorImplementationFiles repoRoot
+        offenders <- fmap concat (traverse (rawTypeFacadeImportOffenders repoRoot) files)
+        offenders H.@?= [],
       H.testCase "Test support constructs Fish through DSL except explicit raw backend tests" $ do
         repoRoot <- makeAbsolute "."
         testFiles <- collectHsFiles (repoRoot </> "test")
@@ -145,15 +150,33 @@ forbiddenTranslatorImportRoots =
   ]
 
 translatorSyntaxImportLimit :: Int
-translatorSyntaxImportLimit = 57
+translatorSyntaxImportLimit = 56
 
-syntaxBoundaryImports :: FilePath -> IO [FilePath]
-syntaxBoundaryImports path = do
+moduleImports :: Text -> FilePath -> IO [FilePath]
+moduleImports moduleName path = do
   contents <- decodeUtf8 <$> readFileBS path
   pure
     [ path
     | lineText <- T.lines contents,
-      importedModule lineText == Just "Language.Fish.Translator.Syntax"
+      importedModule lineText == Just moduleName
+    ]
+
+rawTypeFacadeImportOffenders :: FilePath -> FilePath -> IO [FilePath]
+rawTypeFacadeImportOffenders repoRoot path = do
+  users <- moduleImports "Language.Fish.Translator.Types" path
+  let relativePath = normalise (makeRelative repoRoot path)
+  pure $
+    if relativePath `elem` translatorTypesImportAllowlist
+      then []
+      else users
+
+translatorTypesImportAllowlist :: [FilePath]
+translatorTypesImportAllowlist =
+  map
+    normalise
+    [ "src/Language/Fish/Translator/Hoist.hs",
+      "src/Language/Fish/Translator/Hoist/Monad.hs",
+      "src/Language/Fish/Translator/Redirections/Core.hs"
     ]
 
 forbiddenRawTestImports :: FilePath -> FilePath -> IO [String]

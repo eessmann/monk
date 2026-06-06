@@ -37,7 +37,7 @@ import ShellCheck.AST
 translatePipeline :: [Token] -> [Token] -> FishStatement
 translatePipeline bang cmds =
   let (timed, cmds') = stripTimePrefix cmds
-   in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
+   in case map translateTokenToStatusCmd cmds' of
         [] -> Stmt (Command "true" [])
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
@@ -62,15 +62,16 @@ translateTokenToMaybeStatusCmd token =
     T_SimpleCommand _ assignments rest -> Just (translateCommandTokensToStatus assignments rest)
     T_Condition {} -> Just (translateTokenToStatusCmd token)
     T_Redirecting _ _ inner -> translateTokenToMaybeStatusCmd inner
+    T_Banged _ inner -> Just (Not (translateTokenToStatusCmd inner))
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
     T_AndIf _ l r -> Just (statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
     T_OrIf _ l r -> Just (statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
-    _ -> Nothing
+    _ -> Just (Command "false" [])
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus
 translatePipelineToStatus bang cmds =
   let (timed, cmds') = stripTimePrefix cmds
-   in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
+   in case map translateTokenToStatusCmd cmds' of
         [] -> Command "true" []
         (c : cs) ->
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))

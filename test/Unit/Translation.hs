@@ -13,8 +13,8 @@ import Monk.Translation
     renderTranslation,
     stateWarnings,
     strictConfig,
-    translationState,
     translateParseResult,
+    translationState,
     warnMessage,
   )
 import Test.Tasty (TestTree, testGroup)
@@ -95,6 +95,11 @@ unitTranslationTests =
         out <- translateScript "echo hi > ${OUT:=/tmp/out}"
         T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
         T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected redirection to use OUT",
+      H.testCase "Status redirection expansion hoists side effects" $ do
+        out <- translateScript "if true > ${OUT:=/tmp/out}; then echo ok; fi"
+        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
+        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected condition redirection to use OUT"
+        T.isInfixOf "echo 'ok'" out H.@? "expected then body",
       H.testCase "Heredoc expansion hoists side effects" $ do
         let script = "cat <<EOF\n${VAL:=ok}\nEOF\n"
         out <- translateScript script
@@ -132,6 +137,29 @@ unitTranslationTests =
         H.assertBool
           ("expected command-substitution conjunctions, got: " <> T.unpack out)
           (T.isInfixOf "or " out && T.isInfixOf "and " out),
+      H.testCase "Command substitution status fallback is not silent success" $ do
+        out <- translateScript "echo \"$(case x in x) false ;; esac || echo fallback)\""
+        T.isInfixOf "(false" out H.@? "expected explicit false fallback in command substitution"
+        T.isInfixOf "or echo 'fallback'" out H.@? "expected fallback branch to remain reachable"
+        H.assertBool
+          ("unexpected silent true fallback in command substitution: " <> T.unpack out)
+          (not (T.isInfixOf "(true" out)),
+      H.testCase "Command substitution status redirection hoists target expansion" $ do
+        out <- translateScript "echo \"$(true > ${OUT:=/tmp/out} && printf ok)\""
+        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected substitution redirection prelude"
+        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected substitution redirection target"
+        T.isInfixOf "and printf 'ok'" out H.@? "expected status conjunction",
+      H.testCase "Command substitution redirections share operator parsing" $ do
+        out <- translateScript "echo \"$(printf hi &> out; printf bye 3>&-; cat <> rw)\""
+        T.isInfixOf "printf 'hi' > 'out' 2>&1" out H.@? "expected both-output redirect"
+        T.isInfixOf "printf 'bye' 3>&-" out H.@? "expected fd close redirect"
+        T.isInfixOf "cat <> 'rw'" out H.@? "expected read-write redirect",
+      H.testCase "Unsupported pipeline status stage is not silent success" $ do
+        out <- translateScript "case x in x) false ;; esac | wc -c"
+        T.isInfixOf "false | wc '-c'" out H.@? "expected unsupported stage to fail closed"
+        H.assertBool
+          ("unexpected silent true pipeline stage: " <> T.unpack out)
+          (not (T.isInfixOf "true | wc" out)),
       H.testCase "Errexit guard is command-substitution aware" $ do
         let script =
               T.unlines
@@ -452,8 +480,8 @@ unitTranslationTests =
         H.assertBool "unexpected INT body overwrite" (not (T.isInfixOf "set --global __monk_trap_body_int 'echo second'" out)),
       H.testCase "Trap clear removes Monk-generated handlers" $ do
         out <- translateScript "trap - EXIT INT"
-        out @?=
-          T.intercalate
+        out
+          @?= T.intercalate
             "\n"
             [ "functions '-e' '__monk_trap_exit'",
               "set '-e' '__monk_trap_body_exit'",

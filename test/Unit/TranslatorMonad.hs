@@ -5,6 +5,8 @@ module Unit.TranslatorMonad
   )
 where
 
+import Data.Text qualified as T
+import Monk.AST (SourcePos (..), SourceRange (..))
 import Monk.Translation
   ( TranslateError (..),
     TranslateState,
@@ -18,12 +20,10 @@ import Monk.Translation
     statePipefailEnabled,
     stateWarnings,
     strictConfig,
-    translationState,
     translateParseResult,
+    translationState,
     warnMessage,
   )
-import Data.Text qualified as T
-import Monk.AST (SourcePos (..), SourceRange (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -65,11 +65,10 @@ unitTranslatorMonadTests =
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            fmap warnMessage (stateWarnings st)
-              @?= [ "Coprocess (coproc)",
-                    "Coprocess (coproc)"
-                  ],
+             in fmap warnMessage (stateWarnings st)
+                  @?= [ "Coprocess (coproc)",
+                        "Coprocess (coproc)"
+                      ],
       H.testCase "Background tracking warning is emitted once across repeated wait translation" $ do
         (_out, st) <- translateWithState "sleep 1 &\nwait\nwait"
         fmap warnCode (stateWarnings st)
@@ -100,40 +99,36 @@ unitTranslatorMonadTests =
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            H.assertBool
-              "unexpected warning for arithmetic short-circuit"
-              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
+             in H.assertBool
+                  "unexpected warning for arithmetic short-circuit"
+                  (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Arithmetic short-circuit (||) no longer warns on side effects" $ do
         result <- parseBashScript "spec.sh" "echo $((a++ || b++))"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            H.assertBool
-              "unexpected warning for arithmetic short-circuit"
-              (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
+             in H.assertBool
+                  "unexpected warning for arithmetic short-circuit"
+                  (not (any ((== "Arithmetic short-circuit may not preserve side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Arithmetic ternary no longer warns on side effects" $ do
         result <- parseBashScript "spec.sh" "echo $((a ? b++ : c++))"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            H.assertBool
-              "unexpected warning for arithmetic ternary"
-              (not (any ((== "Arithmetic ternary may not preserve conditional side effects") . warnMessage) (stateWarnings st))),
+             in H.assertBool
+                  "unexpected warning for arithmetic ternary"
+                  (not (any ((== "Arithmetic ternary may not preserve conditional side effects") . warnMessage) (stateWarnings st))),
       H.testCase "Read -r is treated as no-op" $ do
         result <- parseBashScript "spec.sh" "read -r name"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            H.assertBool
-              "unexpected warning for read -r"
-              (not (any ((== "read -r has no fish equivalent; backslash escapes may differ") . warnMessage) (stateWarnings st))),
+             in H.assertBool
+                  "unexpected warning for read -r"
+                  (not (any ((== "read -r has no fish equivalent; backslash escapes may differ") . warnMessage) (stateWarnings st))),
       H.testCase "Read array uses exact newline helper without IFS warning" $ do
         result <- parseBashScript "spec.sh" "read -a arr"
         case translateParseResult defaultConfig result of
@@ -142,11 +137,11 @@ unitTranslatorMonadTests =
             let st = translationState translation
                 out = renderTranslation translation
              in do
-              H.assertBool
-                "unexpected warning for exact newline array read"
-                (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
-              H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
-              H.assertBool "expected array assignment" (T.isInfixOf "set --global arr $__monk_read_fields" out),
+                  H.assertBool
+                    "unexpected warning for exact newline array read"
+                    (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+                  H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
+                  H.assertBool "expected array assignment" (T.isInfixOf "set --global arr $__monk_read_fields" out),
       H.testCase "Set -euo pipefail enables errexit/pipefail and warns about nounset" $ do
         result <- parseBashScript "spec.sh" "set -euo pipefail"
         case translateParseResult defaultConfig result of
@@ -230,6 +225,48 @@ unitTranslatorMonadTests =
             warnMessage warning @?= "output process substitution consumer requires manual review"
           Left err -> H.assertFailure ("unexpected strict error: " <> show err)
           Right _ -> H.assertFailure "expected strict process substitution consumer failure",
+      H.testCase "stderr output process substitution stays on warning-driven generic path" $ do
+        (out, st) <- translateWithState "printf hi 2> >(wc -c > err.count)"
+        H.assertBool "expected generic output process substitution helper" (T.isInfixOf "__monk_procsub_out" out)
+        H.assertBool
+          "unexpected stdout exact temp-file path"
+          (not (T.isInfixOf "set --local __monk_psub_file $__monk_psub_dir'/stdout'" out))
+        H.assertBool "expected process substitution warning code" (any ((== ProcessSubstitutionIssue) . warnCode) (stateWarnings st)),
+      H.testCase "unsupported status-context case expression warns instead of silently succeeding" $ do
+        (out, st) <- translateWithState "case x in x) false ;; esac && echo bad"
+        H.assertBool "expected unsupported status warning code" (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st))
+        assertHasWarningContaining "status context" st
+        assertHasRenderedLine "false" out
+        T.isInfixOf "and echo 'bad'" out H.@? "expected conjunction branch to remain visible"
+        H.assertBool
+          ("unexpected silent true status fallback: " <> T.unpack out)
+          (not (T.isInfixOf "true\nand echo 'bad'" out)),
+      H.testCase "unsupported if-condition status expression warns instead of silently succeeding" $ do
+        (out, st) <- translateWithState "if case x in x) false ;; esac; then echo bad; else echo ok; fi"
+        H.assertBool "expected unsupported status warning code" (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st))
+        assertHasWarningContaining "status context" st
+        T.isInfixOf "if false" out H.@? "expected condition to fail closed"
+        H.assertBool
+          ("unexpected silent true condition: " <> T.unpack out)
+          (not (T.isInfixOf "if true" out)),
+      H.testCase "banged pipefail pipeline remains supported in status context" $ do
+        (out, st) <- translateWithState "set -o pipefail\nif ! false | true; then echo ok; else echo bad; fi"
+        statePipefailEnabled st @?= True
+        H.assertBool
+          "unexpected unsupported status warning"
+          (not (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st)))
+        T.isInfixOf "if not begin" out H.@? "expected banged pipeline wrapper"
+        T.isInfixOf "__monk_pipefail $pipestatus" out H.@? "expected pipefail helper inside wrapper",
+      H.testCase "strict mode fails on unsupported status-context expression" $ do
+        result <- parseBashScript "spec.sh" "case x in x) false ;; esac && echo bad"
+        case translateParseResult strictConfig result of
+          Left (Unsupported warning) -> do
+            warnCode warning @?= UnsupportedConstruct
+            H.assertBool
+              ("unexpected warning message: " <> T.unpack (warnMessage warning))
+              ("status context" `T.isInfixOf` warnMessage warning)
+          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
+          Right _ -> H.assertFailure "expected strict unsupported status-context failure",
       H.testCase "read -d lowers to exact helper without semantic warning" $ do
         (out, st) <- translateWithState "read -d : first second"
         H.assertBool
@@ -413,3 +450,9 @@ assertHasWarningContaining needle st =
   H.assertBool
     ("expected warning containing: " <> toString needle)
     (any (T.isInfixOf needle . warnMessage) (stateWarnings st))
+
+assertHasRenderedLine :: T.Text -> T.Text -> Assertion
+assertHasRenderedLine expected out =
+  H.assertBool
+    ("expected rendered line: " <> toString expected <> "\nin:\n" <> T.unpack out)
+    (any ((== expected) . T.strip) (T.lines out))
