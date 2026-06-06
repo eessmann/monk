@@ -1,5 +1,14 @@
-module Language.Fish.Translator.DSL
+{-# LANGUAGE LambdaCase #-}
+
+module Language.Fish.Translator.Syntax
   ( module Language.Fish.AST,
+    DSL.Script,
+    Arg,
+    argExpr,
+    argRedirect,
+    renderArg,
+    renderArgs,
+    statementToScript,
     attachRedirectsToCommand,
     attachRedirectsToStatement,
   )
@@ -7,6 +16,30 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.AST
+import Language.Fish.DSL.Internal
+  ( Arg (UnsafeArgExpr, UnsafeArgRedirect),
+    ArgumentType,
+    Expr (UnsafeExpr),
+    lowerArg,
+  )
+import Language.Fish.DSL.Internal qualified as DSL
+
+argExpr :: (ArgumentType t, Typeable t) => FishExpr t -> Arg
+argExpr = UnsafeArgExpr . UnsafeExpr
+
+argRedirect :: Redirect -> Arg
+argRedirect = UnsafeArgRedirect
+
+renderArg :: Arg -> ExprOrRedirect
+renderArg = lowerArg
+
+renderArgs :: [Arg] -> [ExprOrRedirect]
+renderArgs = map renderArg
+
+statementToScript :: FishStatement -> DSL.Script
+statementToScript = \case
+  StmtList stmts -> DSL.UnsafeScript (map DSL.UnsafeStmt stmts)
+  stmt -> DSL.UnsafeScript [DSL.UnsafeStmt stmt]
 
 attachRedirectsToCommand :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirectsToCommand redirs cmd =

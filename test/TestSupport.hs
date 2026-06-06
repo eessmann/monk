@@ -7,20 +7,12 @@ module TestSupport
   )
 where
 
-import Data.List.NonEmpty qualified as NE
-import Monk.AST.Raw
+import Monk.AST (JobList, command, condition)
 import Monk.Translation
 import Test.Tasty.HUnit as H
 
-trueCond :: FishJobList
-trueCond =
-  MkFishJobList
-    ( MkFishJobConjunction
-        Nothing
-        (MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False)
-        []
-        NE.:| []
-    )
+trueCond :: JobList
+trueCond = condition (command "true" [])
 
 translateScript :: Text -> IO Text
 translateScript script = do

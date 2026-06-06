@@ -17,7 +17,6 @@ import Language.Fish.Translator.Commands
     translateTokenToStatusCmd,
     translateTokenToStatusCmdM,
   )
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Pipeline
   ( applyPipefailIfEnabled,
@@ -27,6 +26,7 @@ import Language.Fish.Translator.Pipeline
     wrapErrexitIfEnabled,
   )
 import Language.Fish.Translator.Statement (statusConjunction)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokensHaveBang)
 import ShellCheck.AST
 

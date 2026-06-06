@@ -12,13 +12,13 @@ import Data.Char (isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.Translator.Args (Arg, argRedirect)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist
   ( Hoisted (..),
     hoist,
     prependHoist,
   )
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
     translateTokenToExpr,

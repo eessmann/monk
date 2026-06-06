@@ -10,7 +10,7 @@ where
 import Data.Char (isDigit)
 import Data.Text qualified as T
 import Language.Fish.Translator.Commands.Read.Types
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import ShellCheck.AST
 

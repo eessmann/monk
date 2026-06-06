@@ -8,7 +8,7 @@ The public API is intentionally explicit:
 
 - `Monk.Translation`
   - Parse, translate, and render entry points.
-  - Owns `TranslationResult`, `TranslationFailure`, `Translation`, and translation-state access.
+  - Owns `TranslationResult`, `TranslationFailure`, `Translation`, and translation-state access. Successful results retain the typed DSL `Script`; `translationStatements` is the explicit compatibility lowering helper for raw backend consumers.
 - `Monk.AST`
   - Convenience re-export of the public type-safe Fish construction DSL for downstream code that needs to build generated Fish.
 - `Language.Fish.DSL`
@@ -28,7 +28,7 @@ The public API is intentionally explicit:
 
 ## Translator Internals
 
-The translator is organized around the typed Fish DSL/IR and small focused subsystems:
+The translator is organized around a typed Fish DSL handoff and small focused subsystems:
 - `Language.Fish.AST`
   - Raw renderer-backend AST surface used internally and re-exported explicitly as `Monk.AST.Raw`.
 - `Language.Fish.AST.Common`
@@ -37,8 +37,8 @@ The translator is organized around the typed Fish DSL/IR and small focused subsy
   - Recursive statement, expression, job, and redirection structures.
 - `Language.Fish.Translator`
   - Top-level statement dispatch and orchestration; the public translation handoff emits a DSL `Script` before `Monk.Translation` lowers it for rendering.
-- `Language.Fish.Translator.DSL`
-  - Transitional translator-only choke point for raw-shaped construction while the remaining translator modules are migrated onto typed DSL helpers. Direct `Language.Fish.AST` imports are forbidden in translator modules outside this boundary, and tests ratchet the facade import count downward over time.
+- `Language.Fish.Translator.Syntax`
+  - Internal translator-only boundary for raw-shaped construction while remaining translator modules are migrated onto typed DSL helpers. Direct `Language.Fish.AST`, `Language.Fish.DSL.Internal`, and `Language.Fish.DSL.Lower` imports are forbidden in translator modules outside this boundary.
 - `Language.Fish.Translator.Commands.Read`
   - Facade over read lowering.
 - `Language.Fish.Translator.Commands.Read.Parse`

@@ -6,8 +6,8 @@ module Language.Fish.Translator.Variables.ParamParse
   )
 where
 
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist.Monad (HoistedM)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables.ParamExpansion
   ( parseParamExpansion,
     parseParamExpansionStr,

@@ -33,6 +33,7 @@ where
 
 import Language.Bash.Parser (parseBashFile, parseBashScript)
 import Language.Fish.AST (FishStatement (..))
+import Language.Fish.DSL (Script)
 import Language.Fish.DSL.Lower (lowerScript)
 import Language.Fish.Inline (Translation (..), WarnFn, inlineStatements)
 import Language.Fish.Pretty (renderFish)
@@ -48,8 +49,8 @@ import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 
 -- | Result of a successful translation.
 data TranslationResult = MkTranslationResult
-  { -- | Root fish statement produced by the translator.
-    translationStatement :: FishStatement,
+  { -- | Typed fish script produced by the translator before backend lowering.
+    translationScript :: Script,
     -- | Final translation state containing warnings and translator flags.
     translationState :: TranslateState
   }
@@ -70,7 +71,7 @@ translateParseResult ::
   Either TranslateError TranslationResult
 translateParseResult cfg parseResult = do
   (script, st) <- Translator.translateParseResult cfg parseResult
-  pure (MkTranslationResult (StmtList (lowerScript script)) st)
+  pure (MkTranslationResult script st)
 
 -- | Parse and translate a Bash file on disk.
 translateBashFile ::
@@ -107,9 +108,9 @@ translateBashScript cfg fileName scriptText = do
 translationWarnings :: TranslationResult -> [Warning]
 translationWarnings = stateWarnings . translationState
 
--- | Flatten the translated root statement into top-level statements.
+-- | Lower the typed translated script into backend statements.
 translationStatements :: TranslationResult -> [FishStatement]
-translationStatements = flattenStatements . translationStatement
+translationStatements = lowerScript . translationScript
 
 -- | Render a translation result as fish source text.
 renderTranslation :: TranslationResult -> Text

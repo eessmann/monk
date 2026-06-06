@@ -17,13 +17,13 @@ where
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.Translator.Commands.Read.Types
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
     ensureHelper,
   )
 import Language.Fish.Translator.Pipeline (jobPipelineFromList, pipelineOf)
+import Language.Fish.Translator.Syntax
 
 ensureReadDelimHelper :: TranslateM ()
 ensureReadDelimHelper =

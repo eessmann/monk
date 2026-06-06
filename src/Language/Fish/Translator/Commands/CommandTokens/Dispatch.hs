@@ -11,11 +11,11 @@ import Language.Fish.Translator.Commands.CommandTokens.Core
     translateCommandTokensWithoutTimeM,
   )
 import Language.Fish.Translator.Commands.CommandTokens.Status (translateTimeReserved)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Pipeline (applyPipefailIfEnabled)
 import Language.Fish.Translator.Redirections (parseRedirectTokens, parseRedirectTokensM)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import ShellCheck.AST
 

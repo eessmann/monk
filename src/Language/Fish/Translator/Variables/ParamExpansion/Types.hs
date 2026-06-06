@@ -15,7 +15,7 @@ module Language.Fish.Translator.Variables.ParamExpansion.Types
   )
 where
 
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax
 import ShellCheck.AST (Token)
 
 data ParamExpansion (t :: FishType) where

@@ -19,12 +19,12 @@ import Language.Fish.Translator.Commands.Read.Runtime
     statusFromVarCommand,
   )
 import Language.Fish.Translator.Commands.Read.Types
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslateState (..),
     TranslationContext (..),
   )
+import Language.Fish.Translator.Syntax
 import Prelude hiding (gets)
 
 translateReadExactM :: ExactReadDelim -> TranslateM (FishCommand TStatus)

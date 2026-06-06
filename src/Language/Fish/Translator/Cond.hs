@@ -15,10 +15,10 @@ module Language.Fish.Translator.Cond
   )
 where
 
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Statement (statusConjunction)
+import Language.Fish.Translator.Syntax
 import ShellCheck.AST
 
 data Cond

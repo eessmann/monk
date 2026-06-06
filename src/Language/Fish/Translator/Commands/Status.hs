@@ -19,7 +19,6 @@ import Language.Fish.Translator.Commands.CommandTokens (translateTokensToStatusC
 import Language.Fish.Translator.Commands.SimpleCommand (translateSimpleCommandMWith)
 import Language.Fish.Translator.Commands.Tests (translateConditionTokenM)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Monad
   ( TranslateM,
@@ -41,6 +40,7 @@ import Language.Fish.Translator.Statement
     toNonEmptyStmtList,
     translateSubshellStatusCommand,
   )
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokensHaveBang,

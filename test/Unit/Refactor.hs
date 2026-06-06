@@ -8,7 +8,7 @@ where
 import Data.Char (isAlphaNum)
 import Data.Text qualified as T
 import System.Directory (doesDirectoryExist, listDirectory, makeAbsolute)
-import System.FilePath (takeExtension, (</>))
+import System.FilePath (makeRelative, normalise, takeExtension, (</>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import TestSupport (translateScript)
@@ -37,24 +37,34 @@ unitRefactorTests =
         files <- fmap concat (traverse (collectHsFiles . (repoRoot </>)) ["src", "app", "test", "scripts"])
         offenders <- fmap concat (traverse punningConstructors files)
         offenders H.@?= [],
-      H.testCase "Translator modules use the DSL/raw boundary instead of importing raw AST directly" $ do
+      H.testCase "Translator implementation modules do not import raw AST, DSL internals, or transitional facade" $ do
         repoRoot <- makeAbsolute "."
-        files <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
-        let boundary = repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "DSL.hs"
-            checkedFiles = filter (/= boundary) files
-        offenders <- fmap concat (traverse directRawAstImports checkedFiles)
+        files <- translatorImplementationFiles repoRoot
+        offenders <- fmap concat (traverse forbiddenTranslatorImports files)
         offenders H.@?= [],
-      H.testCase "Translator DSL facade usage is ratcheted while migration continues" $ do
+      H.testCase "Translator syntax boundary import footprint does not grow" $ do
         repoRoot <- makeAbsolute "."
-        files <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
-        users <- fmap concat (traverse translatorDslImports files)
+        files <- translatorImplementationFiles repoRoot
+        users <- fmap concat (traverse syntaxBoundaryImports files)
         H.assertBool
-          ( "translator DSL facade import count grew above "
-              <> show translatorDslImportLimit
+          ( "translator syntax boundary import count grew above "
+              <> show translatorSyntaxImportLimit
               <> ": "
               <> show users
           )
-          (length users <= translatorDslImportLimit)
+          (length users <= translatorSyntaxImportLimit),
+      H.testCase "Test support constructs Fish through DSL except explicit raw backend tests" $ do
+        repoRoot <- makeAbsolute "."
+        testFiles <- collectHsFiles (repoRoot </> "test")
+        offenders <- fmap concat (traverse (forbiddenRawTestImports repoRoot) testFiles)
+        offenders H.@?= [],
+      H.testCase "Public Fish DSL export list hides unsafe constructors and lowerers" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "DSL.hs")
+        let exports = dslExportList contents
+            forbidden = ["Unsafe", "lower"]
+            offenders = filter (`T.isInfixOf` exports) forbidden
+        offenders H.@?= []
     ]
 
 collectHsFiles :: FilePath -> IO [FilePath]
@@ -104,30 +114,67 @@ trimIdent = T.takeWhile isIdentChar
 isIdentChar :: Char -> Bool
 isIdentChar c = isAlphaNum c || c == '_' || c == '\''
 
-directRawAstImports :: FilePath -> IO [String]
-directRawAstImports path = do
+translatorImplementationFiles :: FilePath -> IO [FilePath]
+translatorImplementationFiles repoRoot = do
+  subtree <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
+  pure
+    ( (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator.hs")
+        : filter (not . isTranslatorBoundary) subtree
+    )
+  where
+    isTranslatorBoundary path =
+      normalise path
+        == normalise (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Syntax.hs")
+
+forbiddenTranslatorImports :: FilePath -> IO [String]
+forbiddenTranslatorImports path = do
   contents <- decodeUtf8 <$> readFileBS path
   pure
     [ path <> ":" <> show lineNo <> ": " <> toString lineText
     | (lineNo, lineText) <- zip [1 :: Int ..] (T.lines contents),
-      isImportUnder "Language.Fish.AST" lineText
+      any (`isImportUnder` lineText) forbiddenTranslatorImportRoots
     ]
 
-translatorDslImportLimit :: Int
-translatorDslImportLimit = 56
+forbiddenTranslatorImportRoots :: [Text]
+forbiddenTranslatorImportRoots =
+  [ "Language.Fish.AST",
+    "Monk.AST.Raw",
+    "Language.Fish.DSL.Internal",
+    "Language.Fish.DSL.Lower",
+    "Language.Fish.Translator.DSL"
+  ]
 
-translatorDslImports :: FilePath -> IO [FilePath]
-translatorDslImports path = do
+translatorSyntaxImportLimit :: Int
+translatorSyntaxImportLimit = 57
+
+syntaxBoundaryImports :: FilePath -> IO [FilePath]
+syntaxBoundaryImports path = do
   contents <- decodeUtf8 <$> readFileBS path
   pure
     [ path
     | lineText <- T.lines contents,
-      isImportOf "Language.Fish.Translator.DSL" lineText
+      importedModule lineText == Just "Language.Fish.Translator.Syntax"
     ]
 
-isImportOf :: Text -> Text -> Bool
-isImportOf moduleName rawLine =
-  Just moduleName == importedModule rawLine
+forbiddenRawTestImports :: FilePath -> FilePath -> IO [String]
+forbiddenRawTestImports repoRoot path
+  | makeRelative repoRoot path `elem` rawBackendTestAllowlist = pure []
+  | otherwise = do
+      contents <- decodeUtf8 <$> readFileBS path
+      pure
+        [ path <> ":" <> show lineNo <> ": " <> toString lineText
+        | (lineNo, lineText) <- zip [1 :: Int ..] (T.lines contents),
+          any (`isImportUnder` lineText) forbiddenTestImportRoots
+        ]
+
+rawBackendTestAllowlist :: [FilePath]
+rawBackendTestAllowlist = []
+
+forbiddenTestImportRoots :: [Text]
+forbiddenTestImportRoots =
+  [ "Language.Fish.AST",
+    "Monk.AST.Raw"
+  ]
 
 isImportUnder :: Text -> Text -> Bool
 isImportUnder moduleRoot rawLine =
@@ -142,3 +189,8 @@ importedModule rawLine =
     "import" : "qualified" : imported : _ -> Just imported
     "import" : imported : _ -> Just imported
     _ -> Nothing
+
+dslExportList :: Text -> Text
+dslExportList contents =
+  case T.breakOn "\nwhere" contents of
+    (header, _) -> header

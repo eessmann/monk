@@ -7,7 +7,7 @@ module Language.Fish.Translator.Rename
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax
 
 renameStatementVariable :: Text -> Text -> FishStatement -> FishStatement
 renameStatementVariable old new = renameStmt

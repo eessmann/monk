@@ -18,10 +18,10 @@ import Language.Fish.Translator.Args
     argExpr,
     renderArg,
   )
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic
   ( arithArgsPlanM,

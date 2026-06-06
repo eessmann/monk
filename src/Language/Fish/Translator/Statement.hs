@@ -13,7 +13,6 @@ module Language.Fish.Translator.Statement
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Monad
   ( TranslateM,
@@ -21,6 +20,7 @@ import Language.Fish.Translator.Monad
     noteUnsupported,
   )
 import Language.Fish.Translator.Pipeline (pipelineOf)
+import Language.Fish.Translator.Syntax
 
 -- | Drop empty statements and convert to NonEmpty if possible.
 toNonEmptyStmtList :: [FishStatement] -> Maybe (NonEmpty FishStatement)

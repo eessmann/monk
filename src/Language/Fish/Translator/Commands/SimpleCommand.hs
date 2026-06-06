@@ -11,12 +11,12 @@ import Language.Fish.Translator.Commands.CommandTokens
   ( translateCommandTokens,
     translateCommandTokensM,
   )
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (wrapErrexitIfEnabled)
 import Language.Fish.Translator.Statement (isEmptyStatement, toNonEmptyStmtList)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables (translateAssignmentWithFlags, translateAssignmentWithFlagsM)
 import ShellCheck.AST

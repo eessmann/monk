@@ -6,9 +6,9 @@ module Language.Fish.Translator.Commands.Args
 where
 
 import Language.Fish.Translator.Args (Arg)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Variables
   ( translateTokenToArgM,
     translateTokenToExprM,

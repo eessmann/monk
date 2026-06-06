@@ -5,12 +5,12 @@ module Language.Fish.Translator.Builtins.Shift
   )
 where
 
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),
     addWarning,
   )
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables (tokenToLiteralText)
 import ShellCheck.AST
 

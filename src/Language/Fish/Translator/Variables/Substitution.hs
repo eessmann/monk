@@ -18,7 +18,6 @@ import Language.Fish.Translator.Cond
     condFromTokenWith,
     condToCommand,
   )
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM, withCommandSubstScope)
@@ -29,6 +28,7 @@ import Language.Fish.Translator.Statement
     statusConjunction,
     translateSubshellStatusCommand,
   )
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokenHasExpansion,

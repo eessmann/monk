@@ -9,8 +9,8 @@ translates what it understands, emits warnings for the parts that need a human t
 
 ## What It Does
 
-Monk parses Bash with ShellCheck, lowers it into a typed fish IR, and renders
-fish source from there.
+Monk parses Bash with ShellCheck, hands translation output through a typed fish
+DSL boundary, and renders fish source from the existing pretty-printer backend.
 
 Today it handles a lot of ordinary shell code:
 
@@ -91,6 +91,10 @@ the type level and lowers through the existing pretty-printer backend. Code
 that intentionally needs raw constructors should import `Monk.AST.Raw`; this is
 a breaking change for callers that previously used `Monk.AST` as the raw
 constructor surface.
+
+Successful translations now retain the typed `Script` in `TranslationResult`.
+Call `translationStatements` when compatibility code needs the lowered raw
+renderer-backend statements.
 
 Example:
 

@@ -22,10 +22,10 @@ where
 
 import Data.Text qualified as T
 import Language.Fish.Translator.Args (Arg)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM)
 import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Variables.Expressions.Arrays
   ( translateArrayAssignmentMWith,
     translateArrayAssignmentWith,

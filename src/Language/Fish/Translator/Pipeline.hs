@@ -14,12 +14,6 @@ where
 
 import Control.Monad.State.Strict qualified as State
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.DSL.Internal
-  ( Command (UnsafeCommand),
-    Stage (UnsafeStage),
-    lowerPipelineWithTime,
-  )
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslateState (..),
@@ -28,6 +22,7 @@ import Language.Fish.Translator.Monad
     isPipefailEnabled,
   )
 import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
+import Language.Fish.Translator.Syntax
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
@@ -38,9 +33,13 @@ jobPipelineFromList = jobPipelineFromListWithTime False
 
 jobPipelineFromListWithTime :: Bool -> NonEmpty (FishCommand TStatus) -> FishJobPipeline
 jobPipelineFromListWithTime timed (cmd NE.:| rest) =
-  lowerPipelineWithTime timed (toStage cmd NE.:| map toStage rest)
-  where
-    toStage = UnsafeStage . UnsafeCommand
+  MkFishJobPipeline
+    { jpTime = timed,
+      jpVariables = [],
+      jpStatement = Stmt cmd,
+      jpCont = map (PipeTo [] . Stmt) rest,
+      jpBackgrounded = False
+    }
 
 wrapErrexitIfEnabled :: FishCommand TStatus -> TranslateM (FishCommand TStatus)
 wrapErrexitIfEnabled cmd = do

@@ -6,7 +6,7 @@ module Language.Fish.Translator.Simplify
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax
 
 simplifyFishStatement :: FishStatement -> FishStatement
 simplifyFishStatement = simplifyStmt

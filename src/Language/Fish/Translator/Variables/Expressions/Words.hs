@@ -13,9 +13,9 @@ module Language.Fish.Translator.Variables.Expressions.Words
   )
 where
 
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (wordHasExpansion)
 import Language.Fish.Translator.Variables.ParamExpansion (noSplitParamExpansion)
 import ShellCheck.AST

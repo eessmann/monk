@@ -11,7 +11,6 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.Translator.Args (Arg, renderArgs)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
@@ -20,6 +19,7 @@ import Language.Fish.Translator.Monad
     ensureHelper,
   )
 import Language.Fish.Translator.Pipeline (pipelineOf)
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 
 ensureBackgroundRuntime :: TranslateM ()
 ensureBackgroundRuntime =

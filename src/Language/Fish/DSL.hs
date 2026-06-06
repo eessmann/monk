@@ -33,6 +33,9 @@ module Language.Fish.DSL
     math,
     commandSubst,
     processSubst,
+    Raw.GlobPattern (..),
+    Raw.GlobPart (..),
+    glob,
     Index,
     IndexShape (..),
     IndexResult,
@@ -175,6 +178,9 @@ commandSubst stmts = UnsafeExpr (Raw.ExprCommandSubst (lowerStmt <$> stmts))
 
 processSubst :: NonEmpty Stmt -> Expr 'Raw.TStr
 processSubst stmts = UnsafeExpr (Raw.ExprProcessSubst (lowerStmt <$> stmts))
+
+glob :: Raw.GlobPattern -> Expr ('Raw.TList 'Raw.TStr)
+glob = UnsafeExpr . Raw.ExprGlob
 
 singleIndex :: Expr 'Raw.TInt -> Index 'IndexOne
 singleIndex = UnsafeIndexSingle

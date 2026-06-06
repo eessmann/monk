@@ -15,8 +15,6 @@ import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
-import Language.Fish.DSL.Internal qualified as DSL
-import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Background
   ( instrumentBackgroundStatusCmd,
   )
@@ -35,7 +33,6 @@ import Language.Fish.Translator.Commands
     translateTokenToStatusCmdM,
   )
 import Language.Fish.Translator.Control qualified as Control
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.ForArithmetic (translateForArithmetic)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.IO qualified as FIO
@@ -70,6 +67,7 @@ import Language.Fish.Translator.Statement
   ( jobConjunctionFromPipelines,
     translateSubshellStatement,
   )
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST
@@ -80,7 +78,7 @@ import Prelude hiding (gets)
 -- 1. Main translation functions
 --------------------------------------------------------------------------------
 
-translateRoot :: Root -> TranslateM DSL.Script
+translateRoot :: Root -> TranslateM Script
 translateRoot root = statementToScript <$> translateRootStatement root
 
 translateRootStatement :: Root -> TranslateM FishStatement
@@ -93,22 +91,17 @@ translateRootWithPositions ::
   TranslateConfig ->
   M.Map Id (Position, Position) ->
   Root ->
-  Either TranslateError (DSL.Script, TranslateState)
+  Either TranslateError (Script, TranslateState)
 translateRootWithPositions cfg positions root =
   runTranslateWithPositions cfg positions (translateRoot root)
 
 translateParseResult ::
   TranslateConfig ->
   ParseResult ->
-  Either TranslateError (DSL.Script, TranslateState)
+  Either TranslateError (Script, TranslateState)
 translateParseResult cfg result = do
   rootTok <- maybe (Left (InternalError "Missing parse root")) Right (prRoot result)
   runTranslateWithPositions cfg (prTokenPositions result) (translateRoot (Root rootTok))
-
-statementToScript :: FishStatement -> DSL.Script
-statementToScript = \case
-  StmtList stmts -> DSL.UnsafeScript (map DSL.UnsafeStmt stmts)
-  stmt -> DSL.UnsafeScript [DSL.UnsafeStmt stmt]
 
 -- | Dispatch on a ShellCheck Token to produce a FishStatement.
 translateToken :: Token -> TranslateM FishStatement

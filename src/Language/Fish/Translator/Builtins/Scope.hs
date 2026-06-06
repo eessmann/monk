@@ -10,7 +10,6 @@ where
 import Control.Monad.State.Strict (gets)
 import Data.Set qualified as Set
 import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStmtList)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslationContext (..),
@@ -20,6 +19,7 @@ import Language.Fish.Translator.Monad
     context,
   )
 import Language.Fish.Translator.Names (isValidVarName)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
     translateAssignmentWithFlags,

@@ -13,7 +13,7 @@ import Data.Char (isDigit)
 import Data.Text qualified as T
 import Language.Fish.Translator.Args (Arg, renderArgs)
 import Language.Fish.Translator.Commands.Args (concatWithSpaces)
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables
   ( translateTokenToExpr,

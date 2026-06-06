@@ -7,7 +7,7 @@ module Language.Fish.Translator.Variables.Expressions.Split
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Syntax
 
 splitOnIfsExpr :: FishExpr TStr -> FishExpr (TList TStr)
 splitOnIfsExpr expr =

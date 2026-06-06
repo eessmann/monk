@@ -9,13 +9,13 @@ import Data.Char (isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.Translator.Builtins.Common (wrapStmtList)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),
     addWarning,
     noteUnsupported,
   )
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables
   ( tokenToLiteralText,
     translateTokenToExpr,

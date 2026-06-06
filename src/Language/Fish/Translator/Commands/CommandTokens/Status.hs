@@ -15,7 +15,6 @@ import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTokensWithoutTime)
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime)
 import Language.Fish.Translator.Redirections (translateRedirectToken)
@@ -23,6 +22,7 @@ import Language.Fish.Translator.Statement
   ( statusCommandBlock,
     statusConjunction,
   )
+import Language.Fish.Translator.Syntax hiding (Arg, argExpr, argRedirect, renderArg, renderArgs)
 import Language.Fish.Translator.Token
   ( stripSeparatorTokens,
     tokenToLiteralText,

@@ -9,6 +9,7 @@ This guide covers the warning classes and best-effort areas that most often need
 - The DSL enforces non-empty blocks and pipeline stages with `NonEmpty`, separates renderable command arguments from redirections with `Arg`, and provides typed constructors for common control forms.
 - If you were pattern matching on raw constructors such as `Stmt`, `Command`, `ExprVal`, or `MkFishJobPipeline`, import `Monk.AST.Raw` explicitly.
 - `Language.Fish.DSL.Lower` lowers DSL values to the raw AST so existing rendering code can continue to use the current pretty-printer.
+- `TranslationResult` now stores a typed `Script`; use `translationStatements` only when you intentionally need the lowered raw backend statements.
 
 ## Reading Diagnostics
 

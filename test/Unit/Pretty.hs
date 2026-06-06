@@ -7,7 +7,9 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Monk.AST.Raw
+import Language.Fish.DSL.Lower (lowerScript)
+import Monk.AST hiding (stdout)
+import Monk.AST qualified as AST
 import Monk.Translation (renderFish)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -18,84 +20,88 @@ unitPrettyTests =
   testGroup
     "Pretty printing"
     [ H.testCase "Redirection embedding" $ do
-        let script =
-              [ Stmt
-                  ( Command
-                      "echo"
-                      [ ExprVal (ExprLiteral "Hello"),
-                        RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))
-                      ]
-                  )
-              ]
-            actual = renderFish script
+        let fishScript =
+              script
+                [ stmt
+                    ( command
+                        "echo"
+                        [ arg (str "Hello"),
+                          redirect AST.stdout overwrite (fileTarget (str "/dev/null"))
+                        ]
+                    )
+                ]
+            actual = renderDsl fishScript
             expected = "echo 'Hello' > '/dev/null'"
         actual @?= expected,
       H.testCase "Redirect stdout+stderr to file" $ do
-        let script =
-              [ Stmt
-                  ( Command
-                      "echo"
-                      [ ExprVal (ExprLiteral "Hello"),
-                        RedirectVal (MkRedirect RedirectBoth RedirectOut (RedirectFile (ExprLiteral "/tmp/out")))
-                      ]
-                  )
-              ]
-            actual = renderFish script
+        let fishScript =
+              script
+                [ stmt
+                    ( command
+                        "echo"
+                        [ arg (str "Hello"),
+                          redirect both overwrite (fileTarget (str "/tmp/out"))
+                        ]
+                    )
+                ]
+            actual = renderDsl fishScript
             expected = "echo 'Hello' > '/tmp/out' 2>&1"
         actual @?= expected,
       H.testCase "Exit with code" $ do
-        let script = [Stmt (Exit (Just (ExprNumLiteral 42)))]
-            actual = renderFish script
+        let fishScript = script [stmt (exit (Just (int 42)))]
+            actual = renderDsl fishScript
         actual @?= "exit 42",
       H.testCase "Eval command" $ do
-        let script = [Stmt (Eval (ExprLiteral "echo hi"))]
-            actual = renderFish script
+        let fishScript = script [stmt (eval (str "echo hi"))]
+            actual = renderDsl fishScript
         actual @?= "eval 'echo hi'",
       H.testCase "Read with flags and vars" $ do
-        let script = [Stmt (Read [ReadPrompt "Name:", ReadLocal] ["name"])]
-            actual = renderFish script
+        let fishScript = script [stmt (read_ [ReadPrompt "Name:", ReadLocal] ["name"])]
+            actual = renderDsl fishScript
             expected = "read --prompt 'Name:' --local name"
         actual @?= expected,
       H.testCase "Glob brace pattern" $ do
-        let script = [Stmt (Command "ls" [ExprVal (ExprGlob (MkGlobPattern [GlobBraces ("a" NE.:| ["b"])]))])]
-            actual = renderFish script
+        let fishScript =
+              script
+                [ stmt
+                    ( command
+                        "ls"
+                        [arg (glob (MkGlobPattern [GlobBraces ("a" NE.:| ["b"])]))]
+                    )
+                ]
+            actual = renderDsl fishScript
         T.isInfixOf "ls {" actual H.@? "must contain brace glob",
       H.testCase "Process substitution" $ do
-        let inner = Stmt (Command "echo" [ExprVal (ExprLiteral "x")])
-            script = [Stmt (Command "cat" [ExprVal (ExprProcessSubst (inner NE.:| []))])]
-            actual = renderFish script
+        let inner = stmt (command "echo" [arg (str "x")])
+            fishScript = script [stmt (command "cat" [arg (processSubst (inner NE.:| []))])]
+            actual = renderDsl fishScript
         T.isInfixOf "cat (" actual H.@? "must begin with cat ("
         T.isInfixOf "| psub)" actual H.@? "must pipe to psub",
       H.testCase "Simple pipeline" $ do
-        let pipe =
-              MkFishJobPipeline
-                { jpTime = False,
-                  jpVariables = [],
-                  jpStatement = Stmt (Command "grep" [ExprVal (ExprLiteral "foo")]),
-                  jpCont =
-                    [ PipeTo
-                        { jpcVariables = [],
-                          jpcStatement = Stmt (Command "wc" [ExprVal (ExprLiteral "-l")])
-                        }
-                    ],
-                  jpBackgrounded = False
-                }
-            script = [Stmt (Pipeline pipe)]
-            actual = renderFish script
+        let fishScript =
+              script
+                [ stmt
+                    ( pipeline
+                        ( stage (command "grep" [arg (str "foo")])
+                            NE.:| [stage (command "wc" [arg (str "-l")])]
+                        )
+                    )
+                ]
+            actual = renderDsl fishScript
             expected = "grep 'foo' | wc '-l'"
         actual @?= expected,
       H.testCase "Job conjunction (or)" $ do
-        let job1 = MkFishJobPipeline False [] (Stmt (Command "false" [])) [] False
-            job2 = MkFishJobPipeline False [] (Stmt (Command "echo" [ExprVal (ExprLiteral "ok")])) [] False
-            conj = MkFishJobConjunction Nothing job1 [JCOr job2]
-            script = [Stmt (JobConj conj)]
-            actual = renderFish script
+        let job1 = pipelineValue (stage (command "false" []) NE.:| [])
+            job2 = pipelineValue (stage (command "echo" [arg (str "ok")]) NE.:| [])
+            conj = jobConjunction Nothing job1 [orElse job2]
+            fishScript = script [stmt (job conj)]
+            actual = renderDsl fishScript
             expected = "false \nor echo 'ok'"
         actual @?= expected,
       H.testCase "Begin block" $ do
-        let body = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "A")])]
-            script = [Stmt (Begin body [])]
-            actual = renderFish script
+        let body = NE.fromList [stmt (command "echo" [arg (str "A")])]
+            fishScript = script [stmt (begin body)]
+            actual = renderDsl fishScript
             expected =
               T.intercalate
                 "\n"
@@ -105,10 +111,16 @@ unitPrettyTests =
                 ]
         actual @?= expected,
       H.testCase "Begin block with redirect" $ do
-        let body = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "B")])]
-            script =
-              [Stmt (Begin body [RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectFile (ExprLiteral "/dev/null")))])]
-            actual = renderFish script
+        let body = NE.fromList [stmt (command "echo" [arg (str "B")])]
+            fishScript =
+              script
+                [ stmt
+                    ( beginWithRedirects
+                        body
+                        [redirect AST.stdout overwrite (fileTarget (str "/dev/null"))]
+                    )
+                ]
+            actual = renderDsl fishScript
             expected =
               T.intercalate
                 "\n"
@@ -118,10 +130,10 @@ unitPrettyTests =
                 ]
         actual @?= expected,
       H.testCase "If then else" $ do
-        let thn = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "then")])]
-            els = [Stmt (Command "echo" [ExprVal (ExprLiteral "else")])]
-            script = [Stmt (If trueCond thn els [])]
-            actual = renderFish script
+        let thn = NE.fromList [stmt (command "echo" [arg (str "then")])]
+            els = [stmt (command "echo" [arg (str "else")])]
+            fishScript = script [stmt (if_ trueCond (block thn) els [])]
+            actual = renderDsl fishScript
             expected =
               T.intercalate
                 "\n"
@@ -133,10 +145,10 @@ unitPrettyTests =
                 ]
         actual @?= expected,
       H.testCase "Switch with two cases" $ do
-        let case1 = MkCaseItem (ExprLiteral "foo" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "a")])])
-            case2 = MkCaseItem (ExprLiteral "bar" NE.:| []) (NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "b")])])
-            script = [Stmt (Switch (ExprLiteral "x") (case1 NE.:| [case2]) [])]
-            actual = renderFish script
+        let case1 = caseItem (str "foo" NE.:| []) (block (NE.fromList [stmt (command "echo" [arg (str "a")])]))
+            case2 = caseItem (str "bar" NE.:| []) (block (NE.fromList [stmt (command "echo" [arg (str "b")])]))
+            fishScript = script [stmt (switch (str "x") (case1 NE.:| [case2]) [])]
+            actual = renderDsl fishScript
             expected =
               T.intercalate
                 "\n"
@@ -149,14 +161,14 @@ unitPrettyTests =
                 ]
         actual @?= expected,
       H.testCase "Join list fallback" $ do
-        let script = [Stmt (Command "echo" [ExprVal (ExprJoinList (ExprVariable (VarAll "x")))])]
-            actual = renderFish script
+        let fishScript = script [stmt (command "echo" [arg (joinList (vars "x"))])]
+            actual = renderDsl fishScript
             expected = "echo (string join ' ' -- $x ; or printf '')"
         actual @?= expected,
       H.testCase "Function printing (no params)" $ do
-        let fn = MkFishFunction {funcName = "greet", funcFlags = [], funcParams = [], funcBody = NE.fromList [Stmt (Command "echo" [ExprVal (ExprLiteral "hi")])]}
-            script = [Stmt (Function fn)]
-            actual = renderFish script
+        let body = block (NE.fromList [stmt (command "echo" [arg (str "hi")])])
+            fishScript = script [stmt (function "greet" [] [] body)]
+            actual = renderDsl fishScript
             expected =
               T.intercalate
                 "\n"
@@ -166,3 +178,6 @@ unitPrettyTests =
                 ]
         actual @?= expected
     ]
+
+renderDsl :: Script -> Text
+renderDsl = renderFish . lowerScript

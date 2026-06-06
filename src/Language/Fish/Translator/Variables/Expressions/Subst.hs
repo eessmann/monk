@@ -8,8 +8,8 @@ module Language.Fish.Translator.Variables.Expressions.Subst
   )
 where
 
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Variables.Substitution
   ( commandSubstExprListMWith,
     commandSubstExprListWith,

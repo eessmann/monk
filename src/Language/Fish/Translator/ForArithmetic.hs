@@ -14,7 +14,6 @@ import Language.Fish.Translator.Cond
     testNonZeroCommand,
   )
 import Language.Fish.Translator.Control qualified as Control
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),
@@ -22,6 +21,7 @@ import Language.Fish.Translator.Monad
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (pipelineOf)
+import Language.Fish.Translator.Syntax
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic
   ( arithArgsFromText,

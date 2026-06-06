@@ -47,8 +47,8 @@ where
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
-import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
+import Language.Fish.Translator.Syntax
 import Monk.Translation.Types
   ( TranslateConfig (..),
     TranslateError (..),

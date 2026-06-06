@@ -163,7 +163,7 @@ library
                      , Language.Fish.Translator.Commands.Tests
                      , Language.Fish.Translator.Commands.Time
                      , Language.Fish.Translator.Control
-                     , Language.Fish.Translator.DSL
+                     , Language.Fish.Translator.Syntax
                      , Language.Fish.Translator.ForArithmetic
                      , Language.Fish.Translator.IO
                      , Language.Fish.Translator.Redirections
