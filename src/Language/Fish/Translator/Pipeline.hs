@@ -89,6 +89,7 @@ wrapErrexitStatusCommand cmd
 
 shouldWrapErrexit :: FishCommand TStatus -> Bool
 shouldWrapErrexit = \case
+  Command "set argv" _ -> False
   JobConj {} -> False
   Not {} -> False
   Background {} -> False

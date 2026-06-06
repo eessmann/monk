@@ -14,7 +14,8 @@ data SetOptionParse = MkSetOptionParse
     setPipefail :: Maybe Bool,
     setIssues :: [Text],
     setSawOptions :: Bool,
-    setHasNonOptionArgs :: Bool
+    setHasNonOptionArgs :: Bool,
+    setPositionalArgs :: Maybe [Token]
   }
   deriving stock (Show, Eq)
 
@@ -25,7 +26,8 @@ defaultSetOptionParse =
       setPipefail = Nothing,
       setIssues = [],
       setSawOptions = False,
-      setHasNonOptionArgs = False
+      setHasNonOptionArgs = False,
+      setPositionalArgs = Nothing
     }
 
 parseSetOptions :: [Token] -> SetOptionParse
@@ -41,11 +43,22 @@ parseSetOptions = go defaultSetOptionParse
       | otherwise =
           let txt = tokenToLiteralText t
            in if txt == "--"
-                then acc {setSawOptions = True, setHasNonOptionArgs = not (null ts)}
+                then
+                  acc
+                    { setSawOptions = True,
+                      setHasNonOptionArgs = not (null ts),
+                      setPositionalArgs = Just ts
+                    }
                 else
                   if (T.isPrefixOf "-" txt || T.isPrefixOf "+" txt) && T.length txt > 1
                     then parseFlagToken acc txt ts
-                    else acc {setHasNonOptionArgs = True}
+                    else
+                      acc
+                        { setIssues =
+                            setIssues acc
+                              <> ["Bash set positional arguments require -- for exact argv translation"],
+                          setHasNonOptionArgs = True
+                        }
 
     parseFlagToken acc txt ts =
       let sign = T.take 1 txt

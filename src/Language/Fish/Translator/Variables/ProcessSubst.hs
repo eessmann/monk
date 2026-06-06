@@ -6,6 +6,7 @@ module Language.Fish.Translator.Variables.ProcessSubst
     procSubListExpr,
     procSubListExprM,
     procSubOutList,
+    procSubOutRedirectCommand,
   )
 where
 
@@ -15,8 +16,11 @@ import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
+    WarningCode (..),
     ensureHelper,
+    unsupported,
   )
+import Language.Fish.Translator.Pipeline (jobPipelineFromList)
 
 procSubExpr :: String -> NonEmpty FishStatement -> FishExpr TStr
 procSubExpr dir body =
@@ -36,21 +40,32 @@ procSubExprM :: String -> NonEmpty FishStatement -> TranslateM (FishExpr TStr)
 procSubExprM dir body =
   case dir of
     "<" -> pure (ExprProcessSubst body)
-    ">" -> ensureProcSubOutHelper $> ExprJoinList (procSubOutHelperList body)
+    ">" -> do
+      unsupported ProcessSubstitutionIssue (Just outputProcessSubstitutionWarning)
+      ensureProcSubOutHelper $> ExprJoinList (procSubOutHelperList body)
     _ -> pure (ExprProcessSubst body)
 
 procSubListExprM :: String -> NonEmpty FishStatement -> TranslateM (FishExpr (TList TStr))
 procSubListExprM dir body =
   case dir of
     "<" -> pure (ExprListLiteral [ExprProcessSubst body])
-    ">" -> ensureProcSubOutHelper $> procSubOutHelperList body
+    ">" -> do
+      unsupported ProcessSubstitutionIssue (Just outputProcessSubstitutionWarning)
+      ensureProcSubOutHelper $> procSubOutHelperList body
     _ -> pure (ExprListLiteral [ExprProcessSubst body])
+
+outputProcessSubstitutionWarning :: Text
+outputProcessSubstitutionWarning =
+  "output process substitution in argument position requires manual review"
 
 procSubDirVar :: Text
 procSubDirVar = "__monk_psub_dir"
 
 procSubFifoVar :: Text
 procSubFifoVar = "__monk_psub_fifo"
+
+procSubFileVar :: Text
+procSubFileVar = "__monk_psub_file"
 
 procSubStatusVar :: Text
 procSubStatusVar = "__monk_psub_status"
@@ -76,6 +91,21 @@ procSubOutHelperList body =
         )
         NE.:| []
     )
+
+procSubOutRedirectCommand :: FishCommand TStatus -> FishStatement -> FishCommand TStatus
+procSubOutRedirectCommand producer consumer =
+  Begin
+    ( procSubSetDirStmt
+        NE.:| [ procSubSetFileStmt,
+                procSubProducerFileStmt producer,
+                procSubCaptureStatusStmt,
+                procSubPipelineFileStmt consumer,
+                procSubRmFileStmt,
+                procSubRmdirStmt,
+                procSubReturnStatusStmt
+              ]
+    )
+    []
 
 ensureProcSubOutHelper :: TranslateM ()
 ensureProcSubOutHelper =
@@ -132,6 +162,23 @@ procSubFifoPathExpr =
         (ExprLiteral "/fifo")
     ]
 
+procSubSetFileStmt :: FishStatement
+procSubSetFileStmt =
+  Stmt
+    ( Set
+        [SetLocal]
+        procSubFileVar
+        procSubFilePathExpr
+    )
+
+procSubFilePathExpr :: FishExpr (TList TStr)
+procSubFilePathExpr =
+  ExprListLiteral
+    [ ExprStringConcat
+        (ExprVariable (VarScalar procSubDirVar))
+        (ExprLiteral "/stdout")
+    ]
+
 procSubRmFifoStmt :: FishStatement
 procSubRmFifoStmt =
   Stmt
@@ -139,6 +186,16 @@ procSubRmFifoStmt =
         "rm"
         [ ExprVal (ExprLiteral "-f"),
           ExprVal (ExprVariable (VarScalar procSubFifoVar))
+        ]
+    )
+
+procSubRmFileStmt :: FishStatement
+procSubRmFileStmt =
+  Stmt
+    ( Command
+        "rm"
+        [ ExprVal (ExprLiteral "-f"),
+          ExprVal (ExprVariable (VarScalar procSubFileVar))
         ]
     )
 
@@ -158,45 +215,92 @@ procSubMkfifoStmt =
         [ExprVal (ExprVariable (VarScalar procSubFifoVar))]
     )
 
-procSubCatFifoStmt :: FishStatement
-procSubCatFifoStmt =
-  Stmt
-    ( Command
-        "cat"
-        [ExprVal (ExprVariable (VarScalar procSubFifoVar))]
-    )
-
 procSubBodyStmt :: NonEmpty FishStatement -> FishStatement
 procSubBodyStmt body =
   case NE.toList body of
     [stmt] -> stmt
     stmts -> Stmt (Begin (NE.fromList stmts) [])
 
-procSubConsumerPipeStmt :: FishStatement -> FishStatement
-procSubConsumerPipeStmt rhsStmt =
-  Stmt
-    ( Pipeline
-        ( MkFishJobPipeline False
-            []
-            procSubCatFifoStmt
-            [PipeTo [] rhsStmt]
-            False
-        )
+procSubInputRedirect :: ExprOrRedirect
+procSubInputRedirect =
+  RedirectVal
+    ( MkRedirect
+        RedirectStdin
+        RedirectIn
+        (RedirectFile (ExprVariable (VarScalar procSubFifoVar)))
     )
+
+procSubFileOutputRedirect :: ExprOrRedirect
+procSubFileOutputRedirect =
+  RedirectVal
+    ( MkRedirect
+        RedirectStdout
+        RedirectOut
+        (RedirectFile (ExprVariable (VarScalar procSubFileVar)))
+    )
+
+procSubProducerFileStmt :: FishCommand TStatus -> FishStatement
+procSubProducerFileStmt producer =
+  attachRedirectsToStatusCommand [procSubFileOutputRedirect] producer
+
+procSubCatFileCommand :: FishCommand TStatus
+procSubCatFileCommand =
+  Command
+    "cat"
+    [ExprVal (ExprVariable (VarScalar procSubFileVar))]
+
+procSubPipelineFileStmt :: FishStatement -> FishStatement
+procSubPipelineFileStmt consumer =
+  let pipe =
+        (jobPipelineFromList [procSubCatFileCommand])
+          { jpCont = [PipeTo [] consumer]
+          }
+   in Stmt (Pipeline pipe)
+
+procSubConsumerStmt :: FishStatement -> FishStatement
+procSubConsumerStmt rhsStmt =
+  case rhsStmt of
+    Stmt (Command name args) -> Stmt (Command name (args ++ [procSubInputRedirect]))
+    Stmt (Exec cmd args) -> Stmt (Exec cmd (args ++ [procSubInputRedirect]))
+    Stmt (Begin body suffix) -> Stmt (Begin body (suffix ++ [procSubInputRedirect]))
+    Stmt (If cond thn els suffix) -> Stmt (If cond thn els (suffix ++ [procSubInputRedirect]))
+    Stmt (Switch expr cases suffix) -> Stmt (Switch expr cases (suffix ++ [procSubInputRedirect]))
+    Stmt (While cond body suffix) -> Stmt (While cond body (suffix ++ [procSubInputRedirect]))
+    Stmt (For var listExpr body suffix) -> Stmt (For var listExpr body (suffix ++ [procSubInputRedirect]))
+    StmtList stmts ->
+      case NE.nonEmpty stmts of
+        Just body -> Stmt (Begin body [procSubInputRedirect])
+        Nothing -> Comment "Skipped empty process substitution body"
+    other -> Stmt (Begin (other NE.:| []) [procSubInputRedirect])
+
+attachRedirectsToStatusCommand :: [ExprOrRedirect] -> FishCommand TStatus -> FishStatement
+attachRedirectsToStatusCommand redirs cmd =
+  case cmd of
+    Command name args -> Stmt (Command name (args ++ redirs))
+    Exec c args -> Stmt (Exec c (args ++ redirs))
+    Begin body suffix -> Stmt (Begin body (suffix ++ redirs))
+    If cond thn els suffix -> Stmt (If cond thn els (suffix ++ redirs))
+    Switch expr cases suffix -> Stmt (Switch expr cases (suffix ++ redirs))
+    While cond body suffix -> Stmt (While cond body (suffix ++ redirs))
+    For var listExpr body suffix -> Stmt (For var listExpr body (suffix ++ redirs))
+    other ->
+      case redirs of
+        [] -> Stmt other
+        _ -> Stmt (Begin (Stmt other NE.:| []) redirs)
 
 procSubBackgroundStmt :: FishStatement -> [FishStatement] -> FishStatement
 procSubBackgroundStmt rhsStmt cleanupStmts =
   Stmt
     ( Background
         ( Begin
-            (procSubConsumerPipeStmt rhsStmt NE.:| cleanupStmts)
+            (procSubConsumerStmt rhsStmt NE.:| cleanupStmts)
             []
         )
     )
 
 procSubEvalBodyStmt :: FishStatement
 procSubEvalBodyStmt =
-  Stmt (Eval (ExprVariable (VarScalar "body")))
+  Stmt (Command "eval" [ExprVal (ExprVariable (VarScalar "body"))])
 
 procSubCaptureStatusStmt :: FishStatement
 procSubCaptureStatusStmt =

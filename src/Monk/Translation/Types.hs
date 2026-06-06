@@ -48,6 +48,8 @@ data WarningCode
   | BackgroundTracking
   | SetOptionIssue
   | ReadIssue
+  | SourceIssue
+  | ProcessSubstitutionIssue
   | ShoptIgnored
   | TrapIssue
   | ShiftIssue
@@ -68,6 +70,8 @@ allWarningCodes =
     BackgroundTracking,
     SetOptionIssue,
     ReadIssue,
+    SourceIssue,
+    ProcessSubstitutionIssue,
     ShoptIgnored,
     TrapIssue,
     ShiftIssue,
@@ -118,6 +122,10 @@ warningDescriptor = \case
     MkWarningDescriptor WarnHigh "Bash set options require manual review" PreferDetail
   ReadIssue ->
     MkWarningDescriptor WarnMedium "read semantics may differ between bash and fish" PreferDetail
+  SourceIssue ->
+    MkWarningDescriptor WarnMedium "source command requires manual review" PreferDetail
+  ProcessSubstitutionIssue ->
+    MkWarningDescriptor WarnMedium "process substitution translation requires manual review" PreferDetail
   ShoptIgnored ->
     MkWarningDescriptor WarnHigh "shopt has no fish equivalent; ignored" IgnoreDetail
   TrapIssue ->

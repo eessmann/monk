@@ -31,6 +31,7 @@ import Language.Fish.Translator.Builtins
   )
 import Language.Fish.Translator.Commands
   ( translateSimpleCommandM,
+    translateProcessSubstitutionConsumerM,
     translateTokenToStatusCmdM,
   )
 import Language.Fish.Translator.Control qualified as Control
@@ -62,12 +63,14 @@ import Language.Fish.Translator.Redirections
     parseRedirectTokensM,
     translateRedirectTokenM,
   )
+import Language.Fish.Translator.Rename (renameStatementVariable)
 import Language.Fish.Translator.Simplify (simplifyFishStatement)
 import Language.Fish.Translator.Statement
   ( jobConjunctionFromPipelines,
     translateSubshellStatement,
   )
 import Language.Fish.Translator.Variables
+import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST
 import ShellCheck.Interface (ParseResult (..), Position)
 
@@ -223,13 +226,21 @@ translateToken token =
                 then ([], [ExprVariable (VarAll "argv")])
                 else (pre, args)
         bodyStmts <- mapM translateToken body
+        let loopVar = fishLoopVarName var
+            bodyStmts' =
+              if loopVar == T.pack var
+                then bodyStmts
+                else map (renameStatementVariable (T.pack var) loopVar) bodyStmts
         case (NE.nonEmpty args', Control.toNonEmptyStmtList bodyStmts) of
-          (Just neArgs, Just neBody) ->
+          (Just neArgs, Just _) ->
             let (x NE.:| xs) = neArgs
                 listExpr = foldl' ExprListConcat x xs
-                forStmt = Stmt (For (T.pack var) listExpr neBody [])
-             in case Control.toNonEmptyStmtList (pre' <> [forStmt]) of
-                  Just block -> pure (Stmt (Begin block []))
+             in case Control.toNonEmptyStmtList bodyStmts' of
+                  Just neBody' ->
+                    let forStmt = Stmt (For loopVar listExpr neBody' [])
+                     in case Control.toNonEmptyStmtList (pre' <> [forStmt]) of
+                          Just block -> pure (Stmt (Begin block []))
+                          Nothing -> pure (Comment "Skipped empty for loop body or list")
                   Nothing -> pure (Comment "Skipped empty for loop body or list")
           _ -> pure (Comment "Skipped empty for loop body or list")
       T_SelectIn _ var tokens body ->
@@ -237,23 +248,59 @@ translateToken token =
       T_CaseExpression _ switchExpr cases -> Control.translateCaseExpression translateToken switchExpr cases
       T_CoProc {} -> unsupportedStmt UnsupportedConstruct (Just "Coprocess (coproc)")
       T_CoProcBody {} -> unsupportedStmt UnsupportedConstruct (Just "Coprocess body (coproc)")
-      T_Redirecting _ redirs cmd -> do
-        parts <- mapM translateRedirectTokenM redirs
-        let MkHoisted preRedirs redirArgs = sequenceA parts
-            redirExprs' = renderArgs (catMaybes redirArgs)
-        translated <- translateToken cmd
-        let attached = attachRedirs redirExprs' translated
-        if null preRedirs
-          then pure attached
-          else
-            case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
-              Just body -> pure (Stmt (Begin body []))
-              Nothing -> pure (Comment "Skipped empty redirection block")
+      T_Redirecting _ redirs cmd ->
+        case exactOutputProcessSubstitution redirs of
+          Just procSubBody -> do
+            producer <- translateTokenToStatusCmdM cmd
+            consumer <- translateProcessSubstitutionConsumerM procSubBody
+            procSubCmd <- wrapErrexitIfEnabled (procSubOutRedirectCommand producer consumer)
+            pure (Stmt procSubCmd)
+          Nothing -> do
+            parts <- mapM translateRedirectTokenM redirs
+            let MkHoisted preRedirs redirArgs = sequenceA parts
+                redirExprs' = renderArgs (catMaybes redirArgs)
+            translated <- translateToken cmd
+            let attached = attachRedirs redirExprs' translated
+            if null preRedirs
+              then pure attached
+              else
+                case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
+                  Just body -> pure (Stmt (Begin body []))
+                  Nothing -> pure (Comment "Skipped empty redirection block")
       _ -> unsupportedStmt UnsupportedConstruct (Just ("Skipped token at statement level: " <> T.pack (show token)))
 
 wrapStmtList :: [FishStatement] -> FishStatement
 wrapStmtList [stmt] = stmt
 wrapStmtList stmts = StmtList stmts
+
+exactOutputProcessSubstitution :: [Token] -> Maybe [Token]
+exactOutputProcessSubstitution =
+  \case
+    [T_FdRedirect _ src redirTok]
+      | src == "" || src == "1" -> outputProcSubRedirectBody redirTok
+    _ -> Nothing
+
+outputProcSubRedirectBody :: Token -> Maybe [Token]
+outputProcSubRedirectBody = \case
+  T_IoFile _ op file
+    | isOutputRedirectOp op -> procSubWordBody file
+  _ -> Nothing
+
+procSubWordBody :: Token -> Maybe [Token]
+procSubWordBody = \case
+  T_ProcSub _ ">" body -> Just body
+  T_NormalWord _ [T_ProcSub _ ">" body] -> Just body
+  _ -> Nothing
+
+isOutputRedirectOp :: Token -> Bool
+isOutputRedirectOp = \case
+  T_Greater {} -> True
+  _ -> False
+
+fishLoopVarName :: String -> Text
+fishLoopVarName = \case
+  "_" -> "__monk_underscore"
+  name -> T.pack name
 
 attachRedirs :: [ExprOrRedirect] -> FishStatement -> FishStatement
 attachRedirs redirs stmt =

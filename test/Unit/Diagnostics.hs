@@ -50,6 +50,8 @@ unitDiagnosticsTests =
                 BackgroundTracking,
                 SetOptionIssue,
                 ReadIssue,
+                SourceIssue,
+                ProcessSubstitutionIssue,
                 ShoptIgnored,
                 TrapIssue,
                 ShiftIssue,
@@ -73,10 +75,10 @@ unitDiagnosticsTests =
           @?= "shopt has no fish equivalent; ignored",
       H.testCase "renderWarning includes the source range prefix" $
         renderWarning (sampleWarning ReadIssue Nothing)
-          @?= "spec.sh:3:5: warning: read semantics may differ between bash and fish",
+          @?= "spec.sh:3:5: warning[ReadIssue][medium]: read semantics may differ between bash and fish",
       H.testCase "renderTranslateError includes the source range prefix" $
         renderTranslateError (Unsupported (sampleWarning UnsupportedConstruct (Just "Coprocess (coproc)")))
-          @?= "spec.sh:3:5: error: Coprocess (coproc)",
+          @?= "spec.sh:3:5: error[UnsupportedConstruct][high]: Coprocess (coproc)",
       H.testCase "warning summaries and notes stay aligned" $ do
         let warns = [sampleWarning BestEffortSubshell Nothing, sampleWarning ReadIssue Nothing]
         summarizeWarnings warns @?= MkWarningCounts {wcHigh = 1, wcMedium = 1, wcLow = 0}

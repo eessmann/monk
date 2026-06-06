@@ -143,14 +143,20 @@ translateTrapCommand args =
     classifySignal :: Text -> TrapSignalClassification
     classifySignal sig
       | isExitSignal sig = TrapSupported TrapExit
-      | isPseudoSignal normalized =
-          TrapUnsupported ("trap signal " <> normalized <> " has no fish equivalent; manual review required")
-      | isNumericSignal normalized = TrapSupported (TrapSignal normalized)
-      | normalized `elem` supportedSignals = TrapSupported (TrapSignal normalized)
-      | otherwise =
-          TrapUnsupported ("trap signal " <> normalized <> " has no fish equivalent; manual review required")
+      | isNumericSignal normalized =
+          TrapSupported (TrapSignal normalized)
+      | otherwise = classifyNamedSignal normalized
       where
         normalized = normalizeSignal sig
+
+    classifyNamedSignal sig
+      | isPseudoSignal sig =
+          TrapUnsupported ("trap signal " <> sig <> " has no fish equivalent; manual review required")
+      | sig `elem` uncatchableSignals =
+          TrapUnsupported ("trap signal " <> sig <> " cannot be caught; manual review required")
+      | sig `elem` supportedSignals = TrapSupported (TrapSignal sig)
+      | otherwise =
+          TrapUnsupported ("trap signal " <> sig <> " has no fish equivalent; manual review required")
 
     isExitSignal sig =
       let upper = T.toUpper sig
@@ -176,12 +182,10 @@ translateTrapCommand args =
         "INFO",
         "INT",
         "IO",
-        "KILL",
         "PIPE",
         "PROF",
         "QUIT",
         "SEGV",
-        "STOP",
         "SYS",
         "TERM",
         "TRAP",
@@ -196,6 +200,8 @@ translateTrapCommand args =
         "XCPU",
         "XFSZ"
       ]
+
+    uncatchableSignals = ["KILL", "STOP"]
 
 data TrapSignal
   = TrapExit

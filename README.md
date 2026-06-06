@@ -36,11 +36,11 @@ The current source of truth for exact vs best-effort behavior is
 Constructs that still deserve extra attention include:
 
 - subshell-heavy scripts
-- `read` edge cases and delimiter-sensitive behavior
+- residual `read` edge cases outside the exact helper-backed surface
 - `set -e` / `pipefail` interactions in compound shell logic
 - non-literal `source`
-- option-heavy `trap`, `shopt`, and `coproc`
-- Linux-only `>(...)` coverage
+- option-heavy `trap`, uncatchable trap signals, `shopt`, and `coproc`
+- argument-position or broader `>(...)` forms outside the covered Linux redirect-target fixtures
 
 ## Quick Start
 

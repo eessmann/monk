@@ -164,7 +164,8 @@ exactReadDelim MkReadParseResult {readFlags, readVars, readUnsupported, readRaw}
   | readUnsupported = Nothing
   | otherwise = do
       guard (all exactSupportedFlag readFlags)
-      delimiter <- exactDelimiter
+      target <- exactReadTarget readFlags readVars
+      delimiter <- exactDelimiter target
       prompt <- optionalSingleValue [p | ReadPrompt p <- readFlags]
       timeout <- optionalSingleValue [t | ReadTimeout t <- readFlags]
       nChars <- optionalSingleValue [n | ReadNChars n <- readFlags]
@@ -172,7 +173,6 @@ exactReadDelim MkReadParseResult {readFlags, readVars, readUnsupported, readRaw}
       guard (maybe True validTimeout timeout)
       guard (maybe True validNChars nChars)
       guard (countFlags isSilentFlag readFlags <= 1)
-      target <- exactReadTarget readFlags readVars
       pure
         MkExactReadDelim
           { erdDelimiter = delimiter,
@@ -189,9 +189,9 @@ exactReadDelim MkReadParseResult {readFlags, readVars, readUnsupported, readRaw}
       [ExactReadDelimited d | ReadDelimiter d <- readFlags]
         <> [ExactReadNull | ReadNull <- readFlags]
 
-    exactDelimiter =
+    exactDelimiter target =
       case delimiterValues of
-        [] | any isFdFlag readFlags -> Just (ExactReadDelimited "\n")
+        [] | any isFdFlag readFlags || defaultNewlineExactTarget target -> Just (ExactReadDelimited "\n")
         [value] -> Just value
         _ -> Nothing
 
@@ -214,6 +214,16 @@ exactReadDelim MkReadParseResult {readFlags, readVars, readUnsupported, readRaw}
       ReadFD {} -> True
       _ -> False
 
+    hasNChars = any isNCharsFlag readFlags
+
+    isNCharsFlag = \case
+      ReadNChars {} -> True
+      _ -> False
+
+    defaultNewlineExactTarget = \case
+      ExactReadArray _ -> not hasNChars
+      ExactReadVars _ -> not hasNChars && (null readVars || length readVars > 1)
+
 exactReadTarget :: [ReadFlag] -> [Text] -> Maybe ExactReadTarget
 exactReadTarget flags vars =
   case any isArrayFlag flags of
@@ -223,7 +233,7 @@ exactReadTarget flags vars =
         _ -> Nothing
     False ->
       case vars of
-        [] -> Nothing
+        [] -> Just (ExactReadVars ["REPLY"])
         _ -> Just (ExactReadVars vars)
   where
     isArrayFlag = \case

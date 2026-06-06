@@ -88,6 +88,15 @@ unitBakeoffTests =
               specPath fixture @?= fixturePath
               specSelectionSources fixture @?= [SelectionFileList listPath]
             other -> H.assertFailure ("expected one selected fixture, got " <> show (length other)),
+      H.testCase "resolveFixtureSelection loads the real bakeoff compatible list" $ do
+        cwd <- PathIO.getCurrentDir
+        compatibleList <- repoFile "scripts/bakeoff-compatible.txt"
+        helloRel <- parseRelFile "test/fixtures/realworld/hello-world.bash"
+        fixtures <- resolveFixtureSelection cwd [] [] [] [compatibleList]
+        H.assertBool "expected checked-in compatible fixtures" (length fixtures >= 10)
+        case filter ((== helloRel) . specRelativePath) fixtures of
+          [fixture] -> specSelectionSources fixture @?= [SelectionCompatible compatibleList]
+          other -> H.assertFailure ("expected hello-world compatible fixture once, got " <> show (length other)),
       H.testCase "makeBenchmarkPlan excludes skipped fixtures" $ do
         cwd <- PathIO.getCurrentDir
         benchmarkRel <- parseRelFile "benchmark/fixtures/small.bash"

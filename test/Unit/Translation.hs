@@ -25,17 +25,27 @@ unitTranslationTests :: TestTree
 unitTranslationTests =
   testGroup
     "Translation"
-    [ H.testCase "Process substitution output redirect uses FIFO workaround" $ do
-        out <- translateScript "echo hi > >(cat)"
-        T.isInfixOf "function __monk_procsub_out" out H.@? "expected generated procsub helper"
-        T.isInfixOf "__monk_procsub_out" out H.@? "expected helper invocation in translation"
-        T.isInfixOf "mkfifo" out H.@? "expected mkfifo in helper"
-        T.isInfixOf "eval $body" out H.@? "expected helper to evaluate rendered fish body"
-        T.isInfixOf "rm '-f' $__monk_psub_fifo" out H.@? "expected fifo cleanup in helper"
-        T.isInfixOf "rmdir $__monk_psub_dir" out H.@? "expected temp directory cleanup in helper",
-      H.testCase "Process substitution helper is registered once" $ do
-        out <- translateScript "echo hi > >(cat)\necho bye > >(cat)"
-        T.count "function __monk_procsub_out" out @?= 1,
+    [ H.testCase "Process substitution output redirect lowers to status-preserving temp-file block" $ do
+        out <- translateScript "printf hi > >(wc -c > out)"
+        T.isInfixOf "set --local __monk_psub_file $__monk_psub_dir'/stdout'" out H.@? "expected temp file setup for output process substitution"
+        T.isInfixOf "printf 'hi' > $__monk_psub_file" out H.@? "expected producer stdout redirected to temp file"
+        T.isInfixOf "cat $__monk_psub_file | wc '-c' > 'out'" out H.@? "expected consumer fed from temp file"
+        T.isInfixOf "set --local __monk_psub_status" out H.@? "expected producer status capture"
+        T.isInfixOf "fish '--no-config' '-c' 'exit $argv[1]' $__monk_psub_status" out H.@? "expected exact status restoration"
+        H.assertBool "unexpected plain pipeline for status-sensitive output process substitution" (not (T.isInfixOf "printf 'hi' | wc" out))
+        H.assertBool "unexpected helper for exact output process substitution" (not (T.isInfixOf "__monk_procsub_out" out)),
+      H.testCase "Multiple process substitution output redirects lower without command-substitution helper" $ do
+        out <- translateScript "printf hi > >(cat > one)\nprintf bye > >(cat > two)"
+        T.count "__monk_procsub_out" out @?= 0
+        T.count "set --local __monk_psub_file" out @?= 2
+        T.isInfixOf "printf 'hi' > $__monk_psub_file" out H.@? "expected first temp-file producer"
+        T.isInfixOf "printf 'bye' > $__monk_psub_file" out H.@? "expected second temp-file producer",
+      H.testCase "Command substitution preserves command redirections" $ do
+        out <- translateScript "echo $(printf hi > /tmp/monk-count)"
+        T.isInfixOf "printf 'hi' > '/tmp/monk-count'" out H.@? "expected command-substitution redirection",
+      H.testCase "Process substitution output preserves consumer redirections" $ do
+        out <- translateScript "printf hi > >(wc -c > /tmp/monk-count)"
+        T.isInfixOf "wc '-c' > '/tmp/monk-count'" out H.@? "expected process-substitution body redirection",
       H.testCase "Echo -e lowers to printf %b" $ do
         out <- translateScript "echo -e \"hi\\nthere\""
         T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
@@ -217,6 +227,14 @@ unitTranslationTests =
         T.isInfixOf "set --global i" out H.@? "expected init set"
         T.isInfixOf "while test" out H.@? "expected while test condition"
         T.isInfixOf "math $i" out H.@? "expected increment math",
+      H.testCase "For loop avoids fish readonly underscore variable" $ do
+        out <- translateScript "for _ in 1; do true; done"
+        H.assertBool "unexpected readonly underscore loop variable" (not (T.isInfixOf "for _ in" out))
+        T.isInfixOf "for __monk_underscore in" out H.@? "expected safe underscore loop variable",
+      H.testCase "For loop rewrites underscore body references with scoped binding" $ do
+        out <- translateScript "for _ in a; do echo \"$_\"; done"
+        T.isInfixOf "for __monk_underscore in 'a'" out H.@? "expected safe loop variable"
+        T.isInfixOf "$__monk_underscore" out H.@? "expected body reference to renamed loop variable",
       H.testCase "Until loop negates condition" $ do
         out <- translateScript "until true; do echo 1; done"
         T.isInfixOf "while not" out H.@? "expected while not for until loop",
@@ -348,7 +366,8 @@ unitTranslationTests =
         T.isInfixOf "__monk_read_capture_delim" outU H.@? "expected exact helper for numeric fd read"
         T.isInfixOf "<&9" outU H.@? "expected numeric fd redirection in helper path"
         outA <- translateScript "read -a arr"
-        T.isInfixOf "read --array arr" outA H.@? "expected array flag",
+        T.isInfixOf "__monk_read_capture_delim" outA H.@? "expected exact helper for array read"
+        T.isInfixOf "set --global arr $__monk_read_fields" outA H.@? "expected exact array assignment",
       H.testCase "Read helpers are registered once" $ do
         out <- translateScript "read -d : a b\nread -d : c d"
         T.count "function __monk_read_capture_delim" out @?= 1
@@ -405,10 +424,13 @@ unitTranslationTests =
             H.assertBool
               ("unexpected delimiter warning in mixed exact path: " <> show warnMessages)
               ("read delimiter semantics may differ between bash and fish" `notElem` warnMessages),
-      H.testCase "No-var null delimiter stays best effort and uses --null" $ do
+      H.testCase "No-var null delimiter assigns REPLY exactly" $ do
         out <- translateScript "read -d ''"
-        T.isInfixOf "read --null" out H.@? "expected ReadNull pretty-printing on fallback path"
-        T.isInfixOf "read delimiter semantics may differ between bash and fish" out H.@? "expected delimiter warning note",
+        T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited helper path"
+        T.isInfixOf "set --global REPLY" out H.@? "expected REPLY assignment"
+        H.assertBool
+          "unexpected delimiter warning note"
+          (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" out)),
       H.testCase "Delimiter values normalize to the first character" $ do
         out <- translateScript "read -d '::' field"
         T.isInfixOf "__monk_read_capture_delim 'char' ':'" out H.@? "expected normalized delimiter helper call"

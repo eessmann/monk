@@ -191,6 +191,8 @@ Hyperfine outputs are written to `hyperfine-all.md/json` and `hyperfine-benchmar
 
 ## Bake-off results (2026-04-16)
 
+This section is a dated snapshot from the run below; fixture counts may differ from the current test inventory.
+
 Environment:
 
 - Monk: `monk-bakeoff` built from the current local tree

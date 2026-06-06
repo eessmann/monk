@@ -44,11 +44,12 @@ import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad
   ( WarningCode (..),
     noteUnsupported,
+    unsupported,
     setErrexitEnabled,
     setPipefailEnabled,
   )
 import Language.Fish.Translator.Redirections (parseRedirectTokens, parseRedirectTokensM)
-import Language.Fish.Translator.Token (tokenToLiteralText)
+import Language.Fish.Translator.Token (tokenHasExpansion, tokenRawText, tokenToLiteralText)
 import Language.Fish.Translator.Variables (translateTokenToArg)
 import ShellCheck.AST
 
@@ -120,6 +121,13 @@ translateCommandTokensWithoutTimePlanM cmdTokens =
               case T.unpack name of
                 "test" ->
                   hoistM pre0 (Just (Command "test" testArgs))
+                "source" ->
+                  translateSourceCommandM pre0 plainArgs renderedArgs
+                "." ->
+                  translateSourceCommandM pre0 plainArgs renderedArgs
+                "shopt" -> do
+                  unsupported ShoptIgnored Nothing
+                  hoistM pre0 (Just (Command "true" renderedArgs))
                 _ ->
                   if null redirs
                     then case isSingleBracketTokens c plainArgs of
@@ -135,10 +143,6 @@ translateCommandTokensWithoutTimePlanM cmdTokens =
                             case T.unpack name of
                               "exit" ->
                                 hoistM pre0 (Just (translateExitFromExprs plainArgs argExprs))
-                              "source" ->
-                                hoistM pre0 (Just (Command "source" (renderArgs argExprs)))
-                              "." ->
-                                hoistM pre0 (Just (Command "source" (renderArgs argExprs)))
                               "eval" -> do
                                 MkHoisted pre expr <- translateEvalM plainArgs
                                 hoistM (preRedirs <> pre) (Just (Eval expr))
@@ -153,9 +157,17 @@ translateCommandTokensWithoutTimePlanM cmdTokens =
                                 forM_ (setPipefail opts) setPipefailEnabled
                                 notes <- mapM (noteUnsupported SetOptionIssue . Just) (setIssues opts)
                                 let preAll = pre0 <> notes
-                                if setSawOptions opts || not (null (setIssues opts))
-                                  then hoistM preAll Nothing
-                                  else hoistM preAll (Just (Command "set" (renderArgs argExprs)))
+                                case setPositionalArgs opts of
+                                  Just positional -> do
+                                    MkHoisted prePos cmd <- translateSetPositionalM positional
+                                    hoistM (preRedirs <> prePos <> notes) (Just cmd)
+                                  Nothing
+                                    | setSawOptions opts ->
+                                        hoistM preAll Nothing
+                                    | not (null (setIssues opts)) ->
+                                        hoistM preAll (Just (Command "set" (renderArgs argExprs)))
+                                    | otherwise ->
+                                        hoistM preAll (Just (Command "set" (renderArgs argExprs)))
                               "read" -> do
                                 let MkReadParseResult {readIssues} =
                                       parseReadArgsDetailed plainArgs [] [] [] False False
@@ -164,8 +176,30 @@ translateCommandTokensWithoutTimePlanM cmdTokens =
                                 readCmd <- translateReadM plainArgs
                                 hoistM preAll (Just readCmd)
                               "shopt" -> do
-                                note <- noteUnsupported ShoptIgnored Nothing
-                                hoistM (pre0 <> [note]) (Just (Command "true" (renderArgs (argExprs ++ redirs))))
+                                unsupported ShoptIgnored Nothing
+                                hoistM pre0 (Just (Command "true" (renderArgs (argExprs ++ redirs))))
                               _ ->
                                 hoistM pre0 (Just (Command name (renderArgs argExprs)))
                     else hoistM pre0 (Just fallback)
+
+translateSetPositionalM :: [Token] -> HoistedM (FishCommand TStatus)
+translateSetPositionalM positional = do
+  MkHoisted pre args <- translateArgsM positional
+  hoistM pre (Command "set argv" (renderArgs args))
+
+translateSourceCommandM :: [FishStatement] -> [Token] -> [ExprOrRedirect] -> HoistedM (Maybe (FishCommand TStatus))
+translateSourceCommandM pre plainArgs renderedArgs = do
+  mapM_ (unsupported SourceIssue . Just) (sourceIssues plainArgs)
+  hoistM pre (Just (Command "source" renderedArgs))
+
+sourceIssues :: [Token] -> [Text]
+sourceIssues [] = ["source command missing path argument; manual review required"]
+sourceIssues (pathTok : _)
+  | sourcePathIsNonLiteral pathTok = ["non-literal source path requires manual review"]
+  | otherwise = []
+
+sourcePathIsNonLiteral :: Token -> Bool
+sourcePathIsNonLiteral tok =
+  tokenHasExpansion tok
+    || T.null (tokenToLiteralText tok)
+    || T.isInfixOf "$" (tokenRawText tok)

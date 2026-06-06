@@ -134,16 +134,19 @@ unitTranslatorMonadTests =
             H.assertBool
               "unexpected warning for read -r"
               (not (any ((== "read -r has no fish equivalent; backslash escapes may differ") . warnMessage) (stateWarnings st))),
-      H.testCase "Read array warns about IFS splitting" $ do
+      H.testCase "Read array uses exact newline helper without IFS warning" $ do
         result <- parseBashScript "spec.sh" "read -a arr"
         case translateParseResult defaultConfig result of
           Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right translation ->
             let st = translationState translation
-             in
-            H.assertBool
-              "expected warning for read IFS splitting"
-              (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)),
+                out = renderTranslation translation
+             in do
+              H.assertBool
+                "unexpected warning for exact newline array read"
+                (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+              H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
+              H.assertBool "expected array assignment" (T.isInfixOf "set --global arr $__monk_read_fields" out),
       H.testCase "Set -euo pipefail enables errexit/pipefail and warns about nounset" $ do
         result <- parseBashScript "spec.sh" "set -euo pipefail"
         case translateParseResult defaultConfig result of
@@ -156,11 +159,77 @@ unitTranslatorMonadTests =
             H.assertBool "unexpected pipefail warning" ("Bash set -o pipefail has no fish equivalent; manual review required" `notElem` msgs)
             H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
             H.assertBool "expected pipefail enabled" (statePipefailEnabled st),
+      H.testCase "set -- clears argv without warning" $ do
+        (out, st) <- translateWithState "set --"
+        out @?= "set argv"
+        H.assertBool "unexpected set warning" (not (any ((== SetOptionIssue) . warnCode) (stateWarnings st))),
+      H.testCase "set -- assigns argv exactly" $ do
+        (out, st) <- translateWithState "set -- a b"
+        out @?= "set argv 'a' 'b'"
+        H.assertBool "unexpected set warning" (not (any ((== SetOptionIssue) . warnCode) (stateWarnings st))),
+      H.testCase "set options before -- still assign argv" $ do
+        (out, st) <- translateWithState "set -e -- a b"
+        out @?= "set argv 'a' 'b'"
+        H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
+        H.assertBool "unexpected set warning" (not (any ((== SetOptionIssue) . warnCode) (stateWarnings st))),
+      H.testCase "ambiguous set arguments warn and stay raw" $ do
+        (out, st) <- translateWithState "set a b"
+        H.assertBool "expected raw set command" (T.isInfixOf "set 'a' 'b'" out)
+        assertHasWarning "Bash set positional arguments require -- for exact argv translation" st,
       H.testCase "shopt is warning-only and lowered to true" $ do
         (out, st) <- translateWithState "shopt -s nullglob"
         assertHasWarning "shopt has no fish equivalent; ignored" st
-        H.assertBool "expected shopt note in output" (T.isInfixOf "shopt has no fish equivalent; ignored" out)
         H.assertBool "expected fallback true command" (T.isInfixOf "true '-s' 'nullglob'" out),
+      H.testCase "redirected shopt is warning-only and lowered to redirected true" $ do
+        (out, st) <- translateWithState "shopt -s nullglob > out"
+        assertHasWarning "shopt has no fish equivalent; ignored" st
+        H.assertBool "expected redirected true command" (T.isInfixOf "true '-s' 'nullglob' > 'out'" out)
+        H.assertBool "unexpected raw shopt command" (not (T.isInfixOf "shopt '-s' 'nullglob'" out)),
+      H.testCase "non-literal source is warning-driven and preserved" $ do
+        (out, st) <- translateWithState "source \"$child\""
+        H.assertBool "expected source command to be preserved" (T.isInfixOf "source" out)
+        H.assertBool "expected source path expression to be preserved" (T.isInfixOf "$child" out)
+        H.assertBool "expected source warning code" (any ((== SourceIssue) . warnCode) (stateWarnings st))
+        assertHasWarning "non-literal source path requires manual review" st,
+      H.testCase "missing source argument is warning-driven and preserved" $ do
+        (out, st) <- translateWithState "."
+        H.assertBool "expected source command to be preserved" (T.isInfixOf "source" out)
+        H.assertBool "expected source warning code" (any ((== SourceIssue) . warnCode) (stateWarnings st))
+        assertHasWarning "source command missing path argument; manual review required" st,
+      H.testCase "strict mode fails on source issues" $ do
+        result <- parseBashScript "spec.sh" "source \"$child\""
+        case translateParseResult strictConfig result of
+          Left (Unsupported warning) -> do
+            warnCode warning @?= SourceIssue
+            warnMessage warning @?= "non-literal source path requires manual review"
+          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
+          Right _ -> H.assertFailure "expected strict source issue failure",
+      H.testCase "argument-position output process substitution warns for manual review" $ do
+        (out, st) <- translateWithState "echo >(cat)"
+        H.assertBool "expected output process substitution helper" (T.isInfixOf "__monk_procsub_out" out)
+        H.assertBool "expected process substitution warning code" (any ((== ProcessSubstitutionIssue) . warnCode) (stateWarnings st))
+        assertHasWarning "output process substitution in argument position requires manual review" st,
+      H.testCase "strict mode fails on argument-position output process substitution" $ do
+        result <- parseBashScript "spec.sh" "echo >(cat)"
+        case translateParseResult strictConfig result of
+          Left (Unsupported warning) -> do
+            warnCode warning @?= ProcessSubstitutionIssue
+            warnMessage warning @?= "output process substitution in argument position requires manual review"
+          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
+          Right _ -> H.assertFailure "expected strict process substitution issue failure",
+      H.testCase "unsupported output process substitution consumer warns instead of silently dropping body" $ do
+        (out, st) <- translateWithState "printf hi > >(case x in x) cat ;; esac)"
+        H.assertBool "expected process substitution warning code" (any ((== ProcessSubstitutionIssue) . warnCode) (stateWarnings st))
+        assertHasWarning "output process substitution consumer requires manual review" st
+        H.assertBool "expected explicit warned consumer drain" (T.isInfixOf "cat $__monk_psub_file | true" out),
+      H.testCase "strict mode fails on unsupported output process substitution consumer" $ do
+        result <- parseBashScript "spec.sh" "printf hi > >(case x in x) cat ;; esac)"
+        case translateParseResult strictConfig result of
+          Left (Unsupported warning) -> do
+            warnCode warning @?= ProcessSubstitutionIssue
+            warnMessage warning @?= "output process substitution consumer requires manual review"
+          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
+          Right _ -> H.assertFailure "expected strict process substitution consumer failure",
       H.testCase "read -d lowers to exact helper without semantic warning" $ do
         (out, st) <- translateWithState "read -d : first second"
         H.assertBool
@@ -168,6 +237,28 @@ unitTranslatorMonadTests =
           (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
         H.assertBool "expected exact variable assignment helper" (T.isInfixOf "__monk_read_assign" out),
+      H.testCase "read without variables assigns REPLY exactly" $ do
+        (out, st) <- translateWithState "read"
+        H.assertBool
+          "unexpected warning for exact REPLY read"
+          (not (any ((== ReadIssue) . warnCode) (stateWarnings st)))
+        H.assertBool "expected REPLY assignment" (T.isInfixOf "set --global REPLY" out)
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out),
+      H.testCase "read delimiter without variables assigns REPLY exactly" $ do
+        (out, st) <- translateWithState "read -d :"
+        H.assertBool
+          "unexpected delimiter warning for exact REPLY read"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+        H.assertBool "expected REPLY assignment" (T.isInfixOf "set --global REPLY" out)
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out),
+      H.testCase "multi-variable newline read uses exact helper without IFS warning" $ do
+        (out, st) <- translateWithState "read first second"
+        H.assertBool
+          "unexpected IFS warning for exact newline multi-var read"
+          (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
+        H.assertBool "expected first assignment" (T.isInfixOf "set --global first" out)
+        H.assertBool "expected second assignment" (T.isInfixOf "set --global second" out),
       H.testCase "read -d '' array path lowers without delimiter or IFS warnings" $ do
         (out, st) <- translateWithState "read -d '' -ra items"
         H.assertBool
@@ -201,10 +292,13 @@ unitTranslatorMonadTests =
         (out, st) <- translateWithState "read -n3 -a items"
         assertHasWarning "read IFS splitting semantics may differ between bash and fish" st
         H.assertBool "expected clustered nchars flag" (T.isInfixOf "read --nchars 3 --array items" out),
-      H.testCase "read -d '' with no vars stays warning-driven and uses --null" $ do
+      H.testCase "read -d '' with no vars assigns REPLY exactly" $ do
         (out, st) <- translateWithState "read -d ''"
-        assertHasWarning "read delimiter semantics may differ between bash and fish" st
-        H.assertBool "expected ReadNull pretty-printing on fallback path" (T.isInfixOf "read --null" out),
+        H.assertBool
+          "unexpected delimiter warning for exact null REPLY read"
+          (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
+        H.assertBool "expected REPLY assignment" (T.isInfixOf "set --global REPLY" out)
+        H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out),
       H.testCase "dynamic set -o warns for manual review" $ do
         (out, st) <- translateWithState "set -o $mode"
         assertHasWarningContaining "dynamic option requires manual review" st
@@ -234,6 +328,17 @@ unitTranslatorMonadTests =
         assertHasWarning "trap signal ERR has no fish equivalent; manual review required" st
         H.assertBool "expected warning note in output" ("manual review required" `T.isInfixOf` out)
         H.assertBool "unexpected invalid ERR signal handler" (not ("--on-signal ERR" `T.isInfixOf` out)),
+      H.testCase "numeric trap signal stays numeric to avoid platform mapping" $ do
+        (out, st) <- translateWithState "trap 'echo int' 2"
+        H.assertBool "unexpected trap warning" (not (any ((== TrapIssue) . warnCode) (stateWarnings st)))
+        H.assertBool "expected numeric signal function" (T.isInfixOf "__monk_trap_sig_2" out)
+        H.assertBool "expected numeric fish signal" (T.isInfixOf "--on-signal 2" out),
+      H.testCase "uncatchable trap signals warn instead of registering handlers" $ do
+        (out, st) <- translateWithState "trap 'echo nope' KILL STOP"
+        assertHasWarning "trap signal KILL cannot be caught; manual review required" st
+        assertHasWarning "trap signal STOP cannot be caught; manual review required" st
+        H.assertBool "unexpected KILL handler" (not (T.isInfixOf "--on-signal KILL" out))
+        H.assertBool "unexpected STOP handler" (not (T.isInfixOf "--on-signal STOP" out)),
       H.testCase "non-numeric read fd stays warning-driven" $ do
         (out, st) <- translateWithState "read -u fd value"
         assertHasWarning "read -u requires a numeric file descriptor; manual review required" st

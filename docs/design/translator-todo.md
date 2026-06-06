@@ -1,6 +1,6 @@
 # Bash to Fish Translator - Active Backlog
 
-Last refreshed: 2026-04-30
+Last refreshed: 2026-06-06
 
 This file is the active backlog for Monk's translator work.
 
@@ -10,9 +10,8 @@ This file is the active backlog for Monk's translator work.
 
 Current local baseline:
 
-- Passing local `cabal test` and `MONK_INTEGRATION=1 cabal test` runs with 257 tests.
-- The gated suite now includes focused regression coverage for the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, bake-off tool preflight messaging, and Linux-gated process-substitution output fixtures.
-- The current phase also landed `Monk.Translation.Types` as the public warning/config contract, translator warning-state cleanup, shared translator dispatch helpers, bake-off execution module splitting, CI linting, repo-wide `hlint` cleanup, recursive separate-output bundling, trap hardening, selector-file relative resolution, and a dedicated Ubuntu CI evidence step for helper-backed `>(...)`.
+- Focused local checks now cover the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, bake-off tool preflight messaging, fixture sidecars, and Linux-gated process-substitution output fixtures.
+- The current phase also landed explicit warning code/severity rendering, non-literal/missing `source` diagnostics, exact `set --` argv updates, redirected `shopt` lowering, expanded exact `read` handling, numeric/named `trap` hardening, shell-run timeouts, checked-in bake-off-compatible list coverage, and temp-file-backed status-preserving lowering for covered `>(...)` redirect targets.
 
 ## Current Position
 
@@ -28,11 +27,15 @@ Monk is a correctness-first conservative migrator, not a prove-exact transpiler.
 ### P0: Keep the remaining best-effort surfaces conservative and explicit
 
 - [x] Expand evidence around residual `set -e` / `pipefail` compound-list edge cases.
-- [x] Keep the remaining warning-driven `read` surface narrow and well-documented.
+- [x] Expand the exact helper-backed `read` surface and keep residual warnings narrow.
+  - [x] no-variable reads via `REPLY`
   - [x] no-variable delimiter reads
+  - [x] newline-delimited array and multi-variable reads
   - [x] non-numeric `-u` values
   - [x] unsupported flag clusters
-- [ ] Record explicit Linux runtime evidence for helper-backed `>(...)` before upgrading it beyond best-effort.
+- [ ] Record explicit Linux runtime evidence for covered `>(...)` redirect-target lowering before upgrading it beyond best-effort overall.
+  - [x] Add fast-fail shell-run timeouts so deadlocks fail instead of hanging.
+  - [x] Add local Linux runtime evidence for the `procsub-output*` fixtures, including producer-status, `set -e`, ignored-consumer-status, and compound-consumer behavior.
   - [x] Add a dedicated Ubuntu CI selector for the Linux-gated `procsub-output*` fixtures.
   - [ ] Close this item after that evidence step passes on Ubuntu.
 
@@ -108,3 +111,4 @@ The following milestones were completed in the correctness-first pass and are ke
   - [x] parent-variable access
   - [x] exact `read -d` helpers
   - [x] pipefail helpers
+- [x] Focused parity and unit coverage now also cover exact `set --` argv updates, no-variable/default-newline `read` helpers, redirected `shopt`, numeric and named uncatchable `trap` signals, checked-in bake-off-compatible selectors, and Linux `procsub-output*` fixtures.

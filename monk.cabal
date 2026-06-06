@@ -111,6 +111,7 @@ library
                      , Language.Fish.Translator.Names
                      , Language.Fish.Translator.Pipefail
                      , Language.Fish.Translator.Pipeline
+                     , Language.Fish.Translator.Rename
                      , Language.Fish.Translator.Simplify
                      , Language.Fish.Translator.Statement
                      , Language.Fish.Translator.Token

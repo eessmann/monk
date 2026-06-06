@@ -6,10 +6,12 @@
 module Monk.Internal.Shell
   ( Shell (..),
     ShellRunMode (..),
+    ShellRunTimeout (..),
     RunResult (..),
     EnvDelta (..),
     shouldRunIntegration,
     prepareEnv,
+    readCreateProcessWithTimeout,
     runShell,
     runShellWith,
     runShellWithMode,
@@ -18,7 +20,7 @@ module Monk.Internal.Shell
   )
 where
 
-import Control.Exception (bracket)
+import Control.Exception (bracket, throwIO)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Char (isAlpha, toLower)
 import Data.List (elemIndices)
@@ -33,6 +35,7 @@ import System.Environment qualified as Env
 import System.Exit (ExitCode)
 import System.IO qualified as IO
 import System.Process (CreateProcess (env), proc, readCreateProcessWithExitCode)
+import System.Timeout qualified as Timeout
 
 data Shell
   = ShellBash
@@ -46,6 +49,16 @@ data ShellRunMode
   | ShellRunExec
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
+
+data ShellRunTimeout = MkShellRunTimeout Int
+  deriving stock (Eq, Show)
+
+instance Exception ShellRunTimeout where
+  displayException (MkShellRunTimeout timeoutMicros) =
+    "shell command timed out after " <> showSeconds timeoutMicros <> "s"
+    where
+      showSeconds micros =
+        show (fromIntegral micros / (1000000 :: Double) :: Double)
 
 data RunResult = MkRunResult
   { rrExit :: ExitCode,
@@ -106,7 +119,7 @@ runShellFileWithMode' runMode shell env0 scriptPath args stdinInput = do
   let wrapped = wrapScriptPath runMode shell scriptPath args
       (cmd, cmdArgs) = shellCommand shell wrapped
       process = (proc cmd cmdArgs) {env = Just env0}
-  (exitCode, out, err) <- readCreateProcessWithExitCode process (T.unpack stdinInput)
+  (exitCode, out, err) <- readCreateProcessWithTimeout shellRunTimeoutMicros process (T.unpack stdinInput)
   let (stdoutPart, envPart) = splitEnv marker (T.pack out)
   pure
     MkRunResult
@@ -115,6 +128,15 @@ runShellFileWithMode' runMode shell env0 scriptPath args stdinInput = do
         rrStderr = T.pack err,
         rrEnv = parseEnv envPart
       }
+
+shellRunTimeoutMicros :: Int
+shellRunTimeoutMicros = 5 * 1000 * 1000
+
+readCreateProcessWithTimeout :: Int -> CreateProcess -> String -> IO (ExitCode, String, String)
+readCreateProcessWithTimeout timeoutMicros process stdinInput =
+  Timeout.timeout timeoutMicros (readCreateProcessWithExitCode process stdinInput) >>= \case
+    Just result -> pure result
+    Nothing -> throwIO (MkShellRunTimeout timeoutMicros)
 
 withTempScript :: Text -> (Path Abs File -> IO a) -> IO a
 withTempScript script action = do

@@ -5,6 +5,7 @@ This guide covers the warning classes and best-effort areas that most often need
 ## Reading Diagnostics
 
 - Monk warnings are now structured. Treat the warning code and severity as the stable contract; rendered message text is for humans.
+- Rendered diagnostics include that contract, for example `warning[ReadIssue][medium]`.
 - High-severity warnings mean the generated Fish should be reviewed before use.
 - If the translator is run with `--strict`, unsupported best-effort branches fail instead of emitting output.
 
@@ -17,29 +18,33 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## `read`
 
-- The exact helper-backed path covers the currently accepted `read -d` surface:
+- The exact helper-backed path covers the currently accepted `read` surface:
   - empty delimiters
   - arrays
   - multiple destination variables
   - supported mixed flag clusters
   - numeric `-u` helper-backed reads
+  - no-variable reads through Bash-compatible `REPLY`
+  - newline-delimited array and multi-variable reads
 - Remaining warning-driven `read` cases still need manual review:
-  - no-variable delimiter reads
   - non-numeric fd values
   - unsupported flag clusters
+  - unsupported option combinations
 - If Monk still emits a `ReadIssue` warning, validate the translated parser against real Bash input instead of trusting the generated Fish blindly.
 
 ## Process Substitution
 
 - `<(...)` has direct runtime coverage for simple cases, but larger pipelines should still be exercised in Fish.
-- `>(...)` now uses a generated FIFO helper. The current simple, pipeline, and variable-sink fixtures are the covered Linux evidence surface once the dedicated Ubuntu CI step passes.
-- Broader async/FIFO-heavy `>(...)` shapes remain manual-review surfaces until they have their own focused runtime evidence.
-- If the translated output feeds another command asynchronously, prefer rewriting it as explicit `mktemp` / producer / consumer steps in hand-edited Fish.
+- Covered stdout redirect-target `>(...)` forms now lower through a temp-file-backed block that preserves the producer status, honors parent `set -e`, and ignores the consumer status, matching the covered Bash behavior more closely than a plain pipeline.
+- The current simple, pipeline, variable-sink, status-sensitive, `set -e`, and compound-consumer fixtures are the covered Linux evidence surface once the dedicated Ubuntu CI step passes.
+- Argument-position output process substitutions emit `ProcessSubstitutionIssue` and remain manual-review surfaces until they have their own focused runtime evidence.
+- If the translated output depends on streaming or asynchronous timing, prefer rewriting it as explicit `mktemp` / producer / consumer steps in hand-edited Fish.
 
 ## `trap`
 
-- Covered `trap '...' EXIT`, normalized real-signal handlers such as `SIGINT`, and `trap - SIGNAL...` reset forms now lower without generating invalid fish.
-- Bash pseudo-signals such as `ERR`, `DEBUG`, and `RETURN`, along with option-heavy forms, still warn for manual review.
+- Covered `trap '...' EXIT`, named real-signal handlers such as `SIGINT`, numeric signal handlers such as `2`, and `trap - SIGNAL...` reset forms now lower without generating invalid fish.
+- Numeric trap signals stay numeric to avoid assuming Linux signal-number mappings on other platforms.
+- Bash pseudo-signals such as `ERR`, `DEBUG`, and `RETURN`, uncatchable signals such as `KILL` and `STOP`, and option-heavy forms still warn for manual review.
 - When cleanup ordering matters, prefer an explicit helper function and `--on-process-exit %self` in hand-edited Fish.
 
 ## Subshell Isolation

@@ -43,15 +43,15 @@ renderParseComment pc =
 renderWarning :: Warning -> Text
 renderWarning warning@MkWarning {warnRange = mRange} =
   case mRange of
-    Nothing -> "warning: " <> warnMessage warning
-    Just range -> formatRange range <> ": warning: " <> warnMessage warning
+    Nothing -> renderWarningLabel warning <> ": " <> warnMessage warning
+    Just range -> formatRange range <> ": " <> renderWarningLabel warning <> ": " <> warnMessage warning
 
 renderTranslateError :: TranslateError -> Text
 renderTranslateError = \case
   Unsupported warning@MkWarning {warnRange = mRange} ->
     case mRange of
-      Nothing -> "error: " <> warnMessage warning
-      Just range -> formatRange range <> ": error: " <> warnMessage warning
+      Nothing -> renderErrorLabel warning <> ": " <> warnMessage warning
+      Just range -> formatRange range <> ": " <> renderErrorLabel warning <> ": " <> warnMessage warning
   InternalError msg -> "error: " <> msg
 
 renderTranslationNotes :: FilePath -> [Warning] -> [Text]
@@ -96,6 +96,23 @@ translationNoteCount = length . renderTranslationNotes ""
 
 warningSeverity :: Warning -> WarningSeverity
 warningSeverity = warnSeverity
+
+renderWarningLabel :: Warning -> Text
+renderWarningLabel warning =
+  "warning[" <> warningCodeText (warnCode warning) <> "][" <> warningSeverityText (warnSeverity warning) <> "]"
+
+renderErrorLabel :: Warning -> Text
+renderErrorLabel warning =
+  "error[" <> warningCodeText (warnCode warning) <> "][" <> warningSeverityText (warnSeverity warning) <> "]"
+
+warningCodeText :: WarningCode -> Text
+warningCodeText = show
+
+warningSeverityText :: WarningSeverity -> Text
+warningSeverityText = \case
+  WarnHigh -> "high"
+  WarnMedium -> "medium"
+  WarnLow -> "low"
 
 formatPosition :: Position -> Text
 formatPosition pos =
