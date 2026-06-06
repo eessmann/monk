@@ -11,7 +11,7 @@ This document compares Monk with the Go-based babelfish translator and outlines 
 
 ## High-level differences
 
-- **Architecture**: Monk lowers into a typed Fish IR (GADT-based) and renders from there; babelfish writes Fish text directly from a Bash AST.
+- **Architecture**: Monk now exposes a typed Fish DSL/IR and lowers the translation handoff through it before rendering with the raw pretty-printer backend; remaining translator internals are being migrated behind that boundary. Babelfish writes Fish text directly from a Bash AST.
 - **Diagnostics**: Monk emits warnings and inline notes for lossy translations and offers `--strict`; babelfish tends to emit a best-effort script with fewer diagnostics.
 - **Translation strategy**: Monk hoists side effects and emulates short-circuit arithmetic to preserve semantics; babelfish focuses on pragmatic, readable output.
 

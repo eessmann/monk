@@ -1,7 +1,5 @@
-{-# LANGUAGE GADTs #-}
-
 module Language.Fish.Translator.Args
-  ( Arg (..),
+  ( Arg,
     argExpr,
     argRedirect,
     renderArg,
@@ -9,21 +7,29 @@ module Language.Fish.Translator.Args
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.DSL.Internal
+  ( Arg (UnsafeArgExpr, UnsafeArgRedirect),
+    ArgumentType,
+    Expr (UnsafeExpr),
+    lowerArg,
+  )
+import Language.Fish.Translator.DSL
+  ( ExprOrRedirect,
+    FishExpr,
+    Redirect,
+  )
 
-data Arg where
-  ArgExpr :: Typeable t => FishExpr t -> Arg
-  ArgRedirect :: Redirect -> Arg
-
-argExpr :: Typeable t => FishExpr t -> Arg
-argExpr = ArgExpr
+argExpr :: (ArgumentType t, Typeable t) => FishExpr t -> Arg
+argExpr = lowerableExprArg
 
 argRedirect :: Redirect -> Arg
-argRedirect = ArgRedirect
+argRedirect = UnsafeArgRedirect
 
 renderArg :: Arg -> ExprOrRedirect
-renderArg (ArgExpr expr) = ExprVal expr
-renderArg (ArgRedirect redir) = RedirectVal redir
+renderArg = lowerArg
 
 renderArgs :: [Arg] -> [ExprOrRedirect]
 renderArgs = map renderArg
+
+lowerableExprArg :: (ArgumentType t, Typeable t) => FishExpr t -> Arg
+lowerableExprArg = UnsafeArgExpr . UnsafeExpr

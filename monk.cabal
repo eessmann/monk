@@ -75,9 +75,12 @@ library
   hs-source-dirs:      src
   exposed-modules:     Monk
                      , Monk.AST
+                     , Monk.AST.Raw
                      , Monk.Source
                      , Monk.Translation
                      , Monk.Translation.Types
+                     , Language.Fish.DSL
+                     , Language.Fish.DSL.Lower
                      , Language.Fish.Inline
                      , Monk.Diagnostics
   build-depends:       containers
@@ -87,6 +90,7 @@ library
                      , Language.Fish.AST.Common
                      , Language.Fish.AST.Example
                      , Language.Fish.AST.Types
+                     , Language.Fish.DSL.Internal
                      , Language.Fish.Pretty
                      , Language.Fish.Pretty.Command
                      , Language.Fish.Pretty.Expr
@@ -159,6 +163,7 @@ library
                      , Language.Fish.Translator.Commands.Tests
                      , Language.Fish.Translator.Commands.Time
                      , Language.Fish.Translator.Control
+                     , Language.Fish.Translator.DSL
                      , Language.Fish.Translator.ForArithmetic
                      , Language.Fish.Translator.IO
                      , Language.Fish.Translator.Redirections
@@ -248,6 +253,7 @@ test-suite monk-test
                      , Unit.Inline
                      , Unit.Bakeoff
                      , Unit.Diagnostics
+                     , Unit.DSL
                      , Unit.Harness
                      , Unit.TranslatorMonad
                      , Unit.Pipefail

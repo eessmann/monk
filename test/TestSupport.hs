@@ -8,13 +8,15 @@ module TestSupport
 where
 
 import Data.List.NonEmpty qualified as NE
-import Monk.AST
+import Monk.AST.Raw
 import Monk.Translation
 import Test.Tasty.HUnit as H
 
 trueCond :: FishJobList
 trueCond =
-  MkFishJobList ( MkFishJobConjunction Nothing
+  MkFishJobList
+    ( MkFishJobConjunction
+        Nothing
         (MkFishJobPipeline False [] (Stmt (Command "true" [])) [] False)
         []
         NE.:| []

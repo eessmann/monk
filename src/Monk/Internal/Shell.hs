@@ -50,7 +50,7 @@ data ShellRunMode
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
-data ShellRunTimeout = MkShellRunTimeout Int
+newtype ShellRunTimeout = MkShellRunTimeout Int
   deriving stock (Eq, Show)
 
 instance Exception ShellRunTimeout where

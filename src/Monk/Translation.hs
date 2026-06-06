@@ -1,11 +1,11 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 -- |
 -- Copyright: (c) 2025 Erich Essmann
 -- SPDX-License-Identifier: MIT
 -- Maintainer: Erich Essmann <essmanne@gmail.com>
 --
 -- Parse, translate, and render entry points for Monk.
-{-# LANGUAGE OverloadedStrings #-}
-
 module Monk.Translation
   ( TranslationResult (..),
     TranslationFailure (..),
@@ -33,6 +33,7 @@ where
 
 import Language.Bash.Parser (parseBashFile, parseBashScript)
 import Language.Fish.AST (FishStatement (..))
+import Language.Fish.DSL.Lower (lowerScript)
 import Language.Fish.Inline (Translation (..), WarnFn, inlineStatements)
 import Language.Fish.Pretty (renderFish)
 import Language.Fish.Translator qualified as Translator
@@ -56,10 +57,10 @@ data TranslationResult = MkTranslationResult
 
 -- | Failure modes for parse and translation entry points.
 data TranslationFailure
-  -- | ShellCheck parse errors.
-  = ParseErrors [PositionedComment]
-  -- | Translation failed with a semantic error.
-  | TranslateFailure TranslateError
+  = -- | ShellCheck parse errors.
+    ParseErrors [PositionedComment]
+  | -- | Translation failed with a semantic error.
+    TranslateFailure TranslateError
   deriving stock (Show, Eq)
 
 -- | Translate a parsed shell script into fish AST plus translation state.
@@ -68,8 +69,8 @@ translateParseResult ::
   ParseResult ->
   Either TranslateError TranslationResult
 translateParseResult cfg parseResult = do
-  (stmt, st) <- Translator.translateParseResult cfg parseResult
-  pure (MkTranslationResult stmt st)
+  (script, st) <- Translator.translateParseResult cfg parseResult
+  pure (MkTranslationResult (StmtList (lowerScript script)) st)
 
 -- | Parse and translate a Bash file on disk.
 translateBashFile ::

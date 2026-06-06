@@ -2,6 +2,14 @@
 
 This guide covers the warning classes and best-effort areas that most often need manual cleanup after translating Bash to Fish.
 
+## Library API Change
+
+- `Monk.AST` is now the safe Fish construction DSL, not the raw constructor surface.
+- Use `script`, `stmt`, `command`, `arg`, `redirect`, `begin`, `pipeline`, `if_`, `while`, `for`, `switch`, `function`, and related smart constructors for normal construction.
+- The DSL enforces non-empty blocks and pipeline stages with `NonEmpty`, separates renderable command arguments from redirections with `Arg`, and provides typed constructors for common control forms.
+- If you were pattern matching on raw constructors such as `Stmt`, `Command`, `ExprVal`, or `MkFishJobPipeline`, import `Monk.AST.Raw` explicitly.
+- `Language.Fish.DSL.Lower` lowers DSL values to the raw AST so existing rendering code can continue to use the current pretty-printer.
+
 ## Reading Diagnostics
 
 - Monk warnings are now structured. Treat the warning code and severity as the stable contract; rendered message text is for humans.

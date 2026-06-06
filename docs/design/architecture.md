@@ -10,7 +10,13 @@ The public API is intentionally explicit:
   - Parse, translate, and render entry points.
   - Owns `TranslationResult`, `TranslationFailure`, `Translation`, and translation-state access.
 - `Monk.AST`
-  - Public Fish AST surface for downstream code that needs to inspect or post-process generated Fish.
+  - Convenience re-export of the public type-safe Fish construction DSL for downstream code that needs to build generated Fish.
+- `Language.Fish.DSL`
+  - Canonical public construction API over typed expressions, renderable arguments, command roles, non-empty blocks, stages, job conjunctions, control forms, and scripts.
+- `Language.Fish.DSL.Lower`
+  - Explicit lowering API from DSL values into the raw AST used by the existing pretty-printer backend.
+- `Monk.AST.Raw`
+  - Explicit raw Fish AST escape hatch for backend/rendering code and advanced consumers.
 - `Monk.Source`
   - Recursive source-graph construction and source-path rewriting helpers used by the CLI and tests.
 - `Monk.Diagnostics`
@@ -22,16 +28,17 @@ The public API is intentionally explicit:
 
 ## Translator Internals
 
-The translator is organized around a typed Fish IR and small focused subsystems:
-
+The translator is organized around the typed Fish DSL/IR and small focused subsystems:
 - `Language.Fish.AST`
-  - Re-export surface over the AST internals.
+  - Raw renderer-backend AST surface used internally and re-exported explicitly as `Monk.AST.Raw`.
 - `Language.Fish.AST.Common`
   - Shared leaf enums and source-position types.
 - `Language.Fish.AST.Types`
   - Recursive statement, expression, job, and redirection structures.
 - `Language.Fish.Translator`
-  - Top-level statement dispatch and orchestration.
+  - Top-level statement dispatch and orchestration; the public translation handoff emits a DSL `Script` before `Monk.Translation` lowers it for rendering.
+- `Language.Fish.Translator.DSL`
+  - Transitional translator-only choke point for raw-shaped construction while the remaining translator modules are migrated onto typed DSL helpers. Direct `Language.Fish.AST` imports are forbidden in translator modules outside this boundary, and tests ratchet the facade import count downward over time.
 - `Language.Fish.Translator.Commands.Read`
   - Facade over read lowering.
 - `Language.Fish.Translator.Commands.Read.Parse`

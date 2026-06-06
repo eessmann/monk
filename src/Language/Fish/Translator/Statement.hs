@@ -13,7 +13,7 @@ module Language.Fish.Translator.Statement
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Monad
   ( TranslateM,

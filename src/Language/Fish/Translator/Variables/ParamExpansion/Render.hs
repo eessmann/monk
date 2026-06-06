@@ -20,12 +20,12 @@ where
 import Data.Char (isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Background (noteBackgroundTracking)
 import Language.Fish.Translator.Cond
   ( testBinaryCommand,
     testUnaryCommand,
   )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)
@@ -35,7 +35,8 @@ import Language.Fish.Translator.Variables.Index
     parseArithExprAdjusted,
   )
 import Language.Fish.Translator.Variables.ParamExpansion.Parse
-  ( parseSimpleVar )
+  ( parseSimpleVar,
+  )
 import Language.Fish.Translator.Variables.ParamExpansion.Types
 import ShellCheck.AST (Token)
 
@@ -277,7 +278,8 @@ varNonEmptyCond :: Text -> FishJobList
 varNonEmptyCond name =
   let varExpr = ExprJoinList (ExprVariable (VarAll (specialVarName name)))
       setq =
-        MkFishJobPipeline False
+        MkFishJobPipeline
+          False
           []
           ( Stmt
               ( Command
@@ -290,7 +292,8 @@ varNonEmptyCond name =
           []
           False
       test =
-        MkFishJobPipeline False
+        MkFishJobPipeline
+          False
           []
           (Stmt (testUnaryCommand "-n" varExpr))
           []
@@ -300,7 +303,8 @@ varNonEmptyCond name =
 varSetCond :: Text -> FishJobList
 varSetCond name =
   let setq =
-        MkFishJobPipeline False
+        MkFishJobPipeline
+          False
           []
           ( Stmt
               ( Command
@@ -316,7 +320,9 @@ varSetCond name =
 
 jobListFromStatus :: FishCommand TStatus -> FishJobList
 jobListFromStatus cmd =
-  MkFishJobList ( MkFishJobConjunction Nothing
+  MkFishJobList
+    ( MkFishJobConjunction
+        Nothing
         (MkFishJobPipeline False [] (Stmt cmd) [] False)
         []
         NE.:| []

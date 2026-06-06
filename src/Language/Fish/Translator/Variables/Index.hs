@@ -11,7 +11,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables.Arithmetic (arithArgsFromText, arithArgsFromToken)
 import ShellCheck.AST

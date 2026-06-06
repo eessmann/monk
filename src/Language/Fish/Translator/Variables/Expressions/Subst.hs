@@ -8,15 +8,15 @@ module Language.Fish.Translator.Variables.Expressions.Subst
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Variables.Substitution
-  ( commandSubstExprListWith,
-    commandSubstExprListMWith,
-    commandSubstExprStrWith,
+  ( commandSubstExprListMWith,
+    commandSubstExprListWith,
     commandSubstExprStrMWith,
-    translateSubstTokenWith,
+    commandSubstExprStrWith,
     translateSubstTokenMWith,
+    translateSubstTokenWith,
   )
 import ShellCheck.AST
 

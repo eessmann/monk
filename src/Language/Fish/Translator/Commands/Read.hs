@@ -7,7 +7,6 @@ module Language.Fish.Translator.Commands.Read
   )
 where
 
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.Read.Exact (translateReadExactM)
 import Language.Fish.Translator.Commands.Read.Parse
   ( exactReadDelim,
@@ -15,6 +14,7 @@ import Language.Fish.Translator.Commands.Read.Parse
     parseReadArgsDetailed,
   )
 import Language.Fish.Translator.Commands.Read.Types (ReadParseResult (..))
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Variables (translateTokenToExprOrRedirect)
 import ShellCheck.AST (Token)

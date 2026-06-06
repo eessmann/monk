@@ -11,12 +11,12 @@ module Language.Fish.Translator.Commands.CommandTokens.Status
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
 import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens.Core (translateCommandTokensWithoutTime)
 import Language.Fish.Translator.Commands.Tests (translateConditionToken)
-import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
+import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Hoist (beginIfNeeded)
 import Language.Fish.Translator.Pipeline (jobPipelineFromListWithTime)
 import Language.Fish.Translator.Redirections (translateRedirectToken)
 import Language.Fish.Translator.Statement
@@ -29,8 +29,8 @@ import Language.Fish.Translator.Token
     tokensHaveBang,
   )
 import Language.Fish.Translator.Variables
-  ( translateAssignmentWithFlags,
-    translateArithmetic,
+  ( translateArithmetic,
+    translateAssignmentWithFlags,
     translateTokenToExprOrRedirect,
   )
 import ShellCheck.AST
@@ -55,7 +55,7 @@ translatePipelineToStatus bang cmds =
    in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
         [] -> Command "true" []
         (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+          let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
            in if tokensHaveBang bang then Not pipe else pipe
 
 translateTokenToMaybeStatusCmd :: Token -> Maybe (FishCommand TStatus)
@@ -112,7 +112,7 @@ translateTimeReserved name args
       case mapMaybe translateTokenToMaybeStatusCmd cmds of
         [] -> Command "true" []
         (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime True (c : cs))
+          let pipe = Pipeline (jobPipelineFromListWithTime True (c NE.:| cs))
            in if tokensHaveBang bang then Not pipe else pipe
 
 translateStatusBlock :: [Token] -> FishCommand TStatus
@@ -126,16 +126,4 @@ translateSubshellStatus tokens =
     (mapMaybe translateTokenToMaybeStatusCmd (stripSeparatorTokens tokens))
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachRedirsToStatus redirs cmd =
-  case cmd of
-    Command name args -> Command name (args ++ redirs)
-    Exec c args -> Exec c (args ++ redirs)
-    Begin body suffix -> Begin body (suffix ++ redirs)
-    If cond thn els suffix -> If cond thn els (suffix ++ redirs)
-    Switch expr cases suffix -> Switch expr cases (suffix ++ redirs)
-    While cond body suffix -> While cond body (suffix ++ redirs)
-    For var listExpr body suffix -> For var listExpr body (suffix ++ redirs)
-    other ->
-      case redirs of
-        [] -> other
-        _ -> Begin (Stmt other NE.:| []) redirs
+attachRedirsToStatus = attachRedirectsToCommand

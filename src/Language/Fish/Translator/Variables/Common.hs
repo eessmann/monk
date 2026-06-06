@@ -7,14 +7,14 @@ module Language.Fish.Translator.Variables.Common
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad.State.Strict (gets)
 import Data.Text qualified as T
-import Language.Fish.AST
-import Language.Fish.Translator.Monad (TranslationContext (..), TranslateM, context, isLocalVar)
+import Language.Fish.Translator.DSL
+import Language.Fish.Translator.Monad (TranslateM, TranslationContext (..), context, isLocalVar)
 import Language.Fish.Translator.Token (tokenRawText)
 import ShellCheck.AST (Token)
 import ShellCheck.ASTLib (getBracedReference)
+import Prelude hiding (gets)
 
 paramNameFrom :: Token -> Maybe Text
 paramNameFrom word =

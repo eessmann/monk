@@ -8,7 +8,7 @@ where
 import Data.Char (isAlphaNum)
 import Data.Text qualified as T
 import System.Directory (doesDirectoryExist, listDirectory, makeAbsolute)
-import System.FilePath ((</>), takeExtension)
+import System.FilePath (takeExtension, (</>))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import TestSupport (translateScript)
@@ -31,13 +31,30 @@ unitRefactorTests =
         T.isInfixOf "set --global name" out H.@? "expected assignment branch",
       H.testCase "Case-modification expansions still lower through string helpers" $ do
         out <- translateScript "echo ${name^^}"
-        T.isInfixOf "string upper" out H.@? "expected case-modifier lowering"
-    ,
+        T.isInfixOf "string upper" out H.@? "expected case-modifier lowering",
       H.testCase "Tracked Haskell sources do not use punning constructors" $ do
         repoRoot <- makeAbsolute "."
         files <- fmap concat (traverse (collectHsFiles . (repoRoot </>)) ["src", "app", "test", "scripts"])
         offenders <- fmap concat (traverse punningConstructors files)
-        offenders H.@?= []
+        offenders H.@?= [],
+      H.testCase "Translator modules use the DSL/raw boundary instead of importing raw AST directly" $ do
+        repoRoot <- makeAbsolute "."
+        files <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
+        let boundary = repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "DSL.hs"
+            checkedFiles = filter (/= boundary) files
+        offenders <- fmap concat (traverse directRawAstImports checkedFiles)
+        offenders H.@?= [],
+      H.testCase "Translator DSL facade usage is ratcheted while migration continues" $ do
+        repoRoot <- makeAbsolute "."
+        files <- collectHsFiles (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator")
+        users <- fmap concat (traverse translatorDslImports files)
+        H.assertBool
+          ( "translator DSL facade import count grew above "
+              <> show translatorDslImportLimit
+              <> ": "
+              <> show users
+          )
+          (length users <= translatorDslImportLimit)
     ]
 
 collectHsFiles :: FilePath -> IO [FilePath]
@@ -86,3 +103,42 @@ trimIdent = T.takeWhile isIdentChar
 
 isIdentChar :: Char -> Bool
 isIdentChar c = isAlphaNum c || c == '_' || c == '\''
+
+directRawAstImports :: FilePath -> IO [String]
+directRawAstImports path = do
+  contents <- decodeUtf8 <$> readFileBS path
+  pure
+    [ path <> ":" <> show lineNo <> ": " <> toString lineText
+    | (lineNo, lineText) <- zip [1 :: Int ..] (T.lines contents),
+      isImportUnder "Language.Fish.AST" lineText
+    ]
+
+translatorDslImportLimit :: Int
+translatorDslImportLimit = 56
+
+translatorDslImports :: FilePath -> IO [FilePath]
+translatorDslImports path = do
+  contents <- decodeUtf8 <$> readFileBS path
+  pure
+    [ path
+    | lineText <- T.lines contents,
+      isImportOf "Language.Fish.Translator.DSL" lineText
+    ]
+
+isImportOf :: Text -> Text -> Bool
+isImportOf moduleName rawLine =
+  Just moduleName == importedModule rawLine
+
+isImportUnder :: Text -> Text -> Bool
+isImportUnder moduleRoot rawLine =
+  case importedModule rawLine of
+    Just imported ->
+      imported == moduleRoot || (moduleRoot <> ".") `T.isPrefixOf` imported
+    Nothing -> False
+
+importedModule :: Text -> Maybe Text
+importedModule rawLine =
+  case T.words (T.strip rawLine) of
+    "import" : "qualified" : imported : _ -> Just imported
+    "import" : imported : _ -> Just imported
+    _ -> Nothing

@@ -13,12 +13,12 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Cond
   ( condFromTokenMWith,
     condFromTokenWith,
     condToCommand,
   )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM, withCommandSubstScope)
@@ -259,38 +259,10 @@ concatHereDocM translateExprM toks = do
   pure (MkHoisted pre expr)
 
 attachSubstRedirs :: [ExprOrRedirect] -> FishStatement -> FishStatement
-attachSubstRedirs redirs stmt =
-  case redirs of
-    [] -> stmt
-    _ ->
-      case stmt of
-        Stmt (Command name args) -> Stmt (Command name (args ++ redirs))
-        Stmt (Exec cmd args) -> Stmt (Exec cmd (args ++ redirs))
-        Stmt (Begin body suffix) -> Stmt (Begin body (suffix ++ redirs))
-        Stmt (If cond thn els suffix) -> Stmt (If cond thn els (suffix ++ redirs))
-        Stmt (Switch expr cases suffix) -> Stmt (Switch expr cases (suffix ++ redirs))
-        Stmt (While cond body suffix) -> Stmt (While cond body (suffix ++ redirs))
-        Stmt (For var listExpr body suffix) -> Stmt (For var listExpr body (suffix ++ redirs))
-        StmtList stmts ->
-          case NE.nonEmpty stmts of
-            Just body -> Stmt (Begin body redirs)
-            Nothing -> Comment "Skipped empty redirection block"
-        other -> Stmt (Begin (other NE.:| []) redirs)
+attachSubstRedirs = attachRedirectsToStatement
 
 attachSubstStatusRedirs :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachSubstStatusRedirs redirs cmd =
-  case redirs of
-    [] -> cmd
-    _ ->
-      case cmd of
-        Command name args -> Command name (args ++ redirs)
-        Exec cmdExpr args -> Exec cmdExpr (args ++ redirs)
-        Begin body suffix -> Begin body (suffix ++ redirs)
-        If cond thn els suffix -> If cond thn els (suffix ++ redirs)
-        Switch expr cases suffix -> Switch expr cases (suffix ++ redirs)
-        While cond body suffix -> While cond body (suffix ++ redirs)
-        For var listExpr body suffix -> For var listExpr body (suffix ++ redirs)
-        other -> Begin (Stmt other NE.:| []) redirs
+attachSubstStatusRedirs = attachRedirectsToCommand
 
 wrapSubstPrelude :: [FishStatement] -> FishStatement -> FishStatement
 wrapSubstPrelude [] stmt = stmt
@@ -391,7 +363,7 @@ translateSubstTokenWith translateAssign translateExpr translateExprOrRedirect = 
       case mapMaybe translateSubstTokenToMaybeStatusCmd cmds of
         [] -> Command "true" []
         (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromList (c : cs))
+          let pipe = Pipeline (jobPipelineFromList (c NE.:| cs))
            in if tokensHaveBang bang then Not pipe else pipe
 
     translateSubstTokenToMaybeStatusCmd token =
@@ -533,7 +505,7 @@ translateSubstTokenMWith translateAssignM translateExprM translateExprOrRedirect
         case catMaybes mCmds of
           [] -> Command "true" []
           (c : cs) ->
-            let pipe = Pipeline (jobPipelineFromList (c : cs))
+            let pipe = Pipeline (jobPipelineFromList (c NE.:| cs))
              in if tokensHaveBang bang then Not pipe else pipe
 
     translateSubstTokenToMaybeStatusCmdM token =

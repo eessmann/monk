@@ -14,7 +14,7 @@ module Language.Fish.Translator.Hoist
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST (FishCommand (Begin), FishStatement (Stmt), FishType (TStatus))
+import Language.Fish.Translator.DSL (FishCommand (Begin), FishStatement (Stmt), FishType (TStatus))
 
 -- | A value paired with statements that must run before it.
 data Hoisted a = MkHoisted

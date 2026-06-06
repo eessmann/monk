@@ -23,7 +23,7 @@ where
 import Data.Char (isAlpha, isAlphaNum, isDigit, isSpace)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import ShellCheck.AST
 
 arithCompareOp :: Text -> Maybe Text

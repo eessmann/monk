@@ -5,13 +5,13 @@ module Language.Fish.Translator.Commands.CommandTokens.Dispatch
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.Args (translateArgsM)
 import Language.Fish.Translator.Commands.CommandTokens.Core
   ( translateCommandTokensWithoutTime,
     translateCommandTokensWithoutTimeM,
   )
 import Language.Fish.Translator.Commands.CommandTokens.Status (translateTimeReserved)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Pipeline (applyPipefailIfEnabled)

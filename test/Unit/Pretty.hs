@@ -7,7 +7,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Monk.AST
+import Monk.AST.Raw
 import Monk.Translation (renderFish)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H

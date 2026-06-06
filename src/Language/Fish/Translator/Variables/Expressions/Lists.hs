@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+
 module Language.Fish.Translator.Variables.Expressions.Lists
   ( translateTokenToListExprWith,
     translateTokenToListExprMWith,
@@ -9,7 +10,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)

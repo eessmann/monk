@@ -8,7 +8,7 @@ module Language.Fish.Translator.Commands.Read.Types
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 
 data ReadParseResult = MkReadParseResult
   { readFlags :: [ReadFlag],

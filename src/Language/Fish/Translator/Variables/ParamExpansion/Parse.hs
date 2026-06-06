@@ -13,7 +13,7 @@ module Language.Fish.Translator.Variables.ParamExpansion.Parse
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Token (tokenRawText, tokenToLiteralText)
 import Language.Fish.Translator.Variables.Common (paramNameFrom)
 import Language.Fish.Translator.Variables.Index
@@ -120,7 +120,8 @@ parseAltModifier name modifier =
         Just braceInner -> Just braceInner
         Nothing -> T.stripPrefix "$" inner0
     let base =
-          fromMaybe inner1
+          fromMaybe
+            inner1
             ( T.stripSuffix "[@]" inner1
                 <|> T.stripSuffix "[*]" inner1
             )

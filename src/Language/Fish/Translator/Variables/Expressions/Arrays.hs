@@ -8,7 +8,7 @@ module Language.Fish.Translator.Variables.Expressions.Arrays
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)

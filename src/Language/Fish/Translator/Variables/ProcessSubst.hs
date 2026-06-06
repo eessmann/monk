@@ -11,8 +11,8 @@ module Language.Fish.Translator.Variables.ProcessSubst
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
 import Language.Fish.Pretty (renderFish)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
@@ -240,8 +240,8 @@ procSubFileOutputRedirect =
     )
 
 procSubProducerFileStmt :: FishCommand TStatus -> FishStatement
-procSubProducerFileStmt producer =
-  attachRedirectsToStatusCommand [procSubFileOutputRedirect] producer
+procSubProducerFileStmt =
+  Stmt . attachRedirectsToCommand [procSubFileOutputRedirect]
 
 procSubCatFileCommand :: FishCommand TStatus
 procSubCatFileCommand =
@@ -252,41 +252,13 @@ procSubCatFileCommand =
 procSubPipelineFileStmt :: FishStatement -> FishStatement
 procSubPipelineFileStmt consumer =
   let pipe =
-        (jobPipelineFromList [procSubCatFileCommand])
+        (jobPipelineFromList (procSubCatFileCommand NE.:| []))
           { jpCont = [PipeTo [] consumer]
           }
    in Stmt (Pipeline pipe)
 
 procSubConsumerStmt :: FishStatement -> FishStatement
-procSubConsumerStmt rhsStmt =
-  case rhsStmt of
-    Stmt (Command name args) -> Stmt (Command name (args ++ [procSubInputRedirect]))
-    Stmt (Exec cmd args) -> Stmt (Exec cmd (args ++ [procSubInputRedirect]))
-    Stmt (Begin body suffix) -> Stmt (Begin body (suffix ++ [procSubInputRedirect]))
-    Stmt (If cond thn els suffix) -> Stmt (If cond thn els (suffix ++ [procSubInputRedirect]))
-    Stmt (Switch expr cases suffix) -> Stmt (Switch expr cases (suffix ++ [procSubInputRedirect]))
-    Stmt (While cond body suffix) -> Stmt (While cond body (suffix ++ [procSubInputRedirect]))
-    Stmt (For var listExpr body suffix) -> Stmt (For var listExpr body (suffix ++ [procSubInputRedirect]))
-    StmtList stmts ->
-      case NE.nonEmpty stmts of
-        Just body -> Stmt (Begin body [procSubInputRedirect])
-        Nothing -> Comment "Skipped empty process substitution body"
-    other -> Stmt (Begin (other NE.:| []) [procSubInputRedirect])
-
-attachRedirectsToStatusCommand :: [ExprOrRedirect] -> FishCommand TStatus -> FishStatement
-attachRedirectsToStatusCommand redirs cmd =
-  case cmd of
-    Command name args -> Stmt (Command name (args ++ redirs))
-    Exec c args -> Stmt (Exec c (args ++ redirs))
-    Begin body suffix -> Stmt (Begin body (suffix ++ redirs))
-    If cond thn els suffix -> Stmt (If cond thn els (suffix ++ redirs))
-    Switch expr cases suffix -> Stmt (Switch expr cases (suffix ++ redirs))
-    While cond body suffix -> Stmt (While cond body (suffix ++ redirs))
-    For var listExpr body suffix -> Stmt (For var listExpr body (suffix ++ redirs))
-    other ->
-      case redirs of
-        [] -> Stmt other
-        _ -> Stmt (Begin (Stmt other NE.:| []) redirs)
+procSubConsumerStmt = attachRedirectsToStatement [procSubInputRedirect]
 
 procSubBackgroundStmt :: FishStatement -> [FishStatement] -> FishStatement
 procSubBackgroundStmt rhsStmt cleanupStmts =

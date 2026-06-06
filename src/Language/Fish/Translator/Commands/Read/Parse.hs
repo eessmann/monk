@@ -9,8 +9,8 @@ where
 
 import Data.Char (isDigit)
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.Read.Types
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import ShellCheck.AST
 
@@ -27,11 +27,11 @@ parseReadArgsDetailed [] fs vs issues unsupported raw =
       needsSplitNote = not exact && (ReadArray `elem` fs || length vs > 1)
       fdIssues =
         [ "read -u requires a numeric file descriptor; manual review required"
-          | any invalidFdFlag fs
+        | any invalidFdFlag fs
         ]
       delimiterNote =
         [ "read delimiter semantics may differ between bash and fish"
-          | any isDelimiterFlag fs && not exact
+        | any isDelimiterFlag fs && not exact
         ]
       issues' =
         if needsSplitNote

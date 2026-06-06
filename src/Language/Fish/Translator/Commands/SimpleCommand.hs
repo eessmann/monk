@@ -5,22 +5,22 @@ module Language.Fish.Translator.Commands.SimpleCommand
   )
 where
 
-import Prelude hiding (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.CommandTokens
   ( translateCommandTokens,
     translateCommandTokensM,
   )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
+import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Pipeline (wrapErrexitIfEnabled)
 import Language.Fish.Translator.Statement (isEmptyStatement, toNonEmptyStmtList)
 import Language.Fish.Translator.Token (tokenToLiteralText)
 import Language.Fish.Translator.Variables (translateAssignmentWithFlags, translateAssignmentWithFlagsM)
-import Language.Fish.Translator.Monad (TranslateM)
 import ShellCheck.AST
+import Prelude hiding (gets)
 
 --------------------------------------------------------------------------------
 -- Simple commands & Assignments

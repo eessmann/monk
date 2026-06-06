@@ -5,13 +5,13 @@ module Language.Fish.Translator.Commands.Echo
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Args
   ( Arg,
     argExpr,
     renderArgs,
   )
 import Language.Fish.Translator.Commands.Args (translateArgsM)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Token (tokenHasExpansion, tokenToLiteralText)
@@ -103,7 +103,7 @@ translateEcho plainArgs redirs =
       | otherwise ->
           let optExprs =
                 [ argExpr (ExprLiteral "-n")
-                  | echoHadOptions opts && not (echoNewline opts)
+                | echoHadOptions opts && not (echoNewline opts)
                 ]
               argExprs = map translateTokenToArg rest
            in Command "echo" (renderArgs (optExprs ++ argExprs ++ redirs))
@@ -125,7 +125,7 @@ translateEchoM plainArgs redirs =
           MkHoisted pre argExprs <- translateArgsM rest
           let optExprs =
                 [ argExpr (ExprLiteral "-n")
-                  | echoHadOptions opts && not (echoNewline opts)
+                | echoHadOptions opts && not (echoNewline opts)
                 ]
           hoistM pre (Command "echo" (renderArgs (optExprs ++ argExprs ++ redirs)))
     _ -> do

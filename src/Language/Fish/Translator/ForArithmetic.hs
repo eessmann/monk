@@ -9,12 +9,12 @@ where
 import Data.List (lookup)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Cond
   ( testBinaryCommand,
     testNonZeroCommand,
   )
 import Language.Fish.Translator.Control qualified as Control
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),

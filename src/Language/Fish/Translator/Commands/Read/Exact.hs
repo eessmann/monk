@@ -5,11 +5,9 @@ module Language.Fish.Translator.Commands.Read.Exact
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.Read.Runtime
   ( assignHelperExpr,
     captureHelperCommandToFile,
@@ -21,11 +19,13 @@ import Language.Fish.Translator.Commands.Read.Runtime
     statusFromVarCommand,
   )
 import Language.Fish.Translator.Commands.Read.Types
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
-    TranslationContext (..),
     TranslateState (..),
+    TranslationContext (..),
   )
+import Prelude hiding (gets)
 
 translateReadExactM :: ExactReadDelim -> TranslateM (FishCommand TStatus)
 translateReadExactM spec = do

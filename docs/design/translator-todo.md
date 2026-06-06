@@ -72,6 +72,12 @@ The following milestones were completed in the correctness-first pass and are ke
 - [x] `mtl`-based translation monad with source-range tracking, warnings, and strict-mode failures
 - [x] Modular translator split across `Variables`, `Commands`, `Control`, `IO`, `Redirections`, and related helper modules
 - [x] Public library split into `Monk.Translation`, `Monk.AST`, `Monk.Source`, and a thin `Monk` facade
+- [x] `Monk.AST` now exposes the typed Fish DSL; raw constructors moved behind the explicit `Monk.AST.Raw` escape hatch
+- [x] Translator handoff now emits a DSL `Script` and lowers through `Language.Fish.DSL.Lower` before rendering
+- [x] Central pipeline helpers now require `NonEmpty` stages instead of accepting empty lists with a silent `true` fallback
+- [x] Translator modules now route raw-shaped construction through `Language.Fish.Translator.DSL` instead of importing `Language.Fish.AST` directly
+- [x] Repeated redirect-attachment helpers are centralized behind the translator DSL boundary
+- [ ] Continue shrinking `Language.Fish.Translator.DSL` imports by moving command, expression, and runtime-helper islands onto typed DSL construction helpers
 - [x] Bake-off moved into a separate private library/executable under `scripts/`
 
 ### Correctness fixes landed

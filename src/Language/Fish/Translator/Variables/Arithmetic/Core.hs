@@ -16,11 +16,11 @@ module Language.Fish.Translator.Variables.Arithmetic.Core
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
 import Language.Fish.Translator.Cond
   ( testBinaryCommand,
     testNonZeroCommand,
   )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad (TranslateM)

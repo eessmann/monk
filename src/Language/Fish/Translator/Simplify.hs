@@ -6,7 +6,7 @@ module Language.Fish.Translator.Simplify
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 
 simplifyFishStatement :: FishStatement -> FishStatement
 simplifyFishStatement = simplifyStmt
@@ -32,7 +32,7 @@ simplifyStmtList = concatMap flatten
         StmtList inner -> inner
         other -> [other]
 
-simplifyCommandStmt :: Typeable t => FishCommand t -> FishStatement
+simplifyCommandStmt :: (Typeable t) => FishCommand t -> FishStatement
 simplifyCommandStmt cmd =
   case cmd of
     Begin body suffix

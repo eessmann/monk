@@ -77,10 +77,20 @@ The public modules are intentionally small:
 
 - `Monk.Translation` for parse + translate entry points
 - `Monk.Translation.Types` for the stable translation/diagnostics contract
-- `Monk.AST` for the public fish AST
+- `Monk.AST` / `Language.Fish.DSL` for the public type-safe Fish construction DSL
+- `Language.Fish.DSL.Lower` for explicit DSL-to-backend lowering
+- `Monk.AST.Raw` for the explicit raw renderer-backend AST escape hatch
 - `Monk.Source` for recursive source-graph helpers
 - `Monk.Diagnostics` for warning rendering and confidence summaries
 - `Monk` as a thin convenience re-export
+
+`Monk.AST` now exposes smart constructors such as `script`, `stmt`,
+`command`, `arg`, `redirect`, `begin`, `pipeline`, `if_`, `while`, `for`,
+`switch`, and `function`. The DSL keeps block and pipeline bodies non-empty at
+the type level and lowers through the existing pretty-printer backend. Code
+that intentionally needs raw constructors should import `Monk.AST.Raw`; this is
+a breaking change for callers that previously used `Monk.AST` as the raw
+constructor surface.
 
 Example:
 

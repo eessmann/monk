@@ -7,14 +7,13 @@ module Language.Fish.Translator.Variables.Arithmetic.Assignments
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Monad
   ( WarningCode (..),
     unsupported,
   )
-import Language.Fish.Translator.Variables.Common (scopeFlagsForVarM)
 import Language.Fish.Translator.Variables.Arithmetic.Helpers
   ( UnaryFixity (..),
     arithTempName,
@@ -25,6 +24,7 @@ import Language.Fish.Translator.Variables.Arithmetic.Helpers
     stripUnaryOp,
     wrapParens,
   )
+import Language.Fish.Translator.Variables.Common (scopeFlagsForVarM)
 import ShellCheck.AST
 
 planUnaryOp ::

@@ -6,8 +6,8 @@ module Language.Fish.Translator.Builtins.Unset
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (wrapStmtList)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),

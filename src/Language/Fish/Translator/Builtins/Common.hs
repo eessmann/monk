@@ -7,7 +7,7 @@ module Language.Fish.Translator.Builtins.Common
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Names (isValidVarName)
 
 parseAssignmentLiteral :: Text -> Maybe (Text, Text)

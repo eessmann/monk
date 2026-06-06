@@ -15,7 +15,7 @@ module Language.Fish.Translator.Cond
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Statement (statusConjunction)
@@ -60,11 +60,11 @@ condBinaryCommand op lhs rhs
           ExprVal lhs
         ]
 
-testUnaryCommand :: Typeable t => Text -> FishExpr t -> FishCommand TStatus
+testUnaryCommand :: (Typeable t) => Text -> FishExpr t -> FishCommand TStatus
 testUnaryCommand op expr =
   Command "test" [ExprVal (ExprLiteral op), ExprVal expr]
 
-testNullaryCommand :: Typeable t => FishExpr t -> FishCommand TStatus
+testNullaryCommand :: (Typeable t) => FishExpr t -> FishCommand TStatus
 testNullaryCommand expr =
   Command "test" [ExprVal expr]
 
@@ -77,7 +77,7 @@ testBinaryCommand op lhs rhs =
       ExprVal rhs
     ]
 
-testNonZeroCommand :: Typeable t => FishExpr t -> FishCommand TStatus
+testNonZeroCommand :: (Typeable t) => FishExpr t -> FishCommand TStatus
 testNonZeroCommand expr =
   testBinaryCommand "-ne" expr (ExprLiteral "0")
 

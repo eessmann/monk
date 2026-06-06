@@ -15,8 +15,8 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Commands (translateTokensToStatusCmd, translateTokensToStatusCmdM)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM, toPairM)
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)

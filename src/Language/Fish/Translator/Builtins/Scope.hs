@@ -7,11 +7,10 @@ module Language.Fish.Translator.Builtins.Scope
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad.State.Strict (gets)
 import Data.Set qualified as Set
-import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStmtList)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslationContext (..),
@@ -22,11 +21,12 @@ import Language.Fish.Translator.Monad
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
-  ( translateAssignmentWithFlags,
+  ( tokenToLiteralText,
+    translateAssignmentWithFlags,
     translateAssignmentWithFlagsM,
-    tokenToLiteralText,
   )
 import ShellCheck.AST
+import Prelude hiding (gets)
 
 translateLocalCommand :: [Token] -> TranslateM FishStatement
 translateLocalCommand args = do

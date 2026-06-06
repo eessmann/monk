@@ -5,7 +5,7 @@ module Language.Fish.Translator.Builtins.Shift
   )
 where
 
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),

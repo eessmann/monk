@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Language.Fish.Translator
@@ -8,14 +9,13 @@ module Language.Fish.Translator
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
-import Language.Fish.AST
+import Language.Fish.DSL.Internal qualified as DSL
 import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Background
   ( instrumentBackgroundStatusCmd,
@@ -30,11 +30,12 @@ import Language.Fish.Translator.Builtins
     translateUnsetCommand,
   )
 import Language.Fish.Translator.Commands
-  ( translateSimpleCommandM,
-    translateProcessSubstitutionConsumerM,
+  ( translateProcessSubstitutionConsumerM,
+    translateSimpleCommandM,
     translateTokenToStatusCmdM,
   )
 import Language.Fish.Translator.Control qualified as Control
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.ForArithmetic (translateForArithmetic)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.IO qualified as FIO
@@ -55,8 +56,8 @@ import Language.Fish.Translator.Monad
 import Language.Fish.Translator.Pipeline
   ( pipelineOf,
     shouldWrapErrexit,
-    wrapErrexitStatusCommand,
     wrapErrexitIfEnabled,
+    wrapErrexitStatusCommand,
   )
 import Language.Fish.Translator.Redirections
   ( parseRedirectTokens,
@@ -73,13 +74,17 @@ import Language.Fish.Translator.Variables
 import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST
 import ShellCheck.Interface (ParseResult (..), Position)
+import Prelude hiding (gets)
 
 --------------------------------------------------------------------------------
 -- 1. Main translation functions
 --------------------------------------------------------------------------------
 
-translateRoot :: Root -> TranslateM FishStatement
-translateRoot (Root topToken) = do
+translateRoot :: Root -> TranslateM DSL.Script
+translateRoot root = statementToScript <$> translateRootStatement root
+
+translateRootStatement :: Root -> TranslateM FishStatement
+translateRootStatement (Root topToken) = do
   stmt <- translateToken topToken
   pre <- preambleStatements
   pure (simplifyFishStatement (wrapStmtList (pre <> [stmt])))
@@ -88,17 +93,22 @@ translateRootWithPositions ::
   TranslateConfig ->
   M.Map Id (Position, Position) ->
   Root ->
-  Either TranslateError (FishStatement, TranslateState)
+  Either TranslateError (DSL.Script, TranslateState)
 translateRootWithPositions cfg positions root =
   runTranslateWithPositions cfg positions (translateRoot root)
 
 translateParseResult ::
   TranslateConfig ->
   ParseResult ->
-  Either TranslateError (FishStatement, TranslateState)
+  Either TranslateError (DSL.Script, TranslateState)
 translateParseResult cfg result = do
   rootTok <- maybe (Left (InternalError "Missing parse root")) Right (prRoot result)
   runTranslateWithPositions cfg (prTokenPositions result) (translateRoot (Root rootTok))
+
+statementToScript :: FishStatement -> DSL.Script
+statementToScript = \case
+  StmtList stmts -> DSL.UnsafeScript (map DSL.UnsafeStmt stmts)
+  stmt -> DSL.UnsafeScript [DSL.UnsafeStmt stmt]
 
 -- | Dispatch on a ShellCheck Token to produce a FishStatement.
 translateToken :: Token -> TranslateM FishStatement
@@ -260,13 +270,12 @@ translateToken token =
             let MkHoisted preRedirs redirArgs = sequenceA parts
                 redirExprs' = renderArgs (catMaybes redirArgs)
             translated <- translateToken cmd
-            let attached = attachRedirs redirExprs' translated
+            let attached = attachRedirectsToStatement redirExprs' translated
             if null preRedirs
               then pure attached
-              else
-                case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
-                  Just body -> pure (Stmt (Begin body []))
-                  Nothing -> pure (Comment "Skipped empty redirection block")
+              else case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
+                Just body -> pure (Stmt (Begin body []))
+                Nothing -> pure (Comment "Skipped empty redirection block")
       _ -> unsupportedStmt UnsupportedConstruct (Just ("Skipped token at statement level: " <> T.pack (show token)))
 
 wrapStmtList :: [FishStatement] -> FishStatement
@@ -301,28 +310,6 @@ fishLoopVarName :: String -> Text
 fishLoopVarName = \case
   "_" -> "__monk_underscore"
   name -> T.pack name
-
-attachRedirs :: [ExprOrRedirect] -> FishStatement -> FishStatement
-attachRedirs redirs stmt =
-  case stmt of
-    Stmt (Command name args) -> Stmt (Command name (args ++ redirs))
-    Stmt (Exec cmd args) -> Stmt (Exec cmd (args ++ redirs))
-    Stmt (Begin body suffix) -> Stmt (Begin body (suffix ++ redirs))
-    Stmt (If cond thn els suffix) -> Stmt (If cond thn els (suffix ++ redirs))
-    Stmt (Switch expr cases suffix) -> Stmt (Switch expr cases (suffix ++ redirs))
-    Stmt (While cond body suffix) -> Stmt (While cond body (suffix ++ redirs))
-    Stmt (For var listExpr body suffix) -> Stmt (For var listExpr body (suffix ++ redirs))
-    StmtList stmts ->
-      case redirs of
-        [] -> stmt
-        _ ->
-          case NE.nonEmpty stmts of
-            Just neBody -> Stmt (Begin neBody redirs)
-            Nothing -> Comment "Skipped empty redirection block"
-    other ->
-      case redirs of
-        [] -> other
-        _ -> Stmt (Begin (other NE.:| []) redirs)
 
 wrapErrexitOnConjunction :: FishJobConjunction -> TranslateM FishJobConjunction
 wrapErrexitOnConjunction conj = do

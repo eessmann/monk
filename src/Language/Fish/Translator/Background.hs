@@ -10,15 +10,16 @@ module Language.Fish.Translator.Background
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
 import Language.Fish.Translator.Args (Arg, renderArgs)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
-  ( TranslateM,
-    HelperId (..),
+  ( HelperId (..),
+    TranslateM,
     WarningCode (..),
     addWarningOnce,
     ensureHelper,
   )
+import Language.Fish.Translator.Pipeline (pipelineOf)
 
 ensureBackgroundRuntime :: TranslateM ()
 ensureBackgroundRuntime =
@@ -334,8 +335,7 @@ waitHelperStmt =
       Stmt
         ( If
             noArgsCond
-            ( Stmt (Command "wait" []) NE.:| [Stmt (Command "return" [ExprVal (ExprLiteral "0")])]
-            )
+            (Stmt (Command "wait" []) NE.:| [Stmt (Command "return" [ExprVal (ExprLiteral "0")])])
             []
             []
         )
@@ -348,8 +348,10 @@ waitHelperStmt =
 
 jobListFromCommand :: FishCommand TStatus -> FishJobList
 jobListFromCommand cmd =
-  MkFishJobList ( MkFishJobConjunction Nothing
-        (MkFishJobPipeline False [] (Stmt cmd) [] False)
+  MkFishJobList
+    ( MkFishJobConjunction
+        Nothing
+        (pipelineOf cmd)
         []
         NE.:| []
     )
@@ -438,8 +440,8 @@ captureStatusStmt =
 writeStatusStmt :: FishStatement
 writeStatusStmt =
   Stmt
-        ( Command
-            "printf"
+    ( Command
+        "printf"
         [ ExprVal (ExprLiteral "%s\\n"),
           ExprVal (ExprVariable (VarScalar "__monk_bg_status")),
           RedirectVal

@@ -5,8 +5,8 @@ module Language.Fish.Translator.Commands.Args
   )
 where
 
-import Language.Fish.AST
 import Language.Fish.Translator.Args (Arg)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Variables

@@ -47,7 +47,7 @@ where
 import Control.Monad.Except (MonadError, catchError, throwError)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
-import Language.Fish.AST
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Monk.Translation.Types
   ( TranslateConfig (..),
@@ -102,8 +102,9 @@ type MonadTranslate m =
     MonadError TranslateError m
   )
 
-newtype TranslateM a = MkTranslateM
-  (ReaderT TranslateEnv (StateT TranslateState (Either TranslateError)) a)
+newtype TranslateM a
+  = MkTranslateM
+      (ReaderT TranslateEnv (StateT TranslateState (Either TranslateError)) a)
   deriving newtype (Functor, Applicative, Monad, MonadReader TranslateEnv, MonadState TranslateState, MonadError TranslateError)
 
 type HoistedM a = TranslateM (Hoisted a)
@@ -156,10 +157,10 @@ mkWarning code detail range =
       warnRange = range
     }
 
-currentRange :: MonadState TranslateState m => m (Maybe SourceRange)
+currentRange :: (MonadState TranslateState m) => m (Maybe SourceRange)
 currentRange = gets (listToMaybe . rangeStack)
 
-appendWarning :: MonadState TranslateState m => Warning -> m ()
+appendWarning :: (MonadState TranslateState m) => Warning -> m ()
 appendWarning warning =
   modify (\st -> st {warnings = warnings st <> [warning]})
 
@@ -172,12 +173,12 @@ stateErrexitEnabled = errexitEnabled
 statePipefailEnabled :: TranslateState -> Bool
 statePipefailEnabled = pipefailEnabled
 
-addWarning :: MonadState TranslateState m => WarningCode -> Maybe Text -> m ()
+addWarning :: (MonadState TranslateState m) => WarningCode -> Maybe Text -> m ()
 addWarning code detail = do
   range <- currentRange
   appendWarning (mkWarning code detail range)
 
-addWarningOnce :: MonadState TranslateState m => WarningCode -> Maybe Text -> m ()
+addWarningOnce :: (MonadState TranslateState m) => WarningCode -> Maybe Text -> m ()
 addWarningOnce code detail = do
   st <- get
   if Set.member code (warningOnceCodes st)
@@ -186,7 +187,7 @@ addWarningOnce code detail = do
       modify (\s -> s {warningOnceCodes = Set.insert code (warningOnceCodes s)})
       addWarning code detail
 
-unsupported :: MonadTranslate m => WarningCode -> Maybe Text -> m ()
+unsupported :: (MonadTranslate m) => WarningCode -> Maybe Text -> m ()
 unsupported code detail = do
   cfg <- asks envConfig
   range <- currentRange
@@ -195,17 +196,17 @@ unsupported code detail = do
     then throwError (Unsupported warning)
     else appendWarning warning
 
-noteUnsupported :: MonadTranslate m => WarningCode -> Maybe Text -> m FishStatement
+noteUnsupported :: (MonadTranslate m) => WarningCode -> Maybe Text -> m FishStatement
 noteUnsupported code detail = do
   unsupported code detail
   pure (Comment ("NOTE: " <> warnMessage (mkWarning code detail Nothing)))
 
-unsupportedStmt :: MonadTranslate m => WarningCode -> Maybe Text -> m FishStatement
+unsupportedStmt :: (MonadTranslate m) => WarningCode -> Maybe Text -> m FishStatement
 unsupportedStmt code detail = do
   unsupported code detail
   pure (Comment ("Unsupported: " <> warnMessage (mkWarning code detail Nothing)))
 
-ensureHelper :: MonadState TranslateState m => HelperId -> [FishStatement] -> m ()
+ensureHelper :: (MonadState TranslateState m) => HelperId -> [FishStatement] -> m ()
 ensureHelper helper stmts = do
   st <- get
   if Set.member helper (registeredHelpers st)
@@ -270,7 +271,7 @@ withCommandSubstScope ::
 withCommandSubstScope =
   withScopedContext (\ctx -> ctx {inCommandSubst = True})
 
-addLocalVars :: MonadState TranslateState m => [Text] -> m ()
+addLocalVars :: (MonadState TranslateState m) => [Text] -> m ()
 addLocalVars names =
   modify
     ( \s ->
@@ -278,7 +279,7 @@ addLocalVars names =
          in s {context = ctx {localVars = Set.union (localVars ctx) (Set.fromList names)}}
     )
 
-isLocalVar :: MonadState TranslateState m => Text -> m Bool
+isLocalVar :: (MonadState TranslateState m) => Text -> m Bool
 isLocalVar name = do
   ctx <- gets context
   pure (Set.member name (localVars ctx))
@@ -296,21 +297,21 @@ withTokenRange tok action = do
     Nothing -> action
     Just range -> withScopedRange range action
 
-isErrexitEnabled :: MonadState TranslateState m => m Bool
+isErrexitEnabled :: (MonadState TranslateState m) => m Bool
 isErrexitEnabled = gets errexitEnabled
 
-isPipefailEnabled :: MonadState TranslateState m => m Bool
+isPipefailEnabled :: (MonadState TranslateState m) => m Bool
 isPipefailEnabled = gets pipefailEnabled
 
-setErrexitEnabled :: MonadState TranslateState m => Bool -> m ()
+setErrexitEnabled :: (MonadState TranslateState m) => Bool -> m ()
 setErrexitEnabled enabled =
   modify (\st -> st {errexitEnabled = enabled})
 
-setPipefailEnabled :: MonadState TranslateState m => Bool -> m ()
+setPipefailEnabled :: (MonadState TranslateState m) => Bool -> m ()
 setPipefailEnabled enabled =
   modify (\st -> st {pipefailEnabled = enabled})
 
-preambleStatements :: MonadState TranslateState m => m [FishStatement]
+preambleStatements :: (MonadState TranslateState m) => m [FishStatement]
 preambleStatements = gets preamble
 
 toSourceRanges :: M.Map Id (Position, Position) -> M.Map Id SourceRange

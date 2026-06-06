@@ -14,11 +14,16 @@ where
 
 import Control.Monad.State.Strict qualified as State
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
+import Language.Fish.DSL.Internal
+  ( Command (UnsafeCommand),
+    Stage (UnsafeStage),
+    lowerPipelineWithTime,
+  )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
-    TranslationContext (..),
     TranslateState (..),
+    TranslationContext (..),
     isErrexitEnabled,
     isPipefailEnabled,
   )
@@ -26,21 +31,16 @@ import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
 
 pipelineOf :: FishCommand TStatus -> FishJobPipeline
 pipelineOf cmd =
-  MkFishJobPipeline {jpTime = False, jpVariables = [], jpStatement = Stmt cmd, jpCont = [], jpBackgrounded = False}
+  jobPipelineFromListWithTime False (cmd NE.:| [])
 
-jobPipelineFromList :: [FishCommand TStatus] -> FishJobPipeline
+jobPipelineFromList :: NonEmpty (FishCommand TStatus) -> FishJobPipeline
 jobPipelineFromList = jobPipelineFromListWithTime False
 
-jobPipelineFromListWithTime :: Bool -> [FishCommand TStatus] -> FishJobPipeline
-jobPipelineFromListWithTime _ [] = pipelineOf (Command "true" [])
-jobPipelineFromListWithTime timed (c : cs) =
-  MkFishJobPipeline
-    { jpTime = timed,
-      jpVariables = [],
-      jpStatement = Stmt c,
-      jpCont = map (\cmd' -> PipeTo {jpcVariables = [], jpcStatement = Stmt cmd'}) cs,
-      jpBackgrounded = False
-    }
+jobPipelineFromListWithTime :: Bool -> NonEmpty (FishCommand TStatus) -> FishJobPipeline
+jobPipelineFromListWithTime timed (cmd NE.:| rest) =
+  lowerPipelineWithTime timed (toStage cmd NE.:| map toStage rest)
+  where
+    toStage = UnsafeStage . UnsafeCommand
 
 wrapErrexitIfEnabled :: FishCommand TStatus -> TranslateM (FishCommand TStatus)
 wrapErrexitIfEnabled cmd = do

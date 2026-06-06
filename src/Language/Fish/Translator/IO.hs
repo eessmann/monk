@@ -10,13 +10,14 @@ module Language.Fish.Translator.IO
   )
 where
 
-import Language.Fish.AST
+import Data.List.NonEmpty qualified as NE
 import Language.Fish.Translator.Commands
   ( stripTimePrefix,
     translateCommandTokensToStatus,
     translateTokenToStatusCmd,
     translateTokenToStatusCmdM,
   )
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad (TranslateM)
 import Language.Fish.Translator.Pipeline
   ( applyPipefailIfEnabled,
@@ -39,7 +40,7 @@ translatePipeline bang cmds =
    in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
         [] -> Stmt (Command "true" [])
         (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+          let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
            in if tokensHaveBang bang then Stmt (Not pipe) else Stmt pipe
 
 translatePipelineM :: [Token] -> [Token] -> TranslateM FishStatement
@@ -49,7 +50,7 @@ translatePipelineM bang cmds = do
   case cmds'' of
     [] -> pure (Stmt (Command "true" []))
     (c : cs) -> do
-      let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+      let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
       pipe' <- applyPipefailIfEnabled pipe
       let cmd = if tokensHaveBang bang then Not pipe' else pipe'
       cmd' <- wrapErrexitIfEnabled cmd
@@ -72,5 +73,5 @@ translatePipelineToStatus bang cmds =
    in case mapMaybe translateTokenToMaybeStatusCmd cmds' of
         [] -> Command "true" []
         (c : cs) ->
-          let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+          let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
            in if tokensHaveBang bang then Not pipe else pipe

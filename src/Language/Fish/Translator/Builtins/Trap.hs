@@ -6,10 +6,10 @@ module Language.Fish.Translator.Builtins.Trap
 where
 
 import Data.Char (isDigit)
-import Data.Text qualified as T
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
+import Data.Text qualified as T
 import Language.Fish.Translator.Builtins.Common (wrapStmtList)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     WarningCode (..),

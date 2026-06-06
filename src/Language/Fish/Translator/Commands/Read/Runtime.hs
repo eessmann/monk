@@ -16,13 +16,14 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Commands.Read.Types
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( HelperId (..),
     TranslateM,
     ensureHelper,
   )
+import Language.Fish.Translator.Pipeline (jobPipelineFromList, pipelineOf)
 
 ensureReadDelimHelper :: TranslateM ()
 ensureReadDelimHelper =
@@ -239,18 +240,14 @@ statusFromVarCommand name =
 
 pipelineFromCommands :: FishCommand TStatus -> [FishCommand TStatus] -> FishJobPipeline
 pipelineFromCommands firstCmd rest =
-  MkFishJobPipeline
-    { jpTime = False,
-      jpVariables = [],
-      jpStatement = Stmt firstCmd,
-      jpCont = map (PipeTo [] . Stmt) rest,
-      jpBackgrounded = False
-    }
+  jobPipelineFromList (firstCmd NE.:| rest)
 
 jobListFromCommand :: FishCommand TStatus -> FishJobList
 jobListFromCommand cmd =
-  MkFishJobList ( MkFishJobConjunction Nothing
-        (MkFishJobPipeline False [] (Stmt cmd) [] False)
+  MkFishJobList
+    ( MkFishJobConjunction
+        Nothing
+        (pipelineOf cmd)
         []
         NE.:| []
     )

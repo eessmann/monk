@@ -11,8 +11,8 @@ where
 import Data.Char (isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Args (Arg, argRedirect)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist
   ( Hoisted (..),
     hoist,
@@ -20,9 +20,9 @@ import Language.Fish.Translator.Hoist
   )
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Variables
-  ( translateTokenToExpr,
+  ( tokenToLiteralText,
+    translateTokenToExpr,
     translateTokenToExprM,
-    tokenToLiteralText,
   )
 import ShellCheck.AST
 

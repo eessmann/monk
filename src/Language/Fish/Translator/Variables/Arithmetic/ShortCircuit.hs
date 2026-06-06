@@ -7,8 +7,8 @@ module Language.Fish.Translator.Variables.Arithmetic.ShortCircuit
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Fish.AST
 import Language.Fish.Translator.Cond (testNonZeroCommand)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
 import Language.Fish.Translator.Pipeline (pipelineOf)

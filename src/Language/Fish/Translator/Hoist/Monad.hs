@@ -6,7 +6,7 @@ module Language.Fish.Translator.Hoist.Monad
   )
 where
 
-import Language.Fish.AST (FishStatement)
+import Language.Fish.Translator.DSL (FishStatement)
 import Language.Fish.Translator.Hoist (Hoisted, fromPair, hoist, toPair)
 import Language.Fish.Translator.Monad (TranslateM)
 

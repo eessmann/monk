@@ -6,12 +6,11 @@ module Language.Fish.Translator.Builtins.Declare
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad (foldM)
 import Control.Monad.State.Strict (gets)
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Builtins.Common (parseAssignmentLiteral, wrapStmtList)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Monad
   ( TranslateM,
     TranslationContext (..),
@@ -22,10 +21,11 @@ import Language.Fish.Translator.Monad
   )
 import Language.Fish.Translator.Names (isValidVarName)
 import Language.Fish.Translator.Variables
-  ( translateAssignmentWithFlagsM,
-    tokenToLiteralText,
+  ( tokenToLiteralText,
+    translateAssignmentWithFlagsM,
   )
 import ShellCheck.AST
+import Prelude hiding (gets)
 
 data DeclareFlags = MkDeclareFlags
   { declareGlobal :: Bool,

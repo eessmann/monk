@@ -10,17 +10,16 @@ module Language.Fish.Translator.Commands.Status
   )
 where
 
-import Prelude hiding (gets)
 import Control.Monad.State.Strict (gets)
 import Data.List.NonEmpty qualified as NE
 import Data.Set qualified as Set
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Args (renderArgs)
 import Language.Fish.Translator.Commands.CommandTokens (translateTokensToStatusCmd)
+import Language.Fish.Translator.Commands.SimpleCommand (translateSimpleCommandMWith)
 import Language.Fish.Translator.Commands.Tests (translateConditionTokenM)
 import Language.Fish.Translator.Commands.Time (stripTimePrefix)
-import Language.Fish.Translator.Commands.SimpleCommand (translateSimpleCommandMWith)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Monad
   ( TranslateM,
@@ -49,6 +48,7 @@ import Language.Fish.Translator.Token
 import Language.Fish.Translator.Variables (translateArithmeticStatusM, translateTokenToListExprM)
 import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectCommand)
 import ShellCheck.AST
+import Prelude hiding (gets)
 
 translateTokenToStatusCmd :: Token -> FishCommand TStatus
 translateTokenToStatusCmd = translateTokensToStatusCmd . pure
@@ -115,7 +115,7 @@ translatePipelineToStatusM bang cmds = do
   case catMaybes mCmds of
     [] -> pure (Command "true" [])
     (c : cs) -> do
-      let pipe = Pipeline (jobPipelineFromListWithTime timed (c : cs))
+      let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
       pipe' <- applyPipefailIfEnabled pipe
       pure (if tokensHaveBang bang then Not pipe' else pipe')
 
@@ -248,10 +248,11 @@ translateProcessSubstitutionConsumerTokenM tok =
           _ -> Comment "Skipped empty for loop body or list"
     T_Redirecting _ redirs inner ->
       case exactOutputProcessSubstitution redirs of
-        Just procSubBody -> Stmt <$> do
-          producer <- translateTokenToStatusCmdM inner
-          consumer <- translateProcessSubstitutionConsumerM procSubBody
-          pure (procSubOutRedirectCommand producer consumer)
+        Just procSubBody ->
+          Stmt <$> do
+            producer <- translateTokenToStatusCmdM inner
+            consumer <- translateProcessSubstitutionConsumerM procSubBody
+            pure (procSubOutRedirectCommand producer consumer)
         Nothing -> do
           innerStmt <- translateProcessSubstitutionConsumerTokenM inner
           parts <- mapM translateRedirectTokenM redirs
@@ -403,38 +404,7 @@ translateStatusConjunction conjunction lhs rhs =
     <*> translateTokenToStatusCmdM rhs
 
 attachRedirsToStatus :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
-attachRedirsToStatus redirs cmd =
-  case cmd of
-    Command name args -> Command name (args ++ redirs)
-    Exec c args -> Exec c (args ++ redirs)
-    Begin body suffix -> Begin body (suffix ++ redirs)
-    If cond thn els suffix -> If cond thn els (suffix ++ redirs)
-    Switch expr cases suffix -> Switch expr cases (suffix ++ redirs)
-    While cond body suffix -> While cond body (suffix ++ redirs)
-    For var listExpr body suffix -> For var listExpr body (suffix ++ redirs)
-    other ->
-      case redirs of
-        [] -> other
-        _ -> Begin (Stmt other NE.:| []) redirs
+attachRedirsToStatus = attachRedirectsToCommand
 
 attachRedirsToStatement :: [ExprOrRedirect] -> FishStatement -> FishStatement
-attachRedirsToStatement redirs stmt =
-  case stmt of
-    Stmt cmd ->
-      case commandToStatus cmd of
-        Just statusCmd -> Stmt (attachRedirsToStatus redirs statusCmd)
-        Nothing ->
-          case redirs of
-            [] -> stmt
-            _ -> Stmt (Begin (stmt NE.:| []) redirs)
-    StmtList stmts ->
-      case redirs of
-        [] -> stmt
-        _ ->
-          case toNonEmptyStmtList stmts of
-            Just body -> Stmt (Begin body redirs)
-            Nothing -> Comment "Skipped empty redirection block"
-    other ->
-      case redirs of
-        [] -> other
-        _ -> Stmt (Begin (other NE.:| []) redirs)
+attachRedirsToStatement = attachRedirectsToStatement

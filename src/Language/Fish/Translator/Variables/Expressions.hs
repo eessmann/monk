@@ -21,8 +21,8 @@ module Language.Fish.Translator.Variables.Expressions
 where
 
 import Data.Text qualified as T
-import Language.Fish.AST
 import Language.Fish.Translator.Args (Arg)
+import Language.Fish.Translator.DSL
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Hoist.Monad (HoistedM)
 import Language.Fish.Translator.Monad (TranslateM)
@@ -50,10 +50,10 @@ import Language.Fish.Translator.Variables.Expressions.Subst qualified as Subst
 import Language.Fish.Translator.Variables.Glob (patternExprFromToken)
 import Language.Fish.Translator.Variables.Index (indexedVarText)
 import Language.Fish.Translator.Variables.ParamParse
-  ( translateDollarBracedWith,
-    translateDollarBracedStrWith,
-    translateDollarBracedWithPreludeWith,
+  ( translateDollarBracedStrWith,
     translateDollarBracedStrWithPreludeWith,
+    translateDollarBracedWith,
+    translateDollarBracedWithPreludeWith,
   )
 import ShellCheck.AST
 
