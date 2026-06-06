@@ -7,10 +7,6 @@ module Bakeoff.Execution.Translation
   )
 where
 
-import Control.Exception (evaluate)
-import Data.Map.Strict qualified as M
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
 import Bakeoff.Artifacts
   ( FixtureArtifacts (..),
     writeTextFile,
@@ -25,6 +21,10 @@ import Bakeoff.Process
     runProcessText,
   )
 import Bakeoff.Types
+import Control.Exception (evaluate)
+import Data.Map.Strict qualified as M
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
 import Monk.Diagnostics
   ( WarningCounts (..),
     confidenceScore,
@@ -237,12 +237,11 @@ buildMonkArtifactFromGraph recursive path graph = do
             rootPath
         inlineWarns <- readIORef inlineWarnsRef
         pure (renderFish inlined, inlineWarns)
-      else
-        case M.lookup rootPath (sgTranslations graph) of
-          Just translation ->
-            pure (renderTranslationSingle translation, [])
-          Nothing ->
-            pure ("", [])
+      else case M.lookup rootPath (sgTranslations graph) of
+        Just translation ->
+          pure (renderTranslationSingle translation, [])
+        Nothing ->
+          pure ("", [])
   pure
     MkMonkTranslationArtifact
       { mtaOutput = renderedOutput,

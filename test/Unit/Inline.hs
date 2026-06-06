@@ -14,9 +14,9 @@ import Monk.Translation
     inlineStatements,
     parseBashScript,
     renderFish,
-    translationStatements,
-    translationState,
     translateParseResult,
+    translationState,
+    translationStatements,
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -55,8 +55,8 @@ unitInlineTests =
             T.isInfixOf "set 'argv' 'a' 'b'" out H.@? "expected argv override"
             T.isInfixOf "set 'argv' $__monk_saved_argv_" out H.@? "expected argv restore"
           (Left err, _) -> H.assertFailure (show err)
-          (_, Left err) -> H.assertFailure (show err)
-    , H.testCase "Inline source warns on non-literal paths" $ do
+          (_, Left err) -> H.assertFailure (show err),
+      H.testCase "Inline source warns on non-literal paths" $ do
         rootParse <- parseBashScript "root.sh" "source \"$child\"\n"
         case translateParseResult defaultConfig rootParse of
           Left err -> H.assertFailure (show err)

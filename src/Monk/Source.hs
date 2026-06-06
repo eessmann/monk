@@ -1,12 +1,12 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+
 -- |
 -- Copyright: (c) 2025 Erich Essmann
 -- SPDX-License-Identifier: MIT
 -- Maintainer: Erich Essmann <essmanne@gmail.com>
 --
 -- Recursive source discovery and source-path rewriting helpers.
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
 module Monk.Source
   ( SourceMode (..),
     SourceGraph (..),
@@ -18,12 +18,12 @@ module Monk.Source
   )
 where
 
+import Control.Monad (foldM)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
-import Control.Monad (foldM)
 import Language.Fish.AST
 import Monk.Translation
   ( TranslateConfig,
@@ -31,8 +31,8 @@ import Monk.Translation
     Translation (..),
     parseBashFile,
     translateParseResult,
-    translationStatements,
     translationState,
+    translationStatements,
   )
 import ShellCheck.AST
 import ShellCheck.ASTLib (getLiteralStringDef)

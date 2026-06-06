@@ -4,14 +4,11 @@ module Bakeoff.Runner
   )
 where
 
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
-import Data.Time (getCurrentTime)
 import Bakeoff.Artifacts
   ( BakeoffOutputs (..),
+    FixtureArtifacts (..),
     bakeoffOutputs,
     ensureParentDirectory,
-    FixtureArtifacts (..),
     fixtureArtifacts,
     prepareOutputDirectory,
     writeTextFile,
@@ -25,7 +22,6 @@ import Bakeoff.Execution
     defineFixtureRules,
     runWorkerFixture,
   )
-import Development.Shake
 import Bakeoff.Process
   ( readJsonFile,
     writeJsonFile,
@@ -44,6 +40,10 @@ import Bakeoff.Tools
     toolPreflightWarnings,
   )
 import Bakeoff.Types
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
+import Data.Time (getCurrentTime)
+import Development.Shake
 import Path
   ( Abs,
     File,

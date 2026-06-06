@@ -88,8 +88,8 @@ loadFixturePrereqs path = do
       content <- TIO.readFile (toFilePath prereqPath)
       pure
         [ cmd
-          | cmd <- map T.strip (T.lines content),
-            not (T.null cmd)
+        | cmd <- map T.strip (T.lines content),
+          not (T.null cmd)
         ]
 
 loadFixtureRecursive :: Path Abs File -> IO Bool

@@ -7,10 +7,10 @@ module Bakeoff.Report
   )
 where
 
-import Data.Aeson (FromJSON)
-import Data.Text qualified as T
 import Bakeoff.Process (readJsonFile)
 import Bakeoff.Types
+import Data.Aeson (FromJSON)
+import Data.Text qualified as T
 import Numeric qualified
 import Path (Abs, Dir, File, Path, Rel, toFilePath)
 import Path.IO qualified as PathIO
@@ -49,7 +49,7 @@ readHyperfineSummary title jsonPath markdownPath = do
                       hyperfineMean = mean entry,
                       hyperfineStddev = stddev entry
                     }
-                  | entry <- results
+                | entry <- results
                 ]
             }
 
@@ -127,7 +127,7 @@ renderStatusCounts counts =
   T.intercalate
     ", "
     [ renderPair status count
-      | (status, count) <- counts
+    | (status, count) <- counts
     ]
   where
     renderPair status count = renderCommandStatus status <> "=" <> show count
@@ -149,7 +149,7 @@ collectRuntimeCounts project fixtures =
 countStatuses :: [Maybe CommandStatus] -> [(CommandStatus, Int)]
 countStatuses statuses =
   [ (status, length (filter (== Just status) statuses))
-    | status <- [CommandSucceeded, CommandFailed, CommandTimedOut, CommandSkipped]
+  | status <- [CommandSucceeded, CommandFailed, CommandTimedOut, CommandSkipped]
   ]
 
 countSkipReasons :: [FixtureReport] -> [(Text, Int)]
@@ -160,8 +160,8 @@ countSkipReasons fixtures =
       group
         . sort
         $ [ renderSkipReason reason
-            | fixture <- fixtures,
-              Just reason <- [fixtureReportSkipReason fixture]
+          | fixture <- fixtures,
+            Just reason <- [fixtureReportSkipReason fixture]
           ]
     summarize [] = ("", 0)
     summarize (reason : rest) = (reason, 1 + length rest)
@@ -225,7 +225,7 @@ renderBenchmark summary =
     "- Markdown: `" <> fileText (hyperfineMarkdownPath summary) <> "`"
   ]
     <> [ "- " <> hyperfineCommand result <> ": mean=" <> formatSeconds (hyperfineMean result) <> "s, stddev=" <> formatSeconds (hyperfineStddev result) <> "s"
-         | result <- hyperfineResults summary
+       | result <- hyperfineResults summary
        ]
     <> [""]
 

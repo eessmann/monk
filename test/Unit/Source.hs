@@ -24,8 +24,8 @@ import ShellSupport
   ( Shell (..),
     ShellRunMode (..),
     prepareEnv,
-    runShellWithMode,
     rrStdout,
+    runShellWithMode,
   )
 import System.Directory
   ( createDirectory,
@@ -94,8 +94,7 @@ unitSourceTests =
                   []
                   ""
               rrStdout fishRes @?= "argv:left|right\nafter:child\n"
-            _ -> H.assertFailure "missing relocated translations"
-        ,
+            _ -> H.assertFailure "missing relocated translations",
       H.testCase "resolveSourcePath keeps missing files unresolved" $ do
         rootPath <- repoFile "test/fixtures/integration/source-recursive.bash"
         resolved <- resolveSourcePath (FP.takeDirectory (toFilePath rootPath)) "does-not-exist.bash"

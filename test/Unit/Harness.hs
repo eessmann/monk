@@ -37,20 +37,19 @@ unitHarnessTests =
         fixturePath <- repoFile "test/fixtures/realworld/argparse-mini.bash"
         metadata <- loadFixtureMetadata fixturePath
         fmArgs metadata
-          @?=
-            [ "--name=monk",
-              "--mode",
-              "detail",
-              "--color=always",
-              "--tag",
-              "alpha",
-              "--tag",
-              "beta",
-              "--",
-              "--literal",
-              "-n",
-              "tail"
-            ]
+          @?= [ "--name=monk",
+                "--mode",
+                "detail",
+                "--color=always",
+                "--tag",
+                "alpha",
+                "--tag",
+                "beta",
+                "--",
+                "--literal",
+                "-n",
+                "tail"
+              ]
         fmMode metadata @?= ShellRunExec
         fmRecursive metadata @?= False
         fmStdin metadata @?= "",
@@ -88,8 +87,8 @@ unitHarnessTests =
       H.testCase "shell process runner times out hung commands" $ do
         result <-
           Exception.try
-            (readCreateProcessWithTimeout 10000 (proc "bash" ["-c", "sleep 1"]) "")
-            :: IO (Either Exception.SomeException (ExitCode, String, String))
+            (readCreateProcessWithTimeout 10000 (proc "bash" ["-c", "sleep 1"]) "") ::
+            IO (Either Exception.SomeException (ExitCode, String, String))
         case result of
           Left ex
             | Just (MkShellRunTimeout timeoutMicros) <- Exception.fromException ex ->

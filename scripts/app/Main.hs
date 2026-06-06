@@ -2,10 +2,10 @@
 
 module Main (main) where
 
-import Data.Time (getCurrentTime)
-import Data.Time.Format (defaultTimeLocale, formatTime)
 import Bakeoff.Runner (runBakeoff, runBenchmarkWorker)
 import Bakeoff.Types (BakeoffConfig (..), BenchmarkSuite (..), FixtureGroup (..), ToolName (..))
+import Data.Time (getCurrentTime)
+import Data.Time.Format (defaultTimeLocale, formatTime)
 import Options.Applicative
 import Path (Abs, Dir, Path, parseRelDir, parseRelFile, (</>))
 import Path.IO qualified as PathIO

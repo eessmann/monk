@@ -39,9 +39,9 @@ import Language.Fish.Translator.Commands.SimpleCommand
     translateSimpleCommandM,
   )
 import Language.Fish.Translator.Commands.Status
-  ( translateTokenToStatusCmd,
+  ( translateProcessSubstitutionConsumerM,
+    translateTokenToStatusCmd,
     translateTokenToStatusCmdM,
-    translateProcessSubstitutionConsumerM,
     translateTokensToStatusCmd,
     translateTokensToStatusCmdM,
   )

@@ -8,12 +8,12 @@ module Bakeoff.Selection
   )
 where
 
+import Bakeoff.Fixture (FixtureMetadata (..), loadFixtureMetadata)
+import Bakeoff.Types
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Bakeoff.Fixture (FixtureMetadata (..), loadFixtureMetadata)
-import Bakeoff.Types
 import Path (Abs, Dir, File, Path, Rel, parseRelDir, parseRelFile, stripProperPrefix, toFilePath, (</>))
 import Path.IO qualified as PathIO
 import System.FilePath qualified as FP
@@ -64,9 +64,9 @@ resolveFixtureSelection cwd groups files fileLists compatibleLists = do
     groupSelections discovered requestedGroups mkSource =
       concat
         [ [ (path, (fixtureGroup, [mkSource fixtureGroup]))
-            | path <- fromMaybe [] (M.lookup fixtureGroup discovered)
+          | path <- fromMaybe [] (M.lookup fixtureGroup discovered)
           ]
-          | fixtureGroup <- requestedGroups
+        | fixtureGroup <- requestedGroups
         ]
 
 insertSelection ::
@@ -154,8 +154,8 @@ listGroupFixtures cwd fixtureGroup = do
       (_, files) <- PathIO.listDir dir
       pure
         [ entry
-          | entry <- sort files,
-            FP.isExtensionOf ".bash" (toFilePath entry)
+        | entry <- sort files,
+          FP.isExtensionOf ".bash" (toFilePath entry)
         ]
 
 groupDirectory :: FixtureGroup -> IO (Path Rel Dir)

@@ -19,8 +19,8 @@ import Monk.Source
     translateSourceGraph,
   )
 import Monk.Translation
-  ( Translation (..),
-    TranslateError,
+  ( TranslateError,
+    Translation (..),
     Warning,
     defaultConfig,
     inlineStatements,
@@ -126,17 +126,17 @@ outputSeparate opts graph rootPath =
           (True, Just rootOutput) -> planSeparateOutputs rootOutput rootPath graph
           _ -> sgTranslations graph
    in case M.lookup rootPath translations of
-    Nothing -> emitWarn opts "warning: no translation output"
-    Just rootTr -> do
-      writeOutput opts (renderFish (rewriteSources translations rootTr))
-      when (optRecursive opts) $ do
-        let writeRoot = isNothing (optOutput opts)
-        forM_ (M.toList translations) $ \(sourcePath, tr) -> do
-          let outPath = translationOutputPath tr
-              rendered = renderFish (rewriteSources translations tr)
-              shouldWrite = writeRoot || sourcePath /= rootPath
-          when shouldWrite $
-            writeFileTextEnsuringDir outPath rendered
+        Nothing -> emitWarn opts "warning: no translation output"
+        Just rootTr -> do
+          writeOutput opts (renderFish (rewriteSources translations rootTr))
+          when (optRecursive opts) $ do
+            let writeRoot = isNothing (optOutput opts)
+            forM_ (M.toList translations) $ \(sourcePath, tr) -> do
+              let outPath = translationOutputPath tr
+                  rendered = renderFish (rewriteSources translations tr)
+                  shouldWrite = writeRoot || sourcePath /= rootPath
+              when shouldWrite $
+                writeFileTextEnsuringDir outPath rendered
 
 writeOutput :: Options -> Text -> IO ()
 writeOutput opts output =

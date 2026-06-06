@@ -9,10 +9,10 @@ module Bakeoff.Tools
   )
 where
 
-import Data.Text qualified as T
 import Bakeoff.Process (ProcessOutput (..), runProcessText)
 import Bakeoff.Selection (defaultGroups)
 import Bakeoff.Types
+import Data.Text qualified as T
 import Path (Abs, Dir, File, Path, parseRelFile, toFilePath)
 import Path.IO qualified as PathIO
 import System.Exit (ExitCode (..))

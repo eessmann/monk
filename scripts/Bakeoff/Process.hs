@@ -38,11 +38,11 @@ runProcessText timeoutSeconds process stdinInput =
     timeoutMicros = maybe maxBound secondsToMicros timeoutSeconds
     secondsToMicros seconds = seconds * 1_000_000
 
-writeJsonFile :: ToJSON a => Path b File -> a -> IO ()
+writeJsonFile :: (ToJSON a) => Path b File -> a -> IO ()
 writeJsonFile path value =
   LBS.writeFile (toFilePath path) (encode value)
 
-readJsonFile :: FromJSON a => Path b File -> IO a
+readJsonFile :: (FromJSON a) => Path b File -> IO a
 readJsonFile path = do
   decoded <- eitherDecodeFileStrict' (toFilePath path)
   case decoded of

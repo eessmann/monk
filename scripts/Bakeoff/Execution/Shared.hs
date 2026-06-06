@@ -7,8 +7,8 @@ module Bakeoff.Execution.Shared
   )
 where
 
-import Data.Text qualified as T
 import Bakeoff.Types
+import Data.Text qualified as T
 import System.Exit (ExitCode (..))
 
 exitCodeToInt :: ExitCode -> Int

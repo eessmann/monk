@@ -5,11 +5,11 @@ module Bakeoff.Benchmark
   )
 where
 
-import Data.Text qualified as T
 import Bakeoff.Artifacts (BakeoffOutputs (..), ensureParentDirectory)
 import Bakeoff.Process (runProcessText)
 import Bakeoff.Report (readHyperfineSummary)
 import Bakeoff.Types
+import Data.Text qualified as T
 import Path (Abs, File, Path, toFilePath)
 import Path.IO qualified as PathIO
 import System.Environment (getExecutablePath)

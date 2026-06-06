@@ -22,7 +22,7 @@ main =
         [ env (TIO.readFile path) $ \src ->
             bench name $
               nfIO (translateFixture path src)
-          | (name, path) <- fixtures
+        | (name, path) <- fixtures
         ]
     ]
 

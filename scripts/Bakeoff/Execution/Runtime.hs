@@ -3,7 +3,6 @@ module Bakeoff.Execution.Runtime
   )
 where
 
-import Data.Text qualified as T
 import Bakeoff.Artifacts
   ( FixtureArtifacts (..),
     writeTextFile,
@@ -16,6 +15,7 @@ import Bakeoff.Process
   )
 import Bakeoff.Shell (ShellRunMode (..))
 import Bakeoff.Types
+import Data.Text qualified as T
 import Path
   ( Abs,
     File,

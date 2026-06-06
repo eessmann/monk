@@ -3,7 +3,6 @@ module Bakeoff.Execution.Diff
   )
 where
 
-import Data.Text.IO qualified as TIO
 import Bakeoff.Artifacts
   ( FixtureArtifacts (..),
     writeTextFile,
@@ -13,6 +12,7 @@ import Bakeoff.Process
     writeComparisonFile,
   )
 import Bakeoff.Types
+import Data.Text.IO qualified as TIO
 import Path
   ( Abs,
     File,

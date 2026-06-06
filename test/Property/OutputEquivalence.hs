@@ -81,8 +81,12 @@ genArithmetic = do
   a <- genSmallInt
   b <- genSmallInt
   let script =
-        "a=" <> T.pack (show a) <> "\n"
-          <> "b=" <> T.pack (show b) <> "\n"
+        "a="
+          <> T.pack (show a)
+          <> "\n"
+          <> "b="
+          <> T.pack (show b)
+          <> "\n"
           <> "echo $((a + b))"
   pure (mkCase "arithmetic" script)
 
@@ -92,8 +96,12 @@ genArrayIndex = do
   idx <- QC.chooseInt (0, 2)
   let arr = T.intercalate " " vals
       script =
-        "arr=(" <> arr <> ")\n"
-          <> "i=" <> T.pack (show idx) <> "\n"
+        "arr=("
+          <> arr
+          <> ")\n"
+          <> "i="
+          <> T.pack (show idx)
+          <> "\n"
           <> "echo ${arr[$i]}"
   pure (mkCase "array-index" script)
 
@@ -140,9 +148,13 @@ genCaseGlob = do
           then stem <> "tail"
           else "other" <> stem
       script =
-        "x=" <> value <> "\n"
+        "x="
+          <> value
+          <> "\n"
           <> "case \"$x\" in\n"
-          <> "  " <> pat <> ") echo match ;;\n"
+          <> "  "
+          <> pat
+          <> ") echo match ;;\n"
           <> "  *) echo miss ;;\n"
           <> "esac"
   pure (mkCase "case-glob" script)
@@ -151,7 +163,9 @@ genHereString :: QC.Gen ScriptCase
 genHereString = do
   val <- genWord
   let script =
-        "read value <<< \"" <> val <> "\"\n"
+        "read value <<< \""
+          <> val
+          <> "\"\n"
           <> "printf 'here:%s\\n' \"$value\""
   pure (mkCase "here-string" script)
 

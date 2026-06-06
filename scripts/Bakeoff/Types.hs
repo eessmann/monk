@@ -29,10 +29,10 @@ module Bakeoff.Types
   )
 where
 
-import Data.Aeson (FromJSON, ToJSON)
-import Data.Time (UTCTime)
 import Bakeoff.Fixture (FixtureMetadata (..))
 import Bakeoff.Shell (ShellRunMode)
+import Data.Aeson (FromJSON, ToJSON)
+import Data.Time (UTCTime)
 import Path (Abs, Dir, File, Path, Rel)
 
 data FixtureGroup

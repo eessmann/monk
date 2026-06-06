@@ -5,10 +5,6 @@ module Unit.Bakeoff
   )
 where
 
-import Control.Exception (bracket)
-import Data.Text qualified as T
-import Data.Text.IO qualified as TIO
-import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import Bakeoff.Benchmark (makeBenchmarkPlan)
 import Bakeoff.Fixture (FixtureMetadata (..))
 import Bakeoff.Report (renderSummaryMarkdown)
@@ -26,6 +22,10 @@ import Bakeoff.Tools
     toolPreflightWarnings,
   )
 import Bakeoff.Types
+import Control.Exception (bracket)
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
+import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
 import Path
   ( Abs,
     Dir,
