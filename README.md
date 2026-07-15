@@ -42,6 +42,60 @@ Constructs that still deserve extra attention include:
 - option-heavy `trap`, uncatchable trap signals, `shopt`, and `coproc`
 - argument-position or broader `>(...)` forms outside the covered Linux redirect-target fixtures
 
+## How It Works
+
+Monk works like a small compiler:
+
+```text
+Bash source
+  -> ShellCheck parser and Bash AST
+  -> Monk translator
+  -> typed fish DSL
+  -> raw renderer AST
+  -> pretty-printed fish source
+```
+
+1. `Language.Bash.Parser` asks ShellCheck to parse Bash and retain source
+   positions and parse diagnostics.
+2. `Language.Fish.Translator` recursively translates ShellCheck tokens.
+   Focused modules handle control flow, commands, variables, arithmetic,
+   redirections, parameter expansion, process substitution, and other semantic
+   areas.
+3. The translator produces a typed `Language.Fish.DSL.Script`. Its types keep
+   blocks and pipelines non-empty, distinguish expression types, and restrict
+   pipeline stages to status-returning commands.
+4. `Language.Fish.DSL.Lower` explicitly lowers the typed script into the raw
+   backend AST consumed by `Language.Fish.Pretty`.
+5. The pretty-printer renders the final fish source while the translation
+   result retains structured diagnostics for the caller.
+
+The translator also tracks context such as function scope, local variables,
+command substitution, `errexit`, and `pipefail`. When fish has no direct
+equivalent for required Bash behavior, Monk can emit a generated helper
+preamble for supported cases such as background-job tracking, exact `read`
+behavior, process substitution, and `pipefail` handling.
+
+## Diagnostics And Strict Mode
+
+Warnings are structured values with a code, severity, optional detail, and
+source range. The CLI prints them to stderr and summarizes translation
+confidence; high-risk warnings are called out for review.
+
+Default mode keeps translating when a best-effort result is available.
+`--strict` instead turns unsupported constructs into translation failures. This
+makes normal mode useful for migrations and strict mode useful when approximate
+output is unacceptable.
+
+## Recursive Sources
+
+With `--recursive`, Monk discovers literal `source` and `.` references and
+builds a graph of the scripts it can resolve. `--sources inline` combines
+translated files into one output, while `--sources separate` emits individual
+`.fish` files and rewrites source paths to their translated targets.
+
+Dynamic source expressions cannot be resolved statically and remain
+warning-driven manual-review cases.
+
 ## Quick Start
 
 Build it from source:
@@ -122,7 +176,40 @@ MONK_INTEGRATION=1 cabal test
 hlint .
 ```
 
-There is also a bake-off runner for comparing Monk and Babelfish:
+### Repository Map
+
+- `app/`: the `monk` CLI entry point
+- `src/Monk/`: public translation, diagnostics, and source-graph APIs
+- `src/Language/Bash/`: the ShellCheck parser boundary
+- `src/Language/Fish/DSL*`: the typed fish construction API and explicit
+  lowering layer
+- `src/Language/Fish/Translator/`: translation orchestration and semantic
+  subsystems
+- `src/Language/Fish/Pretty/`: the raw fish AST renderer
+- `test/`: unit, property, golden, integration, and real-world tests
+- `scripts/Bakeoff/`: the Monk-versus-Babelfish comparison harness
+- `docs/design/`: architecture, fidelity evidence, and active translator
+  design notes
+
+### Testing Strategy
+
+The test suite checks both generated structure and runtime behavior:
+
+- unit tests cover focused translator, DSL, renderer, diagnostics, source, and
+  harness behavior
+- property tests exercise rendering and translation invariants
+- golden tests compare generated fish text with checked-in expected output
+- integration and real-world tests run Bash and translated fish, then compare
+  exit status, stdout, stderr, and environment changes
+- the bake-off runner compares Monk with Babelfish and can benchmark both
+  translators
+
+Run `cabal test` for the normal suite. Set `MONK_INTEGRATION=1` to enable tests
+that require Bash and fish execution.
+
+### Bake-Off
+
+The bake-off runner compares Monk and Babelfish:
 
 ```bash
 cabal run monk-bakeoff -- --compatible --no-benchmark --out-dir /tmp/monk-bakeoff
@@ -136,8 +223,13 @@ Bake-off prerequisites:
 
 ## Docs
 
-- `docs/design/translator-audit.md`: fidelity matrix and evidence backlog
-- `docs/design/translator-todo.md`: active translator backlog
-- `docs/design/architecture.md`: module layout and subsystem boundaries
-- `docs/migration-guide.md`: manual cleanup patterns after translation
-- `docs/babelfish-comparison.md`: current bake-off workflow and comparison notes
+- [`docs/design/translator-audit.md`](docs/design/translator-audit.md): fidelity
+  matrix and evidence backlog
+- [`docs/design/translator-todo.md`](docs/design/translator-todo.md): active
+  translator backlog
+- [`docs/design/architecture.md`](docs/design/architecture.md): module layout
+  and subsystem boundaries
+- [`docs/migration-guide.md`](docs/migration-guide.md): manual cleanup patterns
+  after translation
+- [`docs/babelfish-comparison.md`](docs/babelfish-comparison.md): current
+  bake-off workflow and comparison notes
