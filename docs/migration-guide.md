@@ -4,18 +4,25 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## Library API Change
 
-- `Monk.AST` is now the safe Fish construction DSL, not the raw constructor surface.
+- Monk 0.4 makes one deliberate pre-1.0 API break. `Monk.AST` is the structural
+  Fish DSL; raw constructors and lowering modules are private and unsupported.
 - Use `script`, `stmt`, `command`, `arg`, `redirect`, `begin`, `pipeline`, `if_`, `while`, `for`, `switch`, `function`, and related smart constructors for normal construction.
 - The DSL enforces non-empty blocks and pipeline stages with `NonEmpty`, separates renderable command arguments from redirections with `Arg`, and provides typed constructors for common control forms.
-- If you were pattern matching on raw constructors such as `Stmt`, `Command`, `ExprVal`, or `MkFishJobPipeline`, import `Monk.AST.Raw` explicitly.
-- `Language.Fish.DSL.Lower` lowers DSL values to the raw AST so existing rendering code can continue to use the current pretty-printer.
-- `TranslationResult` now stores a typed `Script`; use `translationStatements` only when you intentionally need the lowered raw backend statements.
+- `TranslationResult` contains only `translationScript`, ordered
+  `translationDiagnostics`, and deduplicated `translationRuntimeRequirements`.
+- `TranslationFailure` contains a nonempty `failureDiagnostics` collection.
+- Recursive source consumers should use typed `SourceGraph` and `OutputBundle`
+  values instead of callback warnings or raw inline statements.
 
 ## Reading Diagnostics
 
-- Monk warnings are now structured. Treat the warning code and severity as the stable contract; rendered message text is for humans.
-- Rendered diagnostics include that contract, for example `warning[ReadIssue][medium]`.
-- High-severity warnings mean the generated Fish should be reviewed before use.
+- Treat diagnostic code, phase, severity, and risk as the stable contract;
+  rendered message text is for humans.
+- Rendered diagnostics include explicit values such as
+  `warning[monk.read][review]`.
+- `Unsafe` means the generated Fish contains an unsupported construct,
+  compatibility fallback, high-risk approximation, or error. Diagnostic counts
+  remain available separately; numeric confidence has been removed.
 - If the translator is run with `--strict`, unsupported best-effort branches fail instead of emitting output.
 
 ## `set -e` / `pipefail`
@@ -27,7 +34,7 @@ This guide covers the warning classes and best-effort areas that most often need
 
 ## `read`
 
-- The exact helper-backed path covers the currently accepted `read` surface:
+- The exact path covers the currently accepted `read` surface:
   - empty delimiters
   - arrays
   - multiple destination variables
@@ -40,6 +47,17 @@ This guide covers the warning classes and best-effort areas that most often need
   - unsupported flag clusters
   - unsupported option combinations
 - If Monk still emits a `ReadIssue` warning, validate the translated parser against real Bash input instead of trusting the generated Fish blindly.
+- Raw single-variable non-newline delimiter reads use a Fish 4.6 native loop
+  when its proven preconditions hold. Harder delimiter/IFS combinations use one
+  Python process and no nested Fish process; `python3` is declared explicitly.
+
+## Here-strings
+
+- `<<<` is a best-effort approximation with the stable `monk.here-string`
+  diagnostic.
+- Strict mode rejects it. Normal mode keeps the covered `printf`-based lowering,
+  so scripts that depend on byte-exact or trailing-newline behavior still need
+  differential review.
 
 ## Process Substitution
 
@@ -79,6 +97,10 @@ This guide covers the warning classes and best-effort areas that most often need
 - Recursive translation only inlines literal source paths.
 - Literal recursive source resolution now tries the working-directory-relative path first and then falls back to the parent source file directory.
 - `--recursive --sources separate --output FILE` now emits a self-contained bundle rooted at the output path and rewrites literal child sources relative to that bundle.
+- Generated helpers are structurally deduplicated into at most one
+  `_monk_runtime.fish`; dependent files resolve quoted relative paths from
+  `status current-filename`, so launching a bundle from another directory does
+  not break its child or runtime imports.
 - Dynamic source paths remain manual-review territory.
 
 ## Cleanup Workflow

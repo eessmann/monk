@@ -91,6 +91,8 @@ translateTokensToStatusCmd tokens =
     [T_AndIf _ l r] -> statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
     [T_OrIf _ l r] -> statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r)
     [T_Annotation _ _ inner] -> translateTokenToStatusCmd inner
+    [T_Include _ inner] -> translateTokenToStatusCmd inner
+    [T_SourceCommand _ original _] -> translateTokenToStatusCmd original
     [tok] | tokenIsUnsupportedStatus tok -> falseStatusCommand
     (c : args) -> Command (tokenToLiteralText c) (map translateTokenToExprOrRedirect args)
 

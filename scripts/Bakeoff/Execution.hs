@@ -10,7 +10,7 @@ import Bakeoff.Artifacts
     FixtureArtifacts (..),
     ensureParentDirectory,
   )
-import Bakeoff.Benchmark (runHyperfineSuite)
+import Bakeoff.Benchmark (runHyperfineRuntimeSuite, runHyperfineSuite)
 import Bakeoff.Execution.Diff (buildDiffReport)
 import Bakeoff.Execution.Runtime (buildRuntimeReport)
 import Bakeoff.Execution.Translation
@@ -108,8 +108,8 @@ defineFixtureRules cfg tools processEnv fixture artifacts = do
       ensureParentDirectory (faResultJson artifacts)
       writeJsonFile (faResultJson artifacts) fixtureReport
 
-defineBenchmarkRules :: BakeoffConfig -> ResolvedTools -> BakeoffOutputs -> Rules ()
-defineBenchmarkRules cfg tools outputs =
+defineBenchmarkRules :: BakeoffConfig -> ResolvedTools -> BakeoffOutputs -> [(FixtureSpec, FixtureArtifacts)] -> Rules ()
+defineBenchmarkRules cfg tools outputs fixtures =
   case toolsHyperfinePath tools of
     Nothing -> pure ()
     Just hyperfinePath -> do
@@ -134,3 +134,32 @@ defineBenchmarkRules cfg tools outputs =
             BenchmarkSuiteBenchmark
             (boHyperfineBenchmarkJsonPath outputs)
             (boHyperfineBenchmarkMarkdownPath outputs)
+
+      toFilePath (boHyperfineRuntimeAllJsonPath outputs) %> \_ -> do
+        need (toFilePath (boBenchmarkPlanPath outputs) : runtimeDependencies (const True))
+        liftIO $
+          runHyperfineRuntimeSuite
+            hyperfinePath
+            cfg
+            outputs
+            BenchmarkSuiteAll
+            (boHyperfineRuntimeAllJsonPath outputs)
+            (boHyperfineRuntimeAllMarkdownPath outputs)
+
+      toFilePath (boHyperfineRuntimeBenchmarkJsonPath outputs) %> \_ -> do
+        need (toFilePath (boBenchmarkPlanPath outputs) : runtimeDependencies ((== FixtureGroupBenchmark) . specGroup))
+        liftIO $
+          runHyperfineRuntimeSuite
+            hyperfinePath
+            cfg
+            outputs
+            BenchmarkSuiteBenchmark
+            (boHyperfineRuntimeBenchmarkJsonPath outputs)
+            (boHyperfineRuntimeBenchmarkMarkdownPath outputs)
+  where
+    runtimeDependencies includeFixture =
+      [ toFilePath (faMonkTranslateJson artifacts)
+      | (fixture, artifacts) <- fixtures,
+        isNothing (specSkipReason fixture),
+        includeFixture fixture
+      ]

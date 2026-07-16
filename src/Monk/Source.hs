@@ -9,9 +9,11 @@
 -- Recursive source discovery and source-path rewriting helpers.
 module Monk.Source
   ( SourceMode (..),
+    Translation (..),
     SourceGraph (..),
     SourceGraphFailure (..),
     translateSourceGraph,
+    inlineSourceGraph,
     rewriteSources,
     collectSourceMap,
     resolveSourcePath,
@@ -19,24 +21,39 @@ module Monk.Source
 where
 
 import Control.Monad (foldM)
+import Data.Char (isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Typeable (cast)
-import Language.Fish.AST
-import Monk.Translation
-  ( TranslateConfig,
-    TranslateError,
+import Language.Fish.DSL.Internal
+import Language.Fish.Inline
+  ( InlineEvent (..),
     Translation (..),
+    inlineStatements,
+    sourceStatusHelperStatement,
+  )
+import Monk.Translation
+  ( Diagnostic (..),
+    DiagnosticCode (..),
+    DiagnosticPhase (PhaseParse, PhaseSource),
+    DiagnosticSeverity (DiagnosticError, DiagnosticWarning),
+    ReviewRisk (Review, Unsafe),
+    TranslateConfig,
+    TranslationFailure (..),
+    TranslationResult (..),
     parseBashFile,
     translateParseResult,
-    translationState,
-    translationStatements,
   )
 import ShellCheck.AST
 import ShellCheck.ASTLib (getLiteralStringDef)
-import ShellCheck.Interface (PositionedComment, prComments, prRoot)
+import ShellCheck.Interface
+  ( Comment (..),
+    Position (..),
+    PositionedComment (..),
+    prRoot,
+  )
 import System.Directory (canonicalizePath, doesFileExist)
 import System.FilePath (isRelative, makeRelative, replaceExtension, takeDirectory, (</>))
 
@@ -47,14 +64,12 @@ data SourceMode
 
 data SourceGraph = MkSourceGraph
   { sgOrder :: [FilePath],
-    sgParseComments :: M.Map FilePath [PositionedComment],
     sgTranslations :: M.Map FilePath Translation
   }
   deriving stock (Show, Eq)
 
 data SourceGraphFailure
-  = SourceGraphParseErrors FilePath [PositionedComment]
-  | SourceGraphTranslateFailure FilePath TranslateError
+  = SourceGraphFailure FilePath TranslationFailure
   deriving stock (Show, Eq)
 
 translateSourceGraph ::
@@ -63,28 +78,27 @@ translateSourceGraph ::
   FilePath ->
   IO (Either SourceGraphFailure SourceGraph)
 translateSourceGraph cfg recursive rootPath =
-  go Set.empty [] mempty mempty [rootPath]
+  go Set.empty [] mempty [rootPath]
   where
-    go _ order comments translations [] =
+    go _ order translations [] =
       pure
         ( Right
             MkSourceGraph
               { sgOrder = order,
-                sgParseComments = comments,
                 sgTranslations = translations
               }
         )
-    go seen order comments translations (path : rest)
-      | Set.member path seen = go seen order comments translations rest
+    go seen order translations (path : rest)
+      | Set.member path seen = go seen order translations rest
       | otherwise = do
           parseResE <- parseBashFile path
           case parseResE of
             Left errs ->
-              pure (Left (SourceGraphParseErrors path errs))
+              pure (Left (SourceGraphFailure path (sourceParseFailure errs)))
             Right parseRes ->
               case translateParseResult cfg parseRes of
-                Left err ->
-                  pure (Left (SourceGraphTranslateFailure path err))
+                Left failure ->
+                  pure (Left (SourceGraphFailure path failure))
                 Right result -> do
                   sourceMap <-
                     if recursive
@@ -93,8 +107,9 @@ translateSourceGraph cfg recursive rootPath =
                   let translation =
                         MkTranslation
                           { trPath = path,
-                            trStatements = translationStatements result,
-                            trState = translationState result,
+                            trScript = translationScript result,
+                            trDiagnostics = translationDiagnostics result,
+                            trRuntimeRequirements = translationRuntimeRequirements result,
                             trSourceMap = sourceMap
                           }
                       next =
@@ -104,13 +119,43 @@ translateSourceGraph cfg recursive rootPath =
                   go
                     (Set.insert path seen)
                     (order <> [path])
-                    (M.insert path (prComments parseRes) comments)
                     (M.insert path translation translations)
                     (rest <> next)
 
-rewriteSources :: M.Map FilePath Translation -> Translation -> [FishStatement]
+inlineSourceGraph :: SourceGraph -> FilePath -> IO (Script, [Diagnostic])
+inlineSourceGraph graph rootPath = do
+  messagesRef <- newIORef []
+  needsStatusHelperRef <- newIORef False
+  statements <-
+    inlineStatements
+      ( \case
+          InlineWarning message -> modifyIORef' messagesRef (message :)
+          InlineNeedsSourceStatusHelper -> writeIORef needsStatusHelperRef True
+      )
+      (sgTranslations graph)
+      Set.empty
+      rootPath
+  messages <- reverse <$> readIORef messagesRef
+  needsStatusHelper <- readIORef needsStatusHelperRef
+  let withStatusHelper
+        | needsStatusHelper && sourceStatusHelperStatement `notElem` statements = sourceStatusHelperStatement : statements
+        | otherwise = statements
+  pure (MkScript withStatusHelper, map inlineDiagnostic messages)
+  where
+    inlineDiagnostic message =
+      MkDiagnostic
+        { diagnosticCode = MkDiagnosticCode "monk.source.inline",
+          diagnosticPhase = PhaseSource,
+          diagnosticSeverity = DiagnosticWarning,
+          diagnosticRisk = Review,
+          diagnosticMessage = message,
+          diagnosticRange = Nothing
+        }
+
+rewriteSources :: M.Map FilePath Translation -> Translation -> Script
 rewriteSources translations tr =
-  map (rewriteStatement sourceRewrite) (trStatements tr)
+  case trScript tr of
+    MkScript statements -> MkScript (map (rewriteStatement sourceRewrite) statements)
   where
     currentOutputDir = takeDirectory (translationOutputPath tr)
 
@@ -127,6 +172,41 @@ rewriteSources translations tr =
 
     translationOutputPath translation =
       replaceExtension (trPath translation) "fish"
+
+sourceParseFailure :: [PositionedComment] -> TranslationFailure
+sourceParseFailure comments =
+  MkTranslationFailure
+    (fromMaybe generic (NE.nonEmpty (map sourceParseDiagnostic comments)))
+  where
+    generic =
+      MkDiagnostic
+        { diagnosticCode = MkDiagnosticCode "shellcheck.parse",
+          diagnosticPhase = PhaseParse,
+          diagnosticSeverity = DiagnosticError,
+          diagnosticRisk = Unsafe,
+          diagnosticMessage = "Unable to parse sourced Bash input",
+          diagnosticRange = Nothing
+        }
+        :| []
+
+sourceParseDiagnostic :: PositionedComment -> Diagnostic
+sourceParseDiagnostic positioned =
+  MkDiagnostic
+    { diagnosticCode = MkDiagnosticCode ("shellcheck." <> toText (filter isDigit (show (cCode payload)))),
+      diagnosticPhase = PhaseParse,
+      diagnosticSeverity = DiagnosticError,
+      diagnosticRisk = Unsafe,
+      diagnosticMessage = toText (cMessage payload),
+      diagnosticRange = Just (MkSourceRange (sourcePos (pcStartPos positioned)) (sourcePos (pcEndPos positioned)))
+    }
+  where
+    payload = pcComment positioned
+    sourcePos position =
+      MkSourcePos
+        { srcFile = toText (posFile position),
+          srcLine = fromInteger (posLine position),
+          srcColumn = fromInteger (posColumn position)
+        }
 
 collectSourceMap :: FilePath -> Maybe Token -> IO (M.Map Text (Maybe FilePath))
 collectSourceMap path mRoot = do
@@ -164,7 +244,6 @@ collectSourceArgs :: Token -> [Token]
 collectSourceArgs tok =
   let direct =
         case tok of
-          T_SourceCommand _ _ pathTok -> [pathTok]
           T_SimpleCommand _ _ (cmdTok : argTok : _)
             | isSourceCmd cmdTok -> [argTok]
           _ -> []
@@ -188,6 +267,8 @@ tokenChildren = \case
   T_OrIf _ left right -> [left, right]
   T_Backgrounded _ inner -> [inner]
   T_Annotation _ _ inner -> [inner]
+  T_Include _ inner -> [inner]
+  T_SourceCommand _ original _ -> [original]
   T_ForIn _ _ tokens body -> tokens <> body
   T_SelectIn _ _ tokens body -> tokens <> body
   T_CaseExpression _ switchExpr cases ->

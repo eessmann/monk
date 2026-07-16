@@ -6,7 +6,6 @@ module Language.Fish.Translator.Commands.Read.Runtime
     currentIfsExpr,
     captureHelperExpr,
     captureHelperCommandToFile,
-    assignHelperExpr,
     helperPipelineStatusExpr,
     statusFromVarCommand,
     collectCommandExpr,
@@ -29,12 +28,12 @@ import Language.Fish.Translator.Types
 
 ensureReadDelimHelper :: TranslateM ()
 ensureReadDelimHelper =
-  ensureHelperScript HelperReadRuntime (DSL.script readRuntimeHelperStatements)
+  ensureHelperScript HelperReadRuntime "perform exact delimiter read" (DSL.script readRuntimeHelperStatements)
 
 readRuntimeHelperStatements :: [DSL.Stmt]
 readRuntimeHelperStatements =
   [ readCaptureHelperStmt,
-    readAssignHelperStmt
+    returnStatusHelperStmt
   ]
 
 readCaptureHelperStmt :: DSL.Stmt
@@ -43,7 +42,7 @@ readCaptureHelperStmt =
     ( DSL.function
         "__monk_read_capture_delim"
         []
-        ["mode", "delimiter", "raw", "prompt", "silent", "timeout", "nchars"]
+        ["mode", "delimiter", "raw", "prompt", "silent", "timeout", "nchars", "ifs", "assign_mode", "count"]
         ( DSL.block
             ( pythonStmt
                 [ DSL.str ("\n" <> readCapturePythonScript),
@@ -53,28 +52,26 @@ readCaptureHelperStmt =
                   DSL.var "prompt",
                   DSL.var "silent",
                   DSL.var "timeout",
-                  DSL.var "nchars"
+                  DSL.var "nchars",
+                  DSL.var "ifs",
+                  DSL.var "assign_mode",
+                  DSL.var "count"
                 ]
                 NE.:| []
             )
         )
     )
 
-readAssignHelperStmt :: DSL.Stmt
-readAssignHelperStmt =
+returnStatusHelperStmt :: DSL.Stmt
+returnStatusHelperStmt =
   DSL.stmt
     ( DSL.function
-        "__monk_read_assign"
+        "__monk_return_status"
         []
-        ["mode", "ifs", "record", "count"]
+        ["code"]
         ( DSL.block
-            ( pythonStmt
-                [ DSL.str ("\n" <> readAssignPythonScript),
-                  DSL.var "mode",
-                  DSL.var "ifs",
-                  DSL.var "record",
-                  DSL.var "count"
-                ]
+            ( DSL.stmt
+                (DSL.return_ (Just (DSL.math (DSL.var "code" NE.:| []))))
                 NE.:| []
             )
         )
@@ -87,7 +84,8 @@ pythonStmt args =
         "python3"
         ( map
             DSL.arg
-            ( [ DSL.str "-c",
+            ( [ DSL.str "-S",
+                DSL.str "-c",
                 DSL.str pythonDedentExecScript
               ]
                 <> args
@@ -124,7 +122,17 @@ currentIfsExpr = collectCommandExpr ifsOutputCommand
         []
 
 captureHelperExpr :: ExactReadDelim -> FishExpr (TList TStr)
-captureHelperExpr = collectCommandExpr . captureHelperCommand
+captureHelperExpr spec =
+  ExprCommandSubst
+    ( Stmt
+        ( Pipeline
+            ( pipelineFromCommands
+                (captureHelperCommand spec)
+                [split0Command]
+            )
+        )
+        NE.:| []
+    )
 
 collectCommandExpr :: FishCommand TStatus -> FishExpr (TList TStr)
 collectCommandExpr cmd =
@@ -179,8 +187,16 @@ captureHelperArgs spec =
     ExprLiteral (fromMaybe "" (erdPrompt spec)),
     ExprLiteral (if erdSilent spec then "1" else "0"),
     ExprLiteral (fromMaybe "" (erdTimeout spec)),
-    ExprLiteral (fromMaybe "" (erdNChars spec))
+    ExprLiteral (fromMaybe "" (erdNChars spec)),
+    ExprVariable (VarScalar "__monk_read_ifs"),
+    ExprLiteral assignmentMode,
+    ExprLiteral assignmentCount
   ]
+  where
+    (assignmentMode, assignmentCount) =
+      case erdTarget spec of
+        ExactReadArray _ -> ("array", "")
+        ExactReadVars names -> ("vars", T.pack (show (length names)))
 
 captureHelperInputRedirects :: ExactReadDelim -> [ExprOrRedirect]
 captureHelperInputRedirects spec =
@@ -199,33 +215,8 @@ delimiterValueArg = \case
   ExactReadDelimited txt -> txt
   ExactReadNull -> ""
 
-assignHelperExpr :: ExactReadDelim -> FishExpr (TList TStr)
-assignHelperExpr spec =
-  ExprCommandSubst
-    ( Stmt
-        ( Pipeline
-            ( pipelineFromCommands
-                (assignHelperCommand spec)
-                [Command "string" [ExprVal (ExprLiteral "split0")]]
-            )
-        )
-        NE.:| []
-    )
-
-assignHelperCommand :: ExactReadDelim -> FishCommand TStatus
-assignHelperCommand spec =
-  Command
-    "__monk_read_assign"
-    [ ExprVal (ExprLiteral mode),
-      ExprVal (ExprVariable (VarScalar "__monk_read_ifs")),
-      ExprVal (ExprVariable (VarScalar "__monk_read_value")),
-      ExprVal (ExprLiteral countValue)
-    ]
-  where
-    (mode, countValue) =
-      case erdTarget spec of
-        ExactReadArray _ -> ("array", "")
-        ExactReadVars names -> ("vars", T.pack (show (length names)))
+split0Command :: FishCommand TStatus
+split0Command = Command "string" [ExprVal (ExprLiteral "split0")]
 
 helperPipelineStatusExpr :: FishExpr TStr
 helperPipelineStatusExpr =
@@ -238,11 +229,8 @@ helperPipelineStatusExpr =
 statusFromVarCommand :: Text -> FishCommand TStatus
 statusFromVarCommand name =
   Command
-    "fish"
-    [ ExprVal (ExprLiteral "--no-config"),
-      ExprVal (ExprLiteral "-c"),
-      ExprVal (ExprLiteral "exit $argv[1]"),
-      ExprVal (ExprVariable (VarScalar name))
+    "__monk_return_status"
+    [ ExprVal (ExprVariable (VarScalar name))
     ]
 
 pipelineFromCommands :: FishCommand TStatus -> [FishCommand TStatus] -> FishJobPipeline
@@ -272,7 +260,7 @@ readCapturePythonScript =
       "import termios",
       "import time",
       "",
-      "mode, delimiter, raw_s, prompt, silent_s, timeout_s, nchars_s = sys.argv[1:8]",
+      "mode, delimiter, raw_s, prompt, silent_s, timeout_s, nchars_s, ifs, assign_mode, count_s = sys.argv[1:11]",
       "raw = raw_s == '1'",
       "silent = silent_s == '1'",
       "timeout = None if timeout_s == '' else float(timeout_s)",
@@ -333,19 +321,8 @@ readCapturePythonScript =
       "            termios.tcsetattr(fd, termios.TCSADRAIN, orig)",
       "        except Exception:",
       "            pass",
-      "sys.stdout.buffer.write(bytes(buf))",
-      "sys.exit(status)"
-    ]
-
-readAssignPythonScript :: Text
-readAssignPythonScript =
-  T.unlines
-    [ "import sys",
-      "",
-      "mode = sys.argv[1]",
-      "ifs = sys.argv[2]",
-      "record = sys.argv[3]",
-      "count = int(sys.argv[4]) if mode == 'vars' else 0",
+      "record = bytes(buf).decode('utf-8', errors='surrogateescape')",
+      "count = int(count_s) if assign_mode == 'vars' else 0",
       "",
       "def is_ws(ch):",
       "    return ch in ifs and ch in ' \\t\\n'",
@@ -355,9 +332,7 @@ readAssignPythonScript =
       "",
       "def parse_fields():",
       "    if ifs == '':",
-      "        if record == '':",
-      "            return [], []",
-      "        return [record], [0]",
+      "        return ([], []) if record == '' else ([record], [0])",
       "    fields = []",
       "    starts = []",
       "    pos = 0",
@@ -366,8 +341,7 @@ readAssignPythonScript =
       "        pos += 1",
       "    while pos < length:",
       "        starts.append(pos)",
-      "        ch = record[pos]",
-      "        if is_nonws(ch):",
+      "        if is_nonws(record[pos]):",
       "            fields.append('')",
       "            pos += 1",
       "            while pos < length and is_ws(record[pos]):",
@@ -381,30 +355,23 @@ readAssignPythonScript =
       "            break",
       "        if is_nonws(record[pos]):",
       "            pos += 1",
-      "            while pos < length and is_ws(record[pos]):",
-      "                pos += 1",
-      "        else:",
-      "            while pos < length and is_ws(record[pos]):",
-      "                pos += 1",
+      "        while pos < length and is_ws(record[pos]):",
+      "            pos += 1",
       "    return fields, starts",
       "",
-      "def trim_end():",
+      "fields, starts = parse_fields()",
+      "if assign_mode == 'array':",
+      "    values = fields",
+      "elif len(fields) > count and count > 0:",
+      "    values = fields[:count - 1]",
       "    end = len(record)",
       "    while end > 0 and is_ws(record[end - 1]):",
       "        end -= 1",
-      "    return end",
-      "",
-      "fields, starts = parse_fields()",
-      "if mode == 'array':",
-      "    values = fields",
+      "    start = starts[count - 1]",
+      "    values.append(record[start:end] if start < end else '')",
       "else:",
-      "    if len(fields) > count and count > 0:",
-      "        values = fields[:count - 1]",
-      "        end = trim_end()",
-      "        start = starts[count - 1]",
-      "        values.append(record[start:end] if start < end else '')",
-      "    else:",
-      "        values = fields[:count] + [''] * max(0, count - len(fields))",
+      "    values = fields[:count] + [''] * max(0, count - len(fields))",
       "for value in values:",
-      "    sys.stdout.buffer.write(value.encode('utf-8') + b'\\0')"
+      "    sys.stdout.buffer.write(value.encode('utf-8', errors='surrogateescape') + b'\\0')",
+      "sys.exit(status)"
     ]

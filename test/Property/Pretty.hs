@@ -8,9 +8,7 @@ where
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Gen
-import Language.Fish.DSL.Lower (lowerScript)
 import Monk.AST
-import Monk.Translation (renderFish)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck qualified as QC
 import TestSupport
@@ -19,10 +17,12 @@ propertyPrettyTests :: TestTree
 propertyPrettyTests =
   testGroup
     "Pretty properties"
-    [ QC.testProperty "Echo literal without single quotes is single-quoted" $
+    [ QC.testProperty "Echo literals choose a safe quote style" $
         QC.forAll genTextNoQuote $ \t ->
           let out = renderDsl (script [stmt (command "echo" [arg (str t)])])
-           in T.isInfixOf ("'" <> t <> "'") out,
+           in if "\\" `T.isInfixOf` t
+                then T.isPrefixOf "echo \"" out
+                else T.isInfixOf ("'" <> t <> "'") out,
       QC.testProperty "Pipeline renders N pipes for N continuations" $ \(QC.NonNegative n) ->
         let stages = NE.fromList (replicate (n + 1) (stage (command "true" [])))
             out = renderDsl (script [stmt (pipeline stages)])
@@ -72,4 +72,4 @@ propertyPrettyTests =
     ]
 
 renderDsl :: Script -> Text
-renderDsl = renderFish . lowerScript
+renderDsl = renderScript

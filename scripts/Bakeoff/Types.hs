@@ -22,6 +22,8 @@ module Bakeoff.Types
     MetaReport (..),
     ConfigReport (..),
     FixtureSelectionReport (..),
+    RuntimeBenchmarkEntry (..),
+    RuntimeShell (..),
     BenchmarkPlan (..),
     BenchmarkSuite (..),
     HyperfineResult (..),
@@ -153,12 +155,16 @@ data TranslationReport = MkTranslationReport
   { translationTool :: ToolName,
     translationStatus :: CommandStatus,
     translationExitCode :: Maybe Int,
+    translationErrorCount :: Int,
     translationWarningCount :: Int,
     translationNotesCount :: Int,
-    translationHighWarnings :: Int,
-    translationMediumWarnings :: Int,
-    translationLowWarnings :: Int,
-    translationConfidenceScore :: Maybe Int,
+    translationReviewRisk :: Maybe Text,
+    translationInputBytes :: Maybe Int,
+    translationOutputBytes :: Maybe Int,
+    translationExpansionRatio :: Maybe Double,
+    translationHelperBytes :: Maybe Int,
+    translationHelperInvocations :: Int,
+    translationExternalRequirements :: [Text],
     translationOutputPath :: Maybe (Path Abs File),
     translationStderrPath :: Maybe (Path Abs File),
     translationErrorMessage :: Maybe Text
@@ -249,10 +255,30 @@ data MetaReport = MkMetaReport
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+data RuntimeBenchmarkEntry = MkRuntimeBenchmarkEntry
+  { runtimeBenchmarkBashPath :: Path Abs File,
+    runtimeBenchmarkFishPath :: Path Abs File,
+    runtimeBenchmarkArgs :: [Text],
+    runtimeBenchmarkMode :: ShellRunMode,
+    runtimeBenchmarkStdin :: Text
+  }
+  deriving stock (Eq, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+data RuntimeShell
+  = RuntimeBash
+  | RuntimeFish
+  deriving stock (Eq, Ord, Show, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
 data BenchmarkPlan = MkBenchmarkPlan
   { benchmarkAllFixtures :: [Path Abs File],
     benchmarkFixtures :: [Path Abs File],
-    benchmarkBabelfishPath :: Path Abs File
+    benchmarkAllRuntime :: [RuntimeBenchmarkEntry],
+    benchmarkRuntimeFixtures :: [RuntimeBenchmarkEntry],
+    benchmarkBabelfishPath :: Path Abs File,
+    benchmarkFishPath :: Path Abs File,
+    benchmarkRuntimeTimeoutSeconds :: Int
   }
   deriving stock (Eq, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
@@ -266,6 +292,7 @@ data BenchmarkSuite
 data HyperfineResult = MkHyperfineResult
   { hyperfineCommand :: Text,
     hyperfineMean :: Double,
+    hyperfineMedian :: Double,
     hyperfineStddev :: Double
   }
   deriving stock (Eq, Show, Generic)

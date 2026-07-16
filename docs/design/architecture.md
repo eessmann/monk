@@ -1,148 +1,103 @@
-# Monk Architecture (2026-04-16)
+# Monk 0.4 Architecture
 
-This document describes the current module boundaries after the whole-repo refactor pass that separated the public library surface, shared harness support, and the bake-off executable.
+Monk is organized as a typed compiler pipeline. ShellCheck's Bash syntax tree
+is an input format, not Monk's output representation, and raw Fish renderer
+constructors are private implementation details.
 
-## Public Library Surface
+```text
+Bash text
+  -> ShellCheck parse result
+  -> structural Fish DSL + diagnostics + requirements
+  -> typed source graph / passes / output bundle
+  -> Fish renderer
+  -> text or files
+```
 
-The public API is intentionally explicit:
+## Public Surface
 
-- `Monk.Translation`
-  - Parse, translate, and render entry points.
-  - Owns `TranslationResult`, `TranslationFailure`, `Translation`, and translation-state access. Successful results retain the typed DSL `Script`; `translationStatements` is the explicit compatibility lowering helper for raw backend consumers.
-- `Monk.AST`
-  - Convenience re-export of the public type-safe Fish construction DSL for downstream code that needs to build generated Fish.
-- `Language.Fish.DSL`
-  - Canonical public construction API over typed expressions, renderable arguments, command roles, non-empty blocks, stages, job conjunctions, control forms, and scripts.
-- `Language.Fish.DSL.Lower`
-  - Explicit lowering API from DSL values into the raw AST used by the existing pretty-printer backend.
-- `Monk.AST.Raw`
-  - Explicit raw Fish AST escape hatch for backend/rendering code and advanced consumers.
-- `Monk.Source`
-  - Recursive source-graph construction and source-path rewriting helpers used by the CLI and tests.
-- `Monk.Diagnostics`
-  - Warning rendering, note rendering, and confidence scoring.
-- `Monk`
-  - Thin convenience facade that re-exports `Monk.Translation` and `Monk.Diagnostics`.
+- `Monk.Translation` parses and translates Bash. `TranslationResult` contains a
+  structural `Script`, ordered `Diagnostic` values, and deduplicated
+  `RuntimeRequirement` values. `TranslationFailure` contains a nonempty
+  diagnostic collection.
+- `Monk.Translation.Types` owns stable diagnostic codes, phases, severities,
+  review risk, runtime programs, reasons, and source locations.
+- `Monk.AST` and `Language.Fish.DSL` expose structural Fish types plus smart
+  constructors and `renderScript`. Constructors preserve expression
+  cardinality, command roles, and nonempty block/pipeline invariants.
+- `Monk.Source` owns recursive literal-source discovery, typed per-source
+  translations, dependency mappings, rewriting, and inlining.
+- `Monk.Output` plans stdout/combined output and separate recursive bundles.
+  `OutputBundle` separates generated user files from an optional shared runtime
+  file; rendering remains separate from filesystem writing.
+- `Monk.Diagnostics` renders stable diagnostics, review-risk summaries, and
+  declared runtime requirements.
 
-`Monk` is no longer the catch-all public surface for the Fish AST or recursive source logic.
+There is no public `Monk.AST.Raw`, public lowering module, translator state,
+callback warning channel, or raw inline result in 0.4.
 
-## Translator Internals
+## Structural Fish IR
 
-The translator is organized around a typed Fish DSL handoff and small focused subsystems:
-- `Language.Fish.AST`
-  - Raw renderer-backend AST surface used internally and re-exported explicitly as `Monk.AST.Raw`.
-- `Language.Fish.AST.Common`
-  - Shared leaf enums and source-position types.
-- `Language.Fish.AST.Types`
-  - Recursive statement, expression, job, and redirection structures.
-- `Language.Fish.Translator`
-  - Top-level statement dispatch and orchestration; the public translation handoff emits a DSL `Script` before `Monk.Translation` lowers it for rendering.
-- `Language.Fish.Translator.Construction`
-  - The single internal lowering and adapter boundary for translator-authored DSL values and raw-to-DSL bridge helpers. Helper/runtime code can use public `Language.Fish.DSL` constructors and lower through this module without importing DSL internals directly.
-- `Language.Fish.Translator.Types`
-  - The single translator raw AST facade. Translator implementation modules import raw constructors through this module instead of importing `Language.Fish.AST` or `Monk.AST.Raw` directly.
-- `Language.Fish.Translator.Redirections`
-  - Shared redirection token planning API that returns typed DSL `Arg` values for normal command and command-substitution lowering.
-- `Language.Fish.Translator.Commands.Read`
-  - Facade over read lowering.
-- `Language.Fish.Translator.Commands.Read.Parse`
-  - Read flag parsing and exact-path selection.
-- `Language.Fish.Translator.Commands.Read.Types`
-  - Shared read lowering data types.
-- `Language.Fish.Translator.Commands.Read.Runtime`
-  - Generated helper text and capture/runtime builders.
-- `Language.Fish.Translator.Commands.Read.Exact`
-  - Exact helper-backed read lowering.
-- `Language.Fish.Translator.Variables.ParamExpansion`
-  - Facade over parameter-expansion lowering.
-- `Language.Fish.Translator.Variables.ParamExpansion.Parse`
-  - Parsing and normalized modifier/operator classification.
-- `Language.Fish.Translator.Variables.ParamExpansion.Types`
-  - Parameter-expansion IR.
-- `Language.Fish.Translator.Variables.ParamExpansion.Render`
-  - Render and hoist-aware lowering.
+`Language.Fish.DSL.Types` defines the independent leaf types.
+`Language.Fish.DSL.Internal` owns the recursive structural representation used
+by translation and typed passes. `Language.Fish.DSL` exposes safe construction
+views and smart constructors; internal constructors remain private to the
+library.
 
-The structural target for this pass was to eliminate mixed-responsibility 700-1000 line translator modules. The remaining top-level translator modules are orchestration modules rather than large monoliths carrying unrelated logic.
+The renderer consumes the same structural representation through a private
+boundary. Compatibility modules under `Language.Fish.AST.*` are private and do
+not form a second public AST.
 
-## Source Graph And CLI
+## Translation
 
-Recursive source handling is now a library service rather than ad hoc CLI logic:
+`Language.Fish.Translator` dispatches ShellCheck tokens and coordinates focused
+subsystems under `Language.Fish.Translator.*`:
 
-- `Monk.Source.translateSourceGraph`
-  - Parses and translates a root script plus recursively discovered literal `source` / `.` edges.
-- `Monk.Source.rewriteSources`
-  - Rewrites recursive source targets for separate-output mode.
-- `app/Main.hs`
-  - Thin CLI that parses arguments, calls `Monk.Source`, and writes inline or separate output.
+- commands, conditions, compound status plans, and control flow;
+- variables, assignments, arithmetic, and parameter expansion;
+- redirection and process-substitution plans;
+- generated background, pipefail, read, and process-substitution runtimes;
+- simplification and renaming passes.
 
-Literal source resolution now tries the Bash working-directory-relative path first and then falls back to the parent source file directory. Non-literal source paths remain warning-driven/manual-review territory.
+Translator state is private policy state. It tracks context, source ranges,
+helper liveness, option state, ordered warnings, and runtime requirements. The
+public boundary converts private warnings into stable `Diagnostic` values.
 
-## Shared Harness Support
+Unsupported standalone statements are fail-closed: normal mode emits a stable
+diagnostic, an explanatory Fish comment, and `false`; strict mode returns a
+failure. Compatibility fallbacks are narrowly allowlisted and declare their
+external runtime requirements.
 
-Tests and bake-off now share one internal support layer:
+## Source And Output Planning
 
-- Private Cabal library: `monk-harness-support`
-- Modules:
-  - `Monk.Internal.Fixture`
-  - `Monk.Internal.Shell`
+ShellCheck sourced-file expansion is disabled. `Monk.Source` is authoritative:
+it discovers literal edges, translates every source into a structural script,
+and records source mappings and diagnostics.
 
-Responsibilities:
+Typed passes then choose one of two shapes:
 
-- fixture sidecar loading (`.args`, `.stdin`, `.mode`, `.platforms`, `.prereqs`, `.recursive`)
-- shell execution helpers
-- environment capture and diffing
+- combined output inlines the source graph and structurally deduplicates helper
+  definitions;
+- separate output relocates source paths, rewrites literal `source` targets,
+  extracts live generated preambles, and emits at most one
+  `_monk_runtime.fish`. Dependent files use quoted paths resolved from
+  `status current-filename`, so nested sources remain file-relative even when
+  the bundle is launched from another working directory.
 
-This layer uses typed `Path` values internally and is consumed by both `test/` and the bake-off code under `scripts/`.
+`Monk.Output` never writes files. The CLI renders the plan and performs the
+requested stdout/filesystem effects.
 
-## Bake-off Architecture
+## Evidence And Tooling
 
-The bake-off is now a separate executable and private internal library:
+The test suite combines focused unit tests, DSL/rendering properties, golden
+fixtures, Bash/Fish differential integrations, real-world fixtures, source
+bundle checks, and static architecture boundaries. The bake-off measures Monk
+against Babelfish and benchmarks original Bash versus Monk-generated Fish with
+the same fixture arguments, stdin, and execution mode.
 
-- Private Cabal library: `monk-bakeoff-lib`
-- Executable entrypoint: `scripts/app/Main.hs`
-- Modules:
-  - `Bakeoff.Selection`
-  - `Bakeoff.Artifacts`
-  - `Bakeoff.Process`
-  - `Bakeoff.Report`
-  - `Bakeoff.Benchmark`
-  - `Bakeoff.Execution`
-  - `Bakeoff.Execution.Translation`
-  - `Bakeoff.Execution.Runtime`
-  - `Bakeoff.Execution.Diff`
-  - `Bakeoff.Execution.Shared`
-  - `Bakeoff.Tools`
-  - `Bakeoff.Runner`
-  - `Bakeoff.Types`
+CI runs bounded Ubuntu matrices for GHC 9.12.2 and 9.14.1 with pinned Fish 4.6.0
+and the moving Fish 4 PPA. It also generates a fixture parity manifest containing
+translation and Fish-syntax success, rendered hash, Fish bytes, diagnostic
+codes, helper count, and declared requirements.
 
-Responsibilities are split as follows:
-
-- `Bakeoff.Selection`
-  - Fixture discovery, selector resolution, metadata-based skipping, and artifact-path derivation.
-- `Bakeoff.Artifacts`
-  - Output-directory preparation and per-fixture artifact paths.
-- `Bakeoff.Process`
-  - External process execution, JSON IO, stderr normalization, and diff artifact emission.
-- `Bakeoff.Benchmark`
-  - Hyperfine plan construction and benchmark execution/loading.
-- `Bakeoff.Execution.*`
-  - Shake orchestration split into translation, runtime, diff, and shared execution helpers.
-- `Bakeoff.Tools`
-  - Tool preflight, version capture, benchmark warnings, and git metadata.
-- `Bakeoff.Report`
-  - Markdown summary rendering and hyperfine summary loading.
-- `Bakeoff.Runner`
-  - Top-level bake-off setup, preflight messaging, and summary generation.
-
-This keeps `shake`, `aeson`, and other bake-off-only dependencies out of the main `monk` library and CLI targets.
-
-## Verification Gates
-
-The refactor is considered healthy when all of the following hold:
-
-- `cabal build all`
-- `MONK_INTEGRATION=1 cabal test`
-- `cabal run monk-bakeoff -- --compatible --no-benchmark ...`
-- one full local `monk-bakeoff` run with metadata-based skips respected
-
-As of 2026-04-20, this architecture pass satisfies the build/test/lint gates on the current machine; bake-off tool preflight is also verified for invalid explicit paths.
+`shellcheck-syntax-inventory.md` records the explicit support or scope decision
+for ShellCheck nodes at the Bash input boundary.

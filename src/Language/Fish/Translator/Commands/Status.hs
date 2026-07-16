@@ -49,7 +49,7 @@ import Language.Fish.Translator.Variables.ProcessSubst (procSubOutRedirectComman
 import ShellCheck.AST
 import Prelude hiding (gets)
 
-data StatusLowering
+data StatusPlan
   = StatusCommand (FishCommand TStatus)
   | StatusUnsupported Text
 
@@ -79,11 +79,11 @@ translateTokensToStatusCmdM tokens =
 
 translateTokenToStatusCmdM :: Token -> TranslateM (FishCommand TStatus)
 translateTokenToStatusCmdM tok = do
-  lowering <- translateTokenToStatusLoweringM tok
-  statusLoweringCommand lowering
+  plan <- translateTokenToStatusPlanM tok
+  lowerStatusPlan plan
 
-translateTokenToStatusLoweringM :: Token -> TranslateM StatusLowering
-translateTokenToStatusLoweringM tok =
+translateTokenToStatusPlanM :: Token -> TranslateM StatusPlan
+translateTokenToStatusPlanM tok =
   case tok of
     T_SimpleCommand _ assignments cmdToks -> do
       locals <- gets (localVars . context)
@@ -125,19 +125,23 @@ translateTokenToStatusLoweringM tok =
     T_OrIf _ l r ->
       StatusCommand <$> translateStatusConjunction ConjOr l r
     T_Annotation _ _ inner ->
-      translateTokenToStatusLoweringM inner
+      translateTokenToStatusPlanM inner
+    T_Include _ inner ->
+      translateTokenToStatusPlanM inner
+    T_SourceCommand _ original _ ->
+      translateTokenToStatusPlanM original
     _ ->
       pure (StatusUnsupported (unsupportedStatusMessage tok))
 
-statusLoweringCommand :: StatusLowering -> TranslateM (FishCommand TStatus)
-statusLoweringCommand = \case
+lowerStatusPlan :: StatusPlan -> TranslateM (FishCommand TStatus)
+lowerStatusPlan = \case
   StatusCommand cmd -> pure cmd
   StatusUnsupported msg -> do
     unsupported UnsupportedConstruct (Just msg)
     pure falseStatusCommand
 
-statusLoweringMaybeCommand :: StatusLowering -> TranslateM (Maybe (FishCommand TStatus))
-statusLoweringMaybeCommand = \case
+lowerStatusPlanMaybe :: StatusPlan -> TranslateM (Maybe (FishCommand TStatus))
+lowerStatusPlanMaybe = \case
   StatusCommand cmd -> pure (Just cmd)
   StatusUnsupported _ -> pure Nothing
 
@@ -158,7 +162,7 @@ statusTokenDescription = \case
   T_CoProcBody {} -> "coprocess body (coproc)"
   T_Backgrounded {} -> "background job"
   T_Script {} -> "script"
-  other -> T.pack (show other)
+  _ -> "unknown ShellCheck token"
 
 translatePipelineToStatusM :: [Token] -> [Token] -> TranslateM (FishCommand TStatus)
 translatePipelineToStatusM bang cmds = do
@@ -176,7 +180,7 @@ translatePipelineToStatusM bang cmds = do
 
 translateTokenToMaybeStatusCmdM :: Token -> TranslateM (Maybe (FishCommand TStatus))
 translateTokenToMaybeStatusCmdM token =
-  translateTokenToStatusLoweringM token >>= statusLoweringMaybeCommand
+  translateTokenToStatusPlanM token >>= lowerStatusPlanMaybe
 
 stmtToStatusCommand :: FishStatement -> FishCommand TStatus
 stmtToStatusCommand stmt =

@@ -5,7 +5,9 @@ module Unit.Bakeoff
   )
 where
 
-import Bakeoff.Benchmark (makeBenchmarkPlan)
+import Bakeoff.Artifacts (FixtureArtifacts (faMonkFish), fixtureArtifacts)
+import Bakeoff.Benchmark (makeBenchmarkPlan, runtimeEntryHasValidSyntax)
+import Bakeoff.Execution.Runtime (runRuntimeBenchmarkEntry)
 import Bakeoff.Fixture (FixtureMetadata (..))
 import Bakeoff.Report (renderSummaryMarkdown)
 import Bakeoff.Selection
@@ -43,9 +45,11 @@ import System.Directory
   ( createDirectory,
     createDirectoryIfMissing,
     doesDirectoryExist,
+    findExecutable,
     removeDirectoryRecursive,
     removeFile,
   )
+import System.Environment (getEnvironment)
 import System.IO qualified as IO
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -97,7 +101,7 @@ unitBakeoffTests =
         case filter ((== helloRel) . specRelativePath) fixtures of
           [fixture] -> specSelectionSources fixture @?= [SelectionCompatible compatibleList]
           other -> H.assertFailure ("expected hello-world compatible fixture once, got " <> show (length other)),
-      H.testCase "makeBenchmarkPlan excludes skipped fixtures" $ do
+      H.testCase "makeBenchmarkPlan excludes skipped and failed translations from runtime measurements" $ do
         cwd <- PathIO.getCurrentDir
         benchmarkRel <- parseRelFile "benchmark/fixtures/small.bash"
         integrationRel <- parseRelFile "test/fixtures/integration/source-recursive.bash"
@@ -125,6 +129,10 @@ unitBakeoffTests =
                   specArtifactDir = integrationArtifactDir,
                   specSkipReason = Just (SkipMissingPrereqs ["missing-tool"])
                 }
+            failedFixture =
+              skippedFixture
+                { specSkipReason = Nothing
+                }
             tools =
               MkResolvedTools
                 { toolsMonkExecutable = integrationPath,
@@ -135,9 +143,69 @@ unitBakeoffTests =
                   toolsFishVersion = MkToolVersion "unknown",
                   toolsHyperfineVersion = Nothing
                 }
-            plan = makeBenchmarkPlan [benchmarkFixture, skippedFixture] tools
-        benchmarkAllFixtures plan @?= [benchmarkPath]
-        benchmarkFixtures plan @?= [benchmarkPath],
+        benchmarkArtifacts <- fixtureArtifacts (sampleBakeoffConfig cwd True) benchmarkFixture
+        skippedArtifacts <- fixtureArtifacts (sampleBakeoffConfig cwd True) skippedFixture
+        failedArtifacts <- fixtureArtifacts (sampleBakeoffConfig cwd True) failedFixture
+        let plan =
+              makeBenchmarkPlan
+                (sampleBakeoffConfig cwd True)
+                [ (benchmarkFixture, benchmarkArtifacts, sampleTranslationReport CommandSucceeded),
+                  (skippedFixture, skippedArtifacts, sampleTranslationReport CommandSkipped),
+                  (failedFixture, failedArtifacts, sampleTranslationReport CommandFailed)
+                ]
+                tools
+        benchmarkAllFixtures plan @?= [benchmarkPath, integrationPath]
+        benchmarkFixtures plan @?= [benchmarkPath]
+        benchmarkAllRuntime plan
+          @?= [ MkRuntimeBenchmarkEntry
+                  { runtimeBenchmarkBashPath = benchmarkPath,
+                    runtimeBenchmarkFishPath = faMonkFish benchmarkArtifacts,
+                    runtimeBenchmarkArgs = [],
+                    runtimeBenchmarkMode = ShellRunSource,
+                    runtimeBenchmarkStdin = ""
+                  }
+              ]
+        benchmarkRuntimeFixtures plan @?= benchmarkAllRuntime plan,
+      H.testCase "runtime benchmark accepts intentional nonzero exits but rejects a missing generated script" $ do
+        cwd <- PathIO.getCurrentDir
+        bashPath <- repoFile "test/fixtures/integration/stdout-stderr-exit.bash"
+        fishPath <- repoFile "app/Main.hs"
+        processEnv <- getEnvironment
+        let missingFish = cwd </> unsafeRelFile "missing-generated.fish"
+            entry =
+              MkRuntimeBenchmarkEntry
+                { runtimeBenchmarkBashPath = bashPath,
+                  runtimeBenchmarkFishPath = missingFish,
+                  runtimeBenchmarkArgs = [],
+                  runtimeBenchmarkMode = ShellRunExec,
+                  runtimeBenchmarkStdin = ""
+                }
+        bashCompleted <- runRuntimeBenchmarkEntry RuntimeBash fishPath 5 processEnv entry
+        fishCompleted <- runRuntimeBenchmarkEntry RuntimeFish fishPath 5 processEnv entry
+        H.assertBool "intentional Bash nonzero exit was treated as an infrastructure failure" bashCompleted
+        H.assertBool "missing generated Fish script was accepted" (not fishCompleted),
+      H.testCase "runtime benchmark syntax preflight rejects malformed generated Fish" $ do
+        withTempDir "monk-runtime-syntax" $ \tmpDir -> do
+          bashRel <- parseRelFile "valid.bash"
+          fishRel <- parseRelFile "invalid.fish"
+          let bashPath = tmpDir </> bashRel
+              fishScriptPath = tmpDir </> fishRel
+          TIO.writeFile (toFilePath bashPath) "exit 7\n"
+          TIO.writeFile (toFilePath fishScriptPath) "if true\n"
+          fishExecutable <-
+            findExecutable "fish" >>= \case
+              Nothing -> H.assertFailure "fish not found" >> unreachable
+              Just path -> PathIO.resolveFile' path
+          let entry =
+                MkRuntimeBenchmarkEntry
+                  { runtimeBenchmarkBashPath = bashPath,
+                    runtimeBenchmarkFishPath = fishScriptPath,
+                    runtimeBenchmarkArgs = [],
+                    runtimeBenchmarkMode = ShellRunExec,
+                    runtimeBenchmarkStdin = ""
+                  }
+          syntaxValid <- runtimeEntryHasValidSyntax fishExecutable entry
+          H.assertBool "malformed generated Fish entered the runtime benchmark" (not syntaxValid),
       H.testCase "renderSummaryMarkdown reports aggregated statuses and mismatches" $ do
         cwd <- PathIO.getCurrentDir
         fixturePath <- repoFile "test/fixtures/integration/source-recursive.bash"
@@ -188,12 +256,16 @@ unitBakeoffTests =
                 { translationTool = ToolMonk,
                   translationStatus = CommandSucceeded,
                   translationExitCode = Just 0,
+                  translationErrorCount = 0,
                   translationWarningCount = 0,
                   translationNotesCount = 0,
-                  translationHighWarnings = 0,
-                  translationMediumWarnings = 0,
-                  translationLowWarnings = 0,
-                  translationConfidenceScore = Just 100,
+                  translationReviewRisk = Just "clean",
+                  translationInputBytes = Just 10,
+                  translationOutputBytes = Just 12,
+                  translationExpansionRatio = Just 1.2,
+                  translationHelperBytes = Just 0,
+                  translationHelperInvocations = 0,
+                  translationExternalRequirements = [],
                   translationOutputPath = Nothing,
                   translationStderrPath = Nothing,
                   translationErrorMessage = Nothing
@@ -203,12 +275,16 @@ unitBakeoffTests =
                 { translationTool = ToolBabelfish,
                   translationStatus = CommandFailed,
                   translationExitCode = Just 1,
+                  translationErrorCount = 1,
                   translationWarningCount = 0,
                   translationNotesCount = 0,
-                  translationHighWarnings = 0,
-                  translationMediumWarnings = 0,
-                  translationLowWarnings = 0,
-                  translationConfidenceScore = Nothing,
+                  translationReviewRisk = Just "unsafe",
+                  translationInputBytes = Just 10,
+                  translationOutputBytes = Nothing,
+                  translationExpansionRatio = Nothing,
+                  translationHelperBytes = Nothing,
+                  translationHelperInvocations = 0,
+                  translationExternalRequirements = [],
                   translationOutputPath = Nothing,
                   translationStderrPath = Nothing,
                   translationErrorMessage = Just "parse error"
@@ -228,10 +304,26 @@ unitBakeoffTests =
                   fixtureReportBabelfishRuntime = Nothing,
                   fixtureReportDiff = Nothing
                 }
-            summary = renderSummaryMarkdown meta [report] []
+            runtimeBenchmark =
+              MkHyperfineSummary
+                { hyperfineTitle = "Runtime All Fixtures",
+                  hyperfineJsonPath = fixturePath,
+                  hyperfineMarkdownPath = fixturePath,
+                  hyperfineResults =
+                    [ MkHyperfineResult
+                        { hyperfineCommand = "generated-fish",
+                          hyperfineMean = 0.012,
+                          hyperfineMedian = 0.01,
+                          hyperfineStddev = 0.002
+                        }
+                    ]
+                }
+            summary = renderSummaryMarkdown meta [report] [runtimeBenchmark]
         assertContains summary "- Babelfish translation: succeeded=0, failed=1, timed_out=0, skipped=0"
         assertContains summary "- Fixtures with any runtime diff: 1"
-        assertContains summary "- `test/fixtures/integration/source-recursive.bash`: babelfish translation failed",
+        assertContains summary "- `test/fixtures/integration/source-recursive.bash`: babelfish translation failed"
+        assertContains summary "### Runtime All Fixtures"
+        assertContains summary "generated-fish: median=0.010s, mean=0.012s, stddev=0.002s",
       H.testCase "renderToolPreflightFailure gives actionable missing-tool guidance" $ do
         let failure =
               MkToolPreflightFailure
@@ -312,6 +404,27 @@ sampleBakeoffConfig cwd benchmarksEnabled =
       bakeoffFishPathHint = Nothing,
       bakeoffHyperfinePathHint = Nothing,
       bakeoffBabelfishVersionOverride = Nothing
+    }
+
+sampleTranslationReport :: CommandStatus -> TranslationReport
+sampleTranslationReport status =
+  MkTranslationReport
+    { translationTool = ToolMonk,
+      translationStatus = status,
+      translationExitCode = Nothing,
+      translationErrorCount = 0,
+      translationWarningCount = 0,
+      translationNotesCount = 0,
+      translationReviewRisk = Nothing,
+      translationInputBytes = Nothing,
+      translationOutputBytes = Nothing,
+      translationExpansionRatio = Nothing,
+      translationHelperBytes = Nothing,
+      translationHelperInvocations = 0,
+      translationExternalRequirements = [],
+      translationOutputPath = Nothing,
+      translationStderrPath = Nothing,
+      translationErrorMessage = Nothing
     }
 
 unsafeAbsDir :: FilePath -> Path Abs Dir

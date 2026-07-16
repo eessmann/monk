@@ -33,6 +33,7 @@ tokenHasExpansion = \case
   T_DoubleQuoted _ parts -> wordHasExpansion parts
   T_DollarBraced {} -> True
   T_DollarArithmetic {} -> True
+  T_DollarBracket {} -> True
   T_Arithmetic {} -> True
   T_DollarExpansion {} -> True
   T_Backticked {} -> True
@@ -46,6 +47,7 @@ wordHasExpansion = any isExpansionPart
     isExpansionPart = \case
       T_DollarBraced {} -> True
       T_DollarArithmetic {} -> True
+      T_DollarBracket {} -> True
       T_Arithmetic {} -> True
       T_DollarExpansion {} -> True
       T_Backticked {} -> True

@@ -8,6 +8,7 @@ module Language.Fish.Translator.Control
     translateSelectExpression,
     translateCondTokens,
     translateCondTokensM,
+    translateCondTokensWith,
     negateJobList,
     toNonEmptyStmtList,
   )
@@ -15,7 +16,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.Translator.Commands (translateTokensToStatusCmd, translateTokensToStatusCmdM)
+import Language.Fish.Translator.Commands (stmtToStatusCommand, translateTokensToStatusCmd, translateTokensToStatusCmdM)
 import Language.Fish.Translator.Hoist (Hoisted (..), beginIfNeeded)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM, toPairM)
 import Language.Fish.Translator.Monad (TranslateM, withFunctionScope)
@@ -25,7 +26,7 @@ import Language.Fish.Translator.Statement
     noteBestEffortSubshell,
     toNonEmptyStmtList,
   )
-import Language.Fish.Translator.Token (tokenHasExpansion, wordHasExpansion)
+import Language.Fish.Translator.Token (stripSeparatorTokens, tokenHasExpansion, wordHasExpansion)
 import Language.Fish.Translator.Types
 import Language.Fish.Translator.Variables
   ( patternExprFromToken,
@@ -50,7 +51,7 @@ translateIfExpression translateStmt conditionBranches elseBranch = do
         Nothing -> Begin (Stmt (Command "true" []) NE.:| []) []
     translateIf' ((condTokens, thenTokens) : rest) elseStmts =
       do
-        condition <- translateCondTokensM condTokens
+        condition <- translateCondTokensWith translateStmt condTokens
         thenBlock <- mapM translateStmt thenTokens
         nestedElse <- translateIf' rest elseStmts
         let elseBlock = [Stmt nestedElse]
@@ -211,6 +212,40 @@ translateCondTokensM tokens = do
           pure (jobListFromStatus arithCmd)
         _ -> pure (jobListFromStatus cmd)
     _ -> pure (jobListFromStatus cmd)
+
+translateCondTokensWith :: (Token -> TranslateM FishStatement) -> [Token] -> TranslateM FishJobList
+translateCondTokensWith translateStmt tokens = do
+  statements <- mapM translateConditionToken (stripSeparatorTokens tokens)
+  let statusStatement =
+        case statements of
+          [] -> Stmt (Command "true" [])
+          [single] -> single
+          multiple -> StmtList multiple
+  pure (jobListFromStatus (stmtToStatusCommand statusStatement))
+  where
+    translateConditionToken token
+      | containsStructuralCompound token = translateStmt token
+      | otherwise = Stmt <$> translateTokensToStatusCmdM [token]
+
+containsStructuralCompound :: Token -> Bool
+containsStructuralCompound = \case
+  T_CaseExpression {} -> True
+  T_IfExpression {} -> True
+  T_WhileExpression {} -> True
+  T_UntilExpression {} -> True
+  T_ForIn {} -> True
+  T_SelectIn {} -> True
+  T_Function {} -> True
+  T_Backgrounded {} -> True
+  T_AndIf _ left right -> containsStructuralCompound left || containsStructuralCompound right
+  T_OrIf _ left right -> containsStructuralCompound left || containsStructuralCompound right
+  T_Banged _ inner -> containsStructuralCompound inner
+  T_Pipeline _ _ commands -> any containsStructuralCompound commands
+  T_Redirecting _ _ inner -> containsStructuralCompound inner
+  T_Annotation _ _ inner -> containsStructuralCompound inner
+  T_Include _ inner -> containsStructuralCompound inner
+  T_SourceCommand _ original _ -> containsStructuralCompound original
+  _ -> False
 
 findArithmeticToken :: [Token] -> Maybe Token
 findArithmeticToken = goList

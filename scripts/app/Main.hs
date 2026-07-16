@@ -2,8 +2,8 @@
 
 module Main (main) where
 
-import Bakeoff.Runner (runBakeoff, runBenchmarkWorker)
-import Bakeoff.Types (BakeoffConfig (..), BenchmarkSuite (..), FixtureGroup (..), ToolName (..))
+import Bakeoff.Runner (runBakeoff, runBenchmarkWorker, runRuntimeBenchmarkWorker)
+import Bakeoff.Types (BakeoffConfig (..), BenchmarkSuite (..), FixtureGroup (..), RuntimeShell (..), ToolName (..))
 import Data.Time (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
 import Options.Applicative
@@ -15,6 +15,7 @@ import System.Exit qualified as Exit
 data Command
   = Run RawOptions
   | BenchmarkWorker ToolName FilePath BenchmarkSuite
+  | RuntimeBenchmarkWorker RuntimeShell FilePath BenchmarkSuite
 
 data RawOptions = MkRawOptions
   { roOutDir :: Maybe FilePath,
@@ -76,10 +77,18 @@ main = do
         if exitCode == 0
           then ExitSuccess
           else ExitFailure exitCode
+    RuntimeBenchmarkWorker runtimeShell planPath suite -> do
+      resolvedPlanPath <- PathIO.resolveFile' planPath
+      exitCode <- runRuntimeBenchmarkWorker runtimeShell resolvedPlanPath suite
+      Exit.exitWith $
+        if exitCode == 0
+          then ExitSuccess
+          else ExitFailure exitCode
 
 commandParser :: Parser Command
 commandParser =
   benchmarkWorkerParser
+    <|> runtimeBenchmarkWorkerParser
     <|> (Run <$> rawOptionsParser)
 
 rawOptionsParser :: Parser RawOptions
@@ -147,6 +156,36 @@ parseToolName = \case
   "monk" -> Right ToolMonk
   "babelfish" -> Right ToolBabelfish
   other -> Left ("invalid tool: " <> other)
+
+runtimeBenchmarkWorkerParser :: Parser Command
+runtimeBenchmarkWorkerParser =
+  hsubparser
+    ( command
+        "_runtime-benchmark-worker"
+        ( info
+            (RuntimeBenchmarkWorker <$> shellParser <*> planParser <*> suiteParser)
+            (progDesc "Internal generated-runtime hyperfine worker")
+        )
+        <> internal
+    )
+  where
+    shellParser =
+      option
+        (eitherReader parseRuntimeShell)
+        (long "shell" <> metavar "SHELL")
+    planParser =
+      strOption
+        (long "plan" <> metavar "PATH")
+    suiteParser =
+      option
+        (eitherReader parseBenchmarkSuite)
+        (long "suite" <> metavar "SUITE")
+
+parseRuntimeShell :: String -> Either String RuntimeShell
+parseRuntimeShell = \case
+  "bash" -> Right RuntimeBash
+  "fish" -> Right RuntimeFish
+  other -> Left ("invalid runtime shell: " <> other)
 
 parseBenchmarkSuite :: String -> Either String BenchmarkSuite
 parseBenchmarkSuite = \case

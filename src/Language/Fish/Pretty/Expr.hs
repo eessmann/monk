@@ -37,10 +37,17 @@ prettyFishExprWith prettyStmt = go
               <+> "printf"
               <+> escapeFishString ""
           )
+      ExprFileRelative path ->
+        parens
+          ( "path resolve"
+              <+> ( parens ("path dirname" <+> parens "status current-filename")
+                      <> escapeFishString ("/" <> path)
+                  )
+          )
       ExprMath args ->
         parens ("math" <+> "--scale" <+> "0" <+> hsep (map go (NE.toList args)))
       ExprCommandSubst stmts ->
-        "(" <> align (vsep (map prettyStmt (NE.toList stmts))) <> ")"
+        "(" <> nest 2 (vsep (map prettyStmt (NE.toList stmts))) <> ")"
       ExprListLiteral [] -> mempty
       ExprListLiteral xs -> hsep (map go xs)
       ExprListConcat a b -> go a <+> go b
@@ -110,7 +117,7 @@ prettyFishExprWith prettyStmt = go
 -- Escapes relevant characters inside double quotes.
 escapeFishString :: Text -> Doc ann
 escapeFishString s
-  | T.any (`elem` ("\'" :: String)) s = doubleQuoted s
+  | T.any (`elem` ("\\\\'" :: String)) s = doubleQuoted s
   | otherwise = singleQuoted s
   where
     singleQuoted t = "'" <> pretty (escapeSingle t) <> "'"

@@ -1,122 +1,99 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Monk.Diagnostics
-  ( WarningCode (..),
-    WarningSeverity (..),
-    WarningCounts (..),
-    renderParseComment,
-    renderWarning,
-    renderTranslateError,
+  ( DiagnosticCounts (..),
+    renderDiagnostic,
+    renderRuntimeRequirement,
     renderTranslationNotes,
-    summarizeWarnings,
-    confidenceScore,
+    summarizeDiagnostics,
+    reviewRisk,
     translationNoteCount,
-    warningSeverity,
-    warnMessage,
   )
 where
 
-import GHC.Show qualified as GHC
-import Language.Fish.AST (SourcePos (..), SourceRange (..))
+import Language.Fish.DSL (SourcePos (..), SourceRange (..))
 import Monk.Translation.Types
-  ( TranslateError (..),
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
-    warnMessage,
-  )
-import ShellCheck.Interface (Position (..), PositionedComment (..))
 
-data WarningCounts = MkWarningCounts
-  { wcHigh :: Int,
-    wcMedium :: Int,
-    wcLow :: Int
+data DiagnosticCounts = MkDiagnosticCounts
+  { dcErrors :: Int,
+    dcWarnings :: Int,
+    dcNotes :: Int
   }
   deriving stock (Eq, Show)
 
-renderParseComment :: PositionedComment -> Text
-renderParseComment pc =
-  let pos = pcStartPos pc
-      loc = formatPosition pos
-   in loc <> ": " <> toText (GHC.show (pcComment pc))
-
-renderWarning :: Warning -> Text
-renderWarning warning@MkWarning {warnRange = mRange} =
-  case mRange of
-    Nothing -> renderWarningLabel warning <> ": " <> warnMessage warning
-    Just range -> formatRange range <> ": " <> renderWarningLabel warning <> ": " <> warnMessage warning
-
-renderTranslateError :: TranslateError -> Text
-renderTranslateError = \case
-  Unsupported warning@MkWarning {warnRange = mRange} ->
-    case mRange of
-      Nothing -> renderErrorLabel warning <> ": " <> warnMessage warning
-      Just range -> formatRange range <> ": " <> renderErrorLabel warning <> ": " <> warnMessage warning
-  InternalError msg -> "error: " <> msg
-
-renderTranslationNotes :: FilePath -> [Warning] -> [Text]
-renderTranslationNotes path warns =
-  let MkWarningCounts {wcHigh, wcMedium, wcLow} = summarizeWarnings warns
-      total = wcHigh + wcMedium + wcLow
-      score = confidenceScore warns
-      header =
-        "note: " <> toText path <> ": translation confidence " <> show score <> "/100"
-      details =
-        "note: "
-          <> show total
-          <> " warning(s) ("
-          <> show wcHigh
-          <> " high, "
-          <> show wcMedium
-          <> " medium, "
-          <> show wcLow
-          <> " low)"
-      highRisk = "note: high-risk translations present; review recommended"
-      detailLines = [details | total > 0] <> [highRisk | wcHigh > 0]
-   in header : detailLines
-
-summarizeWarnings :: [Warning] -> WarningCounts
-summarizeWarnings =
-  foldl' tally (MkWarningCounts 0 0 0)
+renderDiagnostic :: Diagnostic -> Text
+renderDiagnostic diagnostic =
+  locationPrefix
+    <> severityText (diagnosticSeverity diagnostic)
+    <> "["
+    <> diagnosticCodeText (diagnosticCode diagnostic)
+    <> "]["
+    <> riskText (diagnosticRisk diagnostic)
+    <> "]: "
+    <> diagnosticMessage diagnostic
   where
-    tally counts warn =
-      case warningSeverity warn of
-        WarnHigh -> counts {wcHigh = wcHigh counts + 1}
-        WarnMedium -> counts {wcMedium = wcMedium counts + 1}
-        WarnLow -> counts {wcLow = wcLow counts + 1}
+    locationPrefix = maybe "" ((<> ": ") . formatRange) (diagnosticRange diagnostic)
 
-confidenceScore :: [Warning] -> Int
-confidenceScore warns =
-  let MkWarningCounts {wcHigh, wcMedium, wcLow} = summarizeWarnings warns
-      raw = 100 - (wcHigh * 20) - (wcMedium * 10) - (wcLow * 4)
-   in max 0 (min 100 raw)
+renderRuntimeRequirement :: RuntimeRequirement -> Text
+renderRuntimeRequirement requirement =
+  "note: runtime requirement: "
+    <> runtimeProgramText (requirementProgram requirement)
+    <> " ("
+    <> show (length (requirementUses requirement))
+    <> " uses)"
 
-translationNoteCount :: [Warning] -> Int
+renderTranslationNotes :: FilePath -> [Diagnostic] -> [Text]
+renderTranslationNotes path diagnostics =
+  let MkDiagnosticCounts {dcErrors, dcWarnings, dcNotes} = summarizeDiagnostics diagnostics
+      risk = reviewRisk diagnostics
+      total = dcErrors + dcWarnings + dcNotes
+      summary =
+        "note: "
+          <> toText path
+          <> ": "
+          <> show total
+          <> " diagnostic(s) ("
+          <> show dcErrors
+          <> " error, "
+          <> show dcWarnings
+          <> " warning, "
+          <> show dcNotes
+          <> " note)"
+      riskLine = "note: review risk " <> riskText risk
+   in [summary, riskLine]
+
+summarizeDiagnostics :: [Diagnostic] -> DiagnosticCounts
+summarizeDiagnostics =
+  foldl' tally (MkDiagnosticCounts 0 0 0)
+  where
+    tally counts diagnostic =
+      case diagnosticSeverity diagnostic of
+        DiagnosticError -> counts {dcErrors = dcErrors counts + 1}
+        DiagnosticWarning -> counts {dcWarnings = dcWarnings counts + 1}
+        DiagnosticNote -> counts {dcNotes = dcNotes counts + 1}
+
+reviewRisk :: [Diagnostic] -> ReviewRisk
+reviewRisk = foldl' max Clean . map diagnosticRisk
+
+translationNoteCount :: [Diagnostic] -> Int
 translationNoteCount = length . renderTranslationNotes ""
 
-warningSeverity :: Warning -> WarningSeverity
-warningSeverity = warnSeverity
+severityText :: DiagnosticSeverity -> Text
+severityText = \case
+  DiagnosticError -> "error"
+  DiagnosticWarning -> "warning"
+  DiagnosticNote -> "note"
 
-renderWarningLabel :: Warning -> Text
-renderWarningLabel warning =
-  "warning[" <> warningCodeText (warnCode warning) <> "][" <> warningSeverityText (warnSeverity warning) <> "]"
+riskText :: ReviewRisk -> Text
+riskText = \case
+  Clean -> "clean"
+  Review -> "review"
+  Unsafe -> "unsafe"
 
-renderErrorLabel :: Warning -> Text
-renderErrorLabel warning =
-  "error[" <> warningCodeText (warnCode warning) <> "][" <> warningSeverityText (warnSeverity warning) <> "]"
-
-warningCodeText :: WarningCode -> Text
-warningCodeText = show
-
-warningSeverityText :: WarningSeverity -> Text
-warningSeverityText = \case
-  WarnHigh -> "high"
-  WarnMedium -> "medium"
-  WarnLow -> "low"
-
-formatPosition :: Position -> Text
-formatPosition pos =
-  toText (posFile pos) <> ":" <> show (posLine pos) <> ":" <> show (posColumn pos)
+runtimeProgramText :: RuntimeProgram -> Text
+runtimeProgramText = \case
+  RequiresCommand commandName -> commandName
+  RequiresFishFeature featureName -> "fish:" <> featureName
 
 formatRange :: SourceRange -> Text
 formatRange MkSourceRange {rangeStart = MkSourcePos {..}} =

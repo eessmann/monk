@@ -5,29 +5,17 @@ module Unit.Diagnostics
   )
 where
 
-import Data.Text qualified as T
 import Monk.AST (SourcePos (..), SourceRange (..))
 import Monk.Diagnostics
-  ( WarningCounts (..),
-    confidenceScore,
-    renderTranslateError,
+  ( DiagnosticCounts (..),
+    renderDiagnostic,
+    renderRuntimeRequirement,
     renderTranslationNotes,
-    renderWarning,
-    summarizeWarnings,
+    reviewRisk,
+    summarizeDiagnostics,
     translationNoteCount,
   )
 import Monk.Translation.Types
-  ( TranslateConfig (..),
-    TranslateError (..),
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
-    allWarningCodes,
-    defaultConfig,
-    strictConfig,
-    warnMessage,
-    warningCodeSeverity,
-  )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -38,66 +26,41 @@ unitDiagnosticsTests =
     [ H.testCase "translation config defaults are exported from the public types module" $ do
         strictMode defaultConfig @?= False
         strictMode strictConfig @?= True,
-      H.testCase "warning code severities are owned by the public types module" $ do
-        warningCodeSeverity BestEffortSubshell @?= WarnHigh
-        warningCodeSeverity ReadIssue @?= WarnMedium
-        warningCodeSeverity TrapIssue @?= WarnMedium,
-      H.testCase "all warning codes are listed for contract checks" $ do
-        allWarningCodes
-          @?= [ UnsupportedConstruct,
-                BestEffortSubshell,
-                ExecFdRedirect,
-                BackgroundTracking,
-                SetOptionIssue,
-                ReadIssue,
-                SourceIssue,
-                ProcessSubstitutionIssue,
-                ShoptIgnored,
-                TrapIssue,
-                ShiftIssue,
-                ReadonlyNotEnforced,
-                DeclareIssue,
-                ScopeIssue,
-                UnsetIssue,
-                ForArithmeticIssue,
-                ArithmeticIssue
+      H.testCase "renderDiagnostic includes stable code, risk, and source range" $
+        renderDiagnostic (sampleDiagnostic Review)
+          @?= "spec.sh:3:5: warning[monk.read][review]: read semantics require review",
+      H.testCase "diagnostic summaries and review risk stay aligned" $ do
+        let diagnostics =
+              [ sampleDiagnostic Review,
+                (sampleDiagnostic Unsafe) {diagnosticSeverity = DiagnosticError}
               ]
-        forM_ allWarningCodes $ \code ->
-          H.assertBool
-            ("missing default warning message for " <> show code)
-            (not (T.null (warnMessage (MkWarning code (warningCodeSeverity code) Nothing Nothing)))),
-      H.testCase "warnMessage keeps stable defaults and detail overrides" $ do
-        warnMessage (MkWarning ReadIssue WarnMedium Nothing Nothing)
-          @?= "read semantics may differ between bash and fish"
-        warnMessage (MkWarning ReadIssue WarnMedium (Just "custom read detail") Nothing)
-          @?= "custom read detail"
-        warnMessage (MkWarning ShoptIgnored WarnHigh Nothing Nothing)
-          @?= "shopt has no fish equivalent; ignored",
-      H.testCase "renderWarning includes the source range prefix" $
-        renderWarning (sampleWarning ReadIssue Nothing)
-          @?= "spec.sh:3:5: warning[ReadIssue][medium]: read semantics may differ between bash and fish",
-      H.testCase "renderTranslateError includes the source range prefix" $
-        renderTranslateError (Unsupported (sampleWarning UnsupportedConstruct (Just "Coprocess (coproc)")))
-          @?= "spec.sh:3:5: error[UnsupportedConstruct][high]: Coprocess (coproc)",
-      H.testCase "warning summaries and notes stay aligned" $ do
-        let warns = [sampleWarning BestEffortSubshell Nothing, sampleWarning ReadIssue Nothing]
-        summarizeWarnings warns @?= MkWarningCounts {wcHigh = 1, wcMedium = 1, wcLow = 0}
-        confidenceScore warns @?= 70
-        renderTranslationNotes "spec.sh" warns
-          @?= [ "note: spec.sh: translation confidence 70/100",
-                "note: 2 warning(s) (1 high, 1 medium, 0 low)",
-                "note: high-risk translations present; review recommended"
+        summarizeDiagnostics diagnostics @?= MkDiagnosticCounts {dcErrors = 1, dcWarnings = 1, dcNotes = 0}
+        reviewRisk diagnostics @?= Unsafe
+        renderTranslationNotes "spec.sh" diagnostics
+          @?= [ "note: spec.sh: 2 diagnostic(s) (1 error, 1 warning, 0 note)",
+                "note: review risk unsafe"
               ]
-        translationNoteCount warns @?= 3
+        translationNoteCount diagnostics @?= 2,
+      H.testCase "runtime requirements render stable program names and use counts" $
+        renderRuntimeRequirement
+          ( MkRuntimeRequirement
+              (RequiresCommand "python3")
+              ( MkRequirementUse "exact delimiter read" sampleRangeMaybe
+                  :| [MkRequirementUse "array read" Nothing]
+              )
+          )
+          @?= "note: runtime requirement: python3 (2 uses)"
     ]
 
-sampleWarning :: WarningCode -> Maybe Text -> Warning
-sampleWarning code detail =
-  MkWarning
-    { warnCode = code,
-      warnSeverity = warningCodeSeverity code,
-      warnDetail = detail,
-      warnRange = Just sampleRange
+sampleDiagnostic :: ReviewRisk -> Diagnostic
+sampleDiagnostic risk =
+  MkDiagnostic
+    { diagnosticCode = MkDiagnosticCode "monk.read",
+      diagnosticPhase = PhaseTranslate,
+      diagnosticSeverity = DiagnosticWarning,
+      diagnosticRisk = risk,
+      diagnosticMessage = "read semantics require review",
+      diagnosticRange = Just sampleRange
     }
 
 sampleRange :: SourceRange
@@ -106,3 +69,6 @@ sampleRange =
     { rangeStart = MkSourcePos {srcFile = "spec.sh", srcLine = 3, srcColumn = 5},
       rangeEnd = MkSourcePos {srcFile = "spec.sh", srcLine = 3, srcColumn = 12}
     }
+
+sampleRangeMaybe :: Maybe SourceRange
+sampleRangeMaybe = Just sampleRange

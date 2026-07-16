@@ -7,10 +7,8 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
-import Language.Fish.DSL.Lower (lowerScript)
 import Monk.AST hiding (stdout)
 import Monk.AST qualified as AST
-import Monk.Translation (renderFish)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import TestSupport
@@ -55,6 +53,17 @@ unitPrettyTests =
         let fishScript = script [stmt (eval (str "echo hi"))]
             actual = renderDsl fishScript
         actual @?= "eval 'echo hi'",
+      H.testCase "Backslash-terminated literals remain valid Fish" $ do
+        let fishScript = script [stmt (command "echo" [arg (str "\\\\[AMD\\")])]
+            actual = renderDsl fishScript
+        actual @?= "echo \"\\\\\\\\[AMD\\\\\"",
+      H.testCase "Multiline command substitutions use bounded indentation" $ do
+        let inner =
+              stmt (command "first" [])
+                NE.:| [stmt (command "second" [])]
+            fishScript = script [stmt (command "very_long_command_name" [arg (commandSubst inner)])]
+            actual = renderDsl fishScript
+        actual @?= "very_long_command_name (first\n  second)",
       H.testCase "Read with flags and vars" $ do
         let fishScript = script [stmt (read_ [ReadPrompt "Name:", ReadLocal] ["name"])]
             actual = renderDsl fishScript
@@ -180,4 +189,4 @@ unitPrettyTests =
     ]
 
 renderDsl :: Script -> Text
-renderDsl = renderFish . lowerScript
+renderDsl = renderScript

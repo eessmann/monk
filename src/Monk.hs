@@ -7,8 +7,10 @@
 module Monk
   ( module Monk.Translation,
     module Monk.Diagnostics,
+    module Monk.Output,
   )
 where
 
 import Monk.Diagnostics
+import Monk.Output
 import Monk.Translation

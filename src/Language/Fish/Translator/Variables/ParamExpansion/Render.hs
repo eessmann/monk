@@ -38,7 +38,7 @@ import Language.Fish.Translator.Variables.ParamExpansion.Parse
   ( parseSimpleVar,
   )
 import Language.Fish.Translator.Variables.ParamExpansion.Types
-import ShellCheck.AST (Token)
+import ShellCheck.AST
 
 renderParamExpansion :: ([Token] -> FishExpr (TList TStr)) -> ParamExpansion t -> FishExpr t
 renderParamExpansion tokensToListExpr = \case
@@ -86,7 +86,7 @@ renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
       let condFn = condFrom cond
           varName = specialVarName name
       flags <- scopeFlagsForVarM varName
-      MkHoisted pre defaultExpr <- tokensToListExprM' rest
+      MkHoisted pre defaultExpr <- tokensToListExprM' (paramOperatorWord rest)
       let setStmt = Stmt (Set flags varName defaultExpr)
           thenStmt = Stmt (Command "true" [])
           elseStmts = pre <> [setStmt]
@@ -95,7 +95,7 @@ renderParamCoreWithPrelude tokensToListExpr tokensToListExprM = \case
     renderErrorDefault tokensToListExprM' name cond rest = do
       let condFn = condFrom cond
           varName = specialVarName name
-      MkHoisted pre errExpr <- tokensToListExprM' rest
+      MkHoisted pre errExpr <- tokensToListExprM' (paramOperatorWord rest)
       let errStmt =
             Stmt
               ( Command
@@ -117,13 +117,17 @@ renderParamOperator tokensToListExpr name (MkParamOperator kind cond rest) =
         CondSet -> varSetCond
    in case kind of
         OpDefault ->
-          translateDefaultExpansionWith condFn name (tokensToListExpr rest)
+          translateDefaultExpansionWith condFn name (tokensToListExpr (paramOperatorWord rest))
         OpAssign ->
-          translateAssignDefaultExpansionWith condFn name (tokensToListExpr rest)
+          translateAssignDefaultExpansionWith condFn name (tokensToListExpr (paramOperatorWord rest))
         OpError ->
-          translateErrorExpansionWith condFn name (tokensToListExpr rest)
+          translateErrorExpansionWith condFn name (tokensToListExpr (paramOperatorWord rest))
         OpAlt ->
-          translateAltExpansionWith condFn name (tokensToListExpr rest)
+          translateAltExpansionWith condFn name (tokensToListExpr (paramOperatorWord rest))
+
+paramOperatorWord :: [Token] -> [Token]
+paramOperatorWord [] = []
+paramOperatorWord parts = [T_NormalWord (Id 0) parts]
 
 renderSimpleVar :: ParamSimple -> FishExpr (TList TStr)
 renderSimpleVar (MkParamSimple name idx) =
@@ -142,7 +146,17 @@ renderSimpleVar (MkParamSimple name idx) =
     _ -> ExprListLiteral []
 
 translateSimpleVar :: Token -> FishExpr (TList TStr)
-translateSimpleVar = renderSimpleVar . parseSimpleVar
+translateSimpleVar tok =
+  case tok of
+    T_ParamSubSpecialChar _ special
+      | not (isBashSpecialParameter (toText special)) ->
+          ExprListLiteral [ExprLiteral (toText special)]
+    _ -> renderSimpleVar (parseSimpleVar tok)
+
+isBashSpecialParameter :: Text -> Bool
+isBashSpecialParameter name =
+  name `elem` ["*", "@", "#", "?", "-", "$", "!", "_"]
+    || (not (T.null name) && T.all isDigit name)
 
 translateSimpleVarM :: Token -> TranslateM (FishExpr (TList TStr))
 translateSimpleVarM tok = do

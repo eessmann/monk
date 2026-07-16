@@ -14,6 +14,7 @@ module Language.Fish.Translator.Commands
     translateTokensToStatusCmdM,
     translateTokenToStatusCmdM,
     translateProcessSubstitutionConsumerM,
+    stmtToStatusCommand,
     translateCommandTokensToStatus,
     isSingleBracketTest,
     toNonEmptyStmtList,
@@ -39,7 +40,8 @@ import Language.Fish.Translator.Commands.SimpleCommand
     translateSimpleCommandM,
   )
 import Language.Fish.Translator.Commands.Status
-  ( translateProcessSubstitutionConsumerM,
+  ( stmtToStatusCommand,
+    translateProcessSubstitutionConsumerM,
     translateTokenToStatusCmd,
     translateTokenToStatusCmdM,
     translateTokensToStatusCmd,

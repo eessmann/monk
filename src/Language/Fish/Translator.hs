@@ -30,7 +30,8 @@ import Language.Fish.Translator.Builtins
     translateUnsetCommand,
   )
 import Language.Fish.Translator.Commands
-  ( translateProcessSubstitutionConsumerM,
+  ( stmtToStatusCommand,
+    translateProcessSubstitutionConsumerM,
     translateSimpleCommandM,
     translateTokenToStatusCmdM,
   )
@@ -51,9 +52,11 @@ import Language.Fish.Translator.Monad
     WarningCode (..),
     addWarning,
     isErrexitEnabled,
+    isErrexitGuardSuppressed,
     preambleStatements,
     runTranslateWithPositions,
     unsupportedStmt,
+    withErrexitGuardSuppressed,
     withTokenRange,
   )
 import Language.Fish.Translator.Pipeline
@@ -179,21 +182,23 @@ translateToken token =
       T_Pipeline _ bang cmds ->
         case (bang, cmds) of
           ([], [single]) -> translateToken single
-          _ -> FIO.translatePipelineM bang cmds
+          _ -> FIO.translatePipelineM translateToken bang cmds
+      T_Banged _ inner ->
+        Stmt . Not . stmtToStatusCommand <$> withErrexitGuardSuppressed (translateToken inner)
       T_IfExpression _ conditionBranches elseBranch ->
         Control.translateIfExpression translateToken conditionBranches elseBranch
       T_WhileExpression _ cond body -> do
         bodyStmts <- mapM translateToken body
         case Control.toNonEmptyStmtList bodyStmts of
           Just neBody -> do
-            condJob <- Control.translateCondTokensM cond
+            condJob <- Control.translateCondTokensWith translateToken cond
             pure (Stmt (While condJob neBody []))
           Nothing -> pure (Comment "Skipped empty while loop body")
       T_UntilExpression _ cond body -> do
         bodyStmts <- mapM translateToken body
         case Control.toNonEmptyStmtList bodyStmts of
           Just neBody -> do
-            condJob <- Control.translateCondTokensM cond
+            condJob <- Control.translateCondTokensWith translateToken cond
             pure (Stmt (While (Control.negateJobList condJob) neBody []))
           Nothing -> pure (Comment "Skipped empty until loop body")
       T_Arithmetic _ exprTok -> do
@@ -214,19 +219,21 @@ translateToken token =
           Just neBody -> translateSubshellStatement neBody
           Nothing -> unsupportedStmt BestEffortSubshell Nothing
       T_AndIf _ l r -> do
-        lp <- pipelineOf <$> translateTokenToStatusCmdM l
-        rp <- pipelineOf <$> translateTokenToStatusCmdM r
+        lp <- pipelineOf . stmtToStatusCommand <$> withErrexitGuardSuppressed (translateToken l)
+        rp <- pipelineOf . stmtToStatusCommand <$> withErrexitGuardSuppressed (translateToken r)
         conj <- wrapErrexitOnConjunction (jobConjunctionFromPipelines ConjAnd lp rp)
         pure (Stmt (JobConj conj))
       T_OrIf _ l r -> do
-        lp <- pipelineOf <$> translateTokenToStatusCmdM l
-        rp <- pipelineOf <$> translateTokenToStatusCmdM r
+        lp <- pipelineOf . stmtToStatusCommand <$> withErrexitGuardSuppressed (translateToken l)
+        rp <- pipelineOf . stmtToStatusCommand <$> withErrexitGuardSuppressed (translateToken r)
         conj <- wrapErrexitOnConjunction (jobConjunctionFromPipelines ConjOr lp rp)
         pure (Stmt (JobConj conj))
       T_Backgrounded _ bgToken -> do
-        cmd <- translateTokenToStatusCmdM bgToken
-        instrumentBackgroundStatusCmd cmd
+        statement <- withErrexitGuardSuppressed (translateToken bgToken)
+        instrumentBackgroundStatusCmd (stmtToStatusCommand statement)
       T_Annotation _ _ inner -> translateToken inner
+      T_Include _ inner -> translateToken inner
+      T_SourceCommand _ original _ -> translateToken original
       T_ForIn _ var tokens body -> do
         argParts <- mapM translateTokenToListExprM tokens
         let MkHoisted pre args = sequenceA argParts
@@ -275,7 +282,23 @@ translateToken token =
               else case Control.toNonEmptyStmtList (preRedirs <> [attached]) of
                 Just body -> pure (Stmt (Begin body []))
                 Nothing -> pure (Comment "Skipped empty redirection block")
-      _ -> unsupportedStmt UnsupportedConstruct (Just ("Skipped token at statement level: " <> T.pack (show token)))
+      _ -> unsupportedStmt UnsupportedConstruct (Just ("Unsupported statement: " <> statementTokenDescription token))
+
+statementTokenDescription :: Token -> Text
+statementTokenDescription = \case
+  T_Condition {} -> "test condition"
+  T_Extglob {} -> "extended glob"
+  T_CaseExpression {} -> "case expression"
+  T_IfExpression {} -> "if expression"
+  T_WhileExpression {} -> "while expression"
+  T_UntilExpression {} -> "until expression"
+  T_ForIn {} -> "for loop"
+  T_SelectIn {} -> "select loop"
+  T_Function {} -> "function definition"
+  T_CoProc {} -> "coprocess"
+  T_CoProcBody {} -> "coprocess body"
+  T_BatsTest {} -> "Bats test"
+  _ -> "unknown ShellCheck token"
 
 wrapStmtList :: [FishStatement] -> FishStatement
 wrapStmtList [stmt] = stmt
@@ -313,8 +336,9 @@ fishLoopVarName = \case
 wrapErrexitOnConjunction :: FishJobConjunction -> TranslateM FishJobConjunction
 wrapErrexitOnConjunction conj = do
   enabled <- isErrexitEnabled
+  suppressed <- isErrexitGuardSuppressed
   inCmdSubst <- gets (inCommandSubst . context)
-  if not enabled || inCmdSubst
+  if not enabled || suppressed || inCmdSubst
     then pure conj
     else do
       let conts = jcContinuations conj

@@ -22,15 +22,14 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.DSL qualified as DSL
-import Language.Fish.DSL.Internal qualified as DSLI
 import Language.Fish.DSL.Lower qualified as Lower
 import Language.Fish.Translator.Types
 
 argExpr :: (DSL.ArgumentType t, Typeable t) => FishExpr t -> DSL.Arg
-argExpr = DSLI.UnsafeArgExpr . DSLI.UnsafeExpr
+argExpr = DSL.arg
 
 argRedirect :: Redirect -> DSL.Arg
-argRedirect = DSLI.UnsafeArgRedirect
+argRedirect = RedirectVal
 
 renderArg :: DSL.Arg -> ExprOrRedirect
 renderArg = Lower.lowerArg
@@ -40,8 +39,8 @@ renderArgs = map renderArg
 
 statementToScript :: FishStatement -> DSL.Script
 statementToScript = \case
-  StmtList stmts -> DSLI.UnsafeScript (map DSLI.UnsafeStmt stmts)
-  stmt -> DSLI.UnsafeScript [DSLI.UnsafeStmt stmt]
+  StmtList stmts -> DSL.script stmts
+  stmt -> DSL.script [stmt]
 
 attachRedirectsToCommand :: [ExprOrRedirect] -> FishCommand TStatus -> FishCommand TStatus
 attachRedirectsToCommand redirs cmd =
@@ -99,7 +98,7 @@ toRawBlock :: DSL.Block -> NonEmpty FishStatement
 toRawBlock = Lower.lowerBlock
 
 toRawPipeline :: DSL.Pipeline -> FishJobPipeline
-toRawPipeline = DSLI.lowerPipelineValue
+toRawPipeline = id
 
 toRawScript :: DSL.Script -> [FishStatement]
 toRawScript = Lower.lowerScript

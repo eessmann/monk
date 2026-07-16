@@ -15,7 +15,7 @@ import Language.Fish.Translator.Monad
 
 ensurePipefailHelper :: TranslateM ()
 ensurePipefailHelper =
-  ensureHelperScript HelperPipefail (DSL.script [pipefailHelper])
+  ensureHelperScript HelperPipefail "preserve Bash pipefail status" (DSL.script [pipefailHelper])
 
 pipefailHelper :: DSL.Stmt
 pipefailHelper =

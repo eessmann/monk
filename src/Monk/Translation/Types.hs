@@ -3,154 +3,82 @@
 -- SPDX-License-Identifier: MIT
 -- Maintainer: Erich Essmann <essmanne@gmail.com>
 --
--- Public translation and diagnostics contract types.
+-- Stable public translation, diagnostics, and runtime-requirement types.
 module Monk.Translation.Types
   ( TranslateConfig (..),
     defaultConfig,
     strictConfig,
-    WarningSeverity (..),
-    WarningCode (..),
-    Warning (..),
-    TranslateError (..),
-    allWarningCodes,
-    warningCodeSeverity,
-    warnMessage,
+    DiagnosticCode (..),
+    DiagnosticPhase (..),
+    DiagnosticSeverity (..),
+    ReviewRisk (..),
+    Diagnostic (..),
+    RuntimeProgram (..),
+    RequirementUse (..),
+    RuntimeRequirement (..),
   )
 where
 
-import Language.Fish.AST (SourceRange)
+import Language.Fish.DSL (SourceRange)
 
--- | Configuration flags controlling translation behavior.
 newtype TranslateConfig = MkTranslateConfig
-  { -- | Fail on unsupported constructs.
-    strictMode :: Bool
+  { strictMode :: Bool
   }
   deriving stock (Show, Eq)
 
--- | Default translation settings used by the public API.
 defaultConfig :: TranslateConfig
 defaultConfig = MkTranslateConfig {strictMode = False}
 
--- | Strict translation settings that fail on unsupported constructs.
 strictConfig :: TranslateConfig
 strictConfig = defaultConfig {strictMode = True}
 
-data WarningSeverity
-  = WarnHigh
-  | WarnMedium
-  | WarnLow
-  deriving stock (Eq, Ord, Show)
+newtype DiagnosticCode = MkDiagnosticCode
+  { diagnosticCodeText :: Text
+  }
+  deriving stock (Show, Eq, Ord)
 
-data WarningCode
-  = UnsupportedConstruct
-  | BestEffortSubshell
-  | ExecFdRedirect
-  | BackgroundTracking
-  | SetOptionIssue
-  | ReadIssue
-  | SourceIssue
-  | ProcessSubstitutionIssue
-  | ShoptIgnored
-  | TrapIssue
-  | ShiftIssue
-  | ReadonlyNotEnforced
-  | DeclareIssue
-  | ScopeIssue
-  | UnsetIssue
-  | ForArithmeticIssue
-  | ArithmeticIssue
-  deriving stock (Eq, Ord, Show)
+data DiagnosticPhase
+  = PhaseParse
+  | PhaseTranslate
+  | PhaseSource
+  | PhaseRuntime
+  deriving stock (Show, Eq, Ord)
 
--- | All public warning codes, in constructor order.
-allWarningCodes :: [WarningCode]
-allWarningCodes =
-  [ UnsupportedConstruct,
-    BestEffortSubshell,
-    ExecFdRedirect,
-    BackgroundTracking,
-    SetOptionIssue,
-    ReadIssue,
-    SourceIssue,
-    ProcessSubstitutionIssue,
-    ShoptIgnored,
-    TrapIssue,
-    ShiftIssue,
-    ReadonlyNotEnforced,
-    DeclareIssue,
-    ScopeIssue,
-    UnsetIssue,
-    ForArithmeticIssue,
-    ArithmeticIssue
-  ]
+data DiagnosticSeverity
+  = DiagnosticError
+  | DiagnosticWarning
+  | DiagnosticNote
+  deriving stock (Show, Eq, Ord)
 
--- | Structured warning payload used for surfaced diagnostics and strict errors.
-data Warning = MkWarning
-  { warnCode :: WarningCode,
-    warnSeverity :: WarningSeverity,
-    warnDetail :: Maybe Text,
-    warnRange :: Maybe SourceRange
+data ReviewRisk
+  = Clean
+  | Review
+  | Unsafe
+  deriving stock (Show, Eq, Ord)
+
+data Diagnostic = MkDiagnostic
+  { diagnosticCode :: DiagnosticCode,
+    diagnosticPhase :: DiagnosticPhase,
+    diagnosticSeverity :: DiagnosticSeverity,
+    diagnosticRisk :: ReviewRisk,
+    diagnosticMessage :: Text,
+    diagnosticRange :: Maybe SourceRange
   }
   deriving stock (Show, Eq)
 
--- | Translation errors for unsupported or invalid constructs.
-data TranslateError
-  = Unsupported Warning
-  | InternalError Text
-  deriving stock (Show, Eq)
+data RuntimeProgram
+  = RequiresCommand Text
+  | RequiresFishFeature Text
+  deriving stock (Show, Eq, Ord)
 
-data WarningDetailPolicy
-  = PreferDetail
-  | IgnoreDetail
-
-data WarningDescriptor = MkWarningDescriptor
-  { warningDefaultSeverity :: WarningSeverity,
-    warningDefaultMessage :: Text,
-    warningDetailPolicy :: WarningDetailPolicy
+data RequirementUse = MkRequirementUse
+  { requirementReason :: Text,
+    requirementRange :: Maybe SourceRange
   }
+  deriving stock (Show, Eq, Ord)
 
-warningDescriptor :: WarningCode -> WarningDescriptor
-warningDescriptor = \case
-  UnsupportedConstruct ->
-    MkWarningDescriptor WarnHigh "Unsupported construct" PreferDetail
-  BestEffortSubshell ->
-    MkWarningDescriptor WarnHigh "Subshell does not isolate environment in fish; best-effort translation emitted" IgnoreDetail
-  ExecFdRedirect ->
-    MkWarningDescriptor WarnMedium "exec with file descriptor redirection may require manual adjustment in fish" IgnoreDetail
-  BackgroundTracking ->
-    MkWarningDescriptor WarnHigh "Monk-managed background job IDs are only guaranteed for translated wait; PID-specific uses such as kill $! require manual review" IgnoreDetail
-  SetOptionIssue ->
-    MkWarningDescriptor WarnHigh "Bash set options require manual review" PreferDetail
-  ReadIssue ->
-    MkWarningDescriptor WarnMedium "read semantics may differ between bash and fish" PreferDetail
-  SourceIssue ->
-    MkWarningDescriptor WarnMedium "source command requires manual review" PreferDetail
-  ProcessSubstitutionIssue ->
-    MkWarningDescriptor WarnMedium "process substitution translation requires manual review" PreferDetail
-  ShoptIgnored ->
-    MkWarningDescriptor WarnHigh "shopt has no fish equivalent; ignored" IgnoreDetail
-  TrapIssue ->
-    MkWarningDescriptor WarnMedium "trap handling requires manual review" PreferDetail
-  ShiftIssue ->
-    MkWarningDescriptor WarnMedium "shift translation requires manual review" PreferDetail
-  ReadonlyNotEnforced ->
-    MkWarningDescriptor WarnHigh "readonly/declare -r has no direct fish equivalent; emitted set without enforcing readonly" IgnoreDetail
-  DeclareIssue ->
-    MkWarningDescriptor WarnMedium "declare translation requires manual review" PreferDetail
-  ScopeIssue ->
-    MkWarningDescriptor WarnMedium "scope translation requires manual review" PreferDetail
-  UnsetIssue ->
-    MkWarningDescriptor WarnMedium "unset translation requires manual review" PreferDetail
-  ForArithmeticIssue ->
-    MkWarningDescriptor WarnMedium "arithmetic for-loop translation requires manual review" PreferDetail
-  ArithmeticIssue ->
-    MkWarningDescriptor WarnHigh "arithmetic translation may lose side effects" PreferDetail
-
-warningCodeSeverity :: WarningCode -> WarningSeverity
-warningCodeSeverity = warningDefaultSeverity . warningDescriptor
-
-warnMessage :: Warning -> Text
-warnMessage MkWarning {warnCode, warnDetail} =
-  let descriptor = warningDescriptor warnCode
-   in case (warningDetailPolicy descriptor, warnDetail) of
-        (PreferDetail, Just detail) -> detail
-        _ -> warningDefaultMessage descriptor
+data RuntimeRequirement = MkRuntimeRequirement
+  { requirementProgram :: RuntimeProgram,
+    requirementUses :: NonEmpty RequirementUse
+  }
+  deriving stock (Show, Eq)

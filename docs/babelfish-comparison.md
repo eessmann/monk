@@ -180,14 +180,14 @@ cabal run monk-bakeoff -- --babelfish-version 1.2.1
 
 The runner normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
 It respects fixture sidecar files: `<name>.args`, `<name>.stdin`, `<name>.mode`, `<name>.platforms`, `<name>.prereqs`, and `<name>.recursive`.
-If `hyperfine` is installed, the runner also records CLI timing runs. If it is missing, the runner now emits an explicit preflight note and skips benchmark targets. Configure benchmark runs with:
+If `hyperfine` is installed, the runner records translator timing plus original-Bash-versus-Monk-generated-Fish runtime timing. Runtime workers replay each fixture's arguments, stdin, and run mode, and `summary.md` reports medians, means, and standard deviations. If Hyperfine is missing, the runner emits an explicit preflight note and skips benchmark targets. Configure benchmark runs with:
 
 ```bash
 cabal run monk-bakeoff -- --no-benchmark
 cabal run monk-bakeoff -- --hyperfine-runs 10 --hyperfine-warmup 1
 ```
 
-Hyperfine outputs are written to `hyperfine-all.md/json` and `hyperfine-benchmark.md/json` in the output directory when enabled.
+Translation timing is written to `hyperfine-all.md/json` and `hyperfine-benchmark.md/json`. Runtime timing is written to `hyperfine-runtime-all.md/json` and `hyperfine-runtime-benchmark.md/json` when the corresponding suite has fixtures.
 
 ## Bake-off results (2026-04-16)
 
@@ -255,7 +255,7 @@ Performance (hyperfine translation batches):
 ## Where Monk is currently stronger
 
 - **Broader semantic coverage** on the current corpus, especially on integration and real-world fixtures where Babelfish often fails to translate at all
-- **Diagnostics** via warnings, notes, confidence scoring, and `--strict`, which makes approximation visible instead of silent
+- **Diagnostics** via stable codes, phases, severity, review risk, declared runtime requirements, and `--strict`, which makes approximation visible instead of silent
 - **Focused runtime evidence** for side-effecting expansions, translated background jobs / `wait`, generalized covered `read -d`, and recursive literal `source`
 - **Stronger parity on the current mismatches**: the latest spot checks against Bash favored Monk on the major runtime-diff fixtures
 - **Better testing depth** through property, golden, integration, and bake-off coverage tied back to the translator audit

@@ -35,12 +35,15 @@ import Language.Fish.Translator.Variables.Expressions.Words
     translateWordPartsToExprWith,
   )
 import Language.Fish.Translator.Variables.Glob
-  ( extglobShimListExpr,
+  ( braceExpandedGlobList,
+    extglobShimListExpr,
+    extglobShimListExprM,
     parseGlobPattern,
     renderExtglobForFish,
     renderExtglobRaw,
     renderGlobWord,
     renderGlobWordRaw,
+    wordHasBraceExpansion,
     wordIsGlob,
     wordNeedsExtglobShim,
   )
@@ -69,18 +72,25 @@ translateTokenToExprWith translateDollarBracedStr commandSubstExprStr translateS
         case renderExtglobForFish op parts of
           Just pat -> ExprJoinList (ExprGlob (parseGlobPattern pat))
           Nothing -> ExprJoinList (extglobShimListExpr (renderExtglobRaw op parts))
+      token@T_BraceExpansion {} ->
+        ExprJoinList (braceExpandedGlobList [token])
       T_SingleQuoted _ s -> ExprLiteral (T.pack s)
       T_DoubleQuoted _ parts -> translateDoubleQuotedExprWith go parts
       T_NormalWord _ parts ->
-        if wordIsGlob parts
-          then
-            if wordNeedsExtglobShim parts
-              then ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts))
-              else ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts)))
-          else translateWordPartsToExprWith go parts
+        if wordHasBraceExpansion parts
+          then ExprJoinList (braceExpandedGlobList parts)
+          else
+            if wordIsGlob parts
+              then
+                if wordNeedsExtglobShim parts
+                  then ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts))
+                  else ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts)))
+              else translateWordPartsToExprWith go parts
       tok@T_ParamSubSpecialChar {} -> ExprJoinList (translateSimpleVar tok)
       T_DollarBraced _ _ word -> translateDollarBracedStr word
       T_DollarArithmetic _ exprTok ->
+        ExprJoinList (ExprCommandSubst (Stmt (mathCommandFromToken False exprTok) NE.:| []))
+      T_DollarBracket _ exprTok ->
         ExprJoinList (ExprCommandSubst (Stmt (mathCommandFromToken False exprTok) NE.:| []))
       -- Arithmetic tokens: convert to a command substitution calling `math`
       T_Arithmetic _ exprTok ->
@@ -125,22 +135,35 @@ translateTokenToExprPlanWith translateDollarBracedWithPrelude commandSubstExprSt
       T_Extglob _ op parts ->
         case renderExtglobForFish op parts of
           Just pat -> hoistM [] (ExprJoinList (ExprGlob (parseGlobPattern pat)))
-          Nothing -> hoistM [] (ExprJoinList (extglobShimListExpr (renderExtglobRaw op parts)))
+          Nothing -> do
+            expr <- extglobShimListExprM (renderExtglobRaw op parts)
+            hoistM [] (ExprJoinList expr)
+      token@T_BraceExpansion {} ->
+        hoistM [] (ExprJoinList (braceExpandedGlobList [token]))
       T_SingleQuoted _ s -> hoistM [] (ExprLiteral (T.pack s))
       T_DoubleQuoted _ parts -> translateDoubleQuotedExprMWith go parts
       T_NormalWord _ parts ->
-        if wordIsGlob parts
-          then
-            if wordNeedsExtglobShim parts
-              then hoistM [] (ExprJoinList (extglobShimListExpr (renderGlobWordRaw parts)))
-              else hoistM [] (ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts))))
-          else translateWordPartsToExprMWith go parts
+        if wordHasBraceExpansion parts
+          then hoistM [] (ExprJoinList (braceExpandedGlobList parts))
+          else
+            if wordIsGlob parts
+              then
+                if wordNeedsExtglobShim parts
+                  then do
+                    expr <- extglobShimListExprM (renderGlobWordRaw parts)
+                    hoistM [] (ExprJoinList expr)
+                  else hoistM [] (ExprJoinList (ExprGlob (parseGlobPattern (renderGlobWord parts))))
+              else translateWordPartsToExprMWith go parts
       tok@T_ParamSubSpecialChar {} -> do
         expr <- translateSimpleVarM tok
         hoistM [] (ExprJoinList expr)
       T_DollarBraced _ _ word ->
         translateDollarBracedWithPrelude word
       T_DollarArithmetic _ exprTok -> do
+        MkHoisted pre args <- arithArgsPlanM exprTok
+        let cmd = mathCommandFromArgs False args
+        hoistM pre (ExprJoinList (ExprCommandSubst (Stmt cmd NE.:| [])))
+      T_DollarBracket _ exprTok -> do
         MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs False args
         hoistM pre (ExprJoinList (ExprCommandSubst (Stmt cmd NE.:| [])))

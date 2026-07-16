@@ -1,5 +1,6 @@
 module Bakeoff.Execution.Runtime
   ( buildRuntimeReport,
+    runRuntimeBenchmarkEntry,
   )
 where
 
@@ -15,6 +16,7 @@ import Bakeoff.Process
   )
 import Bakeoff.Shell (ShellRunMode (..))
 import Bakeoff.Types
+import Control.Exception (IOException, try)
 import Data.Text qualified as T
 import Path
   ( Abs,
@@ -22,6 +24,7 @@ import Path
     Path,
     toFilePath,
   )
+import Path.IO qualified as PathIO
 import System.Process (CreateProcess (env), proc)
 
 buildRuntimeReport ::
@@ -110,6 +113,61 @@ runtimeProcess tools processEnv runMode scriptPath args =
       if null args
         then "source " <> quoteArg (toText (toFilePath scriptPath))
         else "source " <> quoteArg (toText (toFilePath scriptPath)) <> " " <> quotedArgs
+
+runRuntimeBenchmarkEntry ::
+  RuntimeShell ->
+  Path Abs File ->
+  Int ->
+  [(String, String)] ->
+  RuntimeBenchmarkEntry ->
+  IO Bool
+runRuntimeBenchmarkEntry runtimeShell fishPath timeoutSeconds processEnv entry = do
+  exists <- PathIO.doesFileExist selectedPath
+  if not exists
+    then pure False
+    else do
+      attempted <-
+        try
+          ( runProcessText
+              (Just timeoutSeconds)
+              (benchmarkProcess runtimeShell fishPath processEnv entry)
+              (runtimeBenchmarkStdin entry)
+          ) ::
+          IO (Either IOException (Maybe ProcessOutput))
+      pure $
+        case attempted of
+          Right (Just _) -> True
+          _ -> False
+  where
+    selectedPath =
+      case runtimeShell of
+        RuntimeBash -> runtimeBenchmarkBashPath entry
+        RuntimeFish -> runtimeBenchmarkFishPath entry
+
+benchmarkProcess :: RuntimeShell -> Path Abs File -> [(String, String)] -> RuntimeBenchmarkEntry -> CreateProcess
+benchmarkProcess runtimeShell fishPath processEnv entry =
+  case (runtimeShell, runtimeBenchmarkMode entry) of
+    (RuntimeBash, ShellRunExec) ->
+      withEnv (proc "bash" (scriptPath : args))
+    (RuntimeFish, ShellRunExec) ->
+      withEnv (proc (toFilePath fishPath) ("--no-config" : scriptPath : args))
+    (RuntimeBash, _) ->
+      withEnv (proc "bash" ["-c", T.unpack sourceCommand])
+    (RuntimeFish, _) ->
+      withEnv (proc (toFilePath fishPath) ["--no-config", "-c", T.unpack sourceCommand])
+  where
+    selectedPath =
+      case runtimeShell of
+        RuntimeBash -> runtimeBenchmarkBashPath entry
+        RuntimeFish -> runtimeBenchmarkFishPath entry
+    scriptPath = toFilePath selectedPath
+    args = map toString (runtimeBenchmarkArgs entry)
+    quotedArgs = T.intercalate " " (map quoteArg (runtimeBenchmarkArgs entry))
+    sourceCommand =
+      if null args
+        then "source " <> quoteArg (toText scriptPath)
+        else "source " <> quoteArg (toText scriptPath) <> " " <> quotedArgs
+    withEnv process = process {env = Just processEnv}
 
 quoteArg :: Text -> Text
 quoteArg txt =

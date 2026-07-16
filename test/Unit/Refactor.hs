@@ -17,14 +17,14 @@ unitRefactorTests :: TestTree
 unitRefactorTests =
   testGroup
     "Refactor Seams"
-    [ H.testCase "Null-delimited array reads still lower through the exact helper path" $ do
+    [ H.testCase "Null-delimited array reads lower through the combined exact helper path" $ do
         out <- translateScript "read -d '' -a items"
         T.isInfixOf "__monk_read_capture_delim" out H.@? "expected capture helper"
-        T.isInfixOf "__monk_read_assign" out H.@? "expected array assignment helper",
-      H.testCase "Delimited multi-var reads keep the generalized assignment helper path" $ do
+        T.isInfixOf "set --global items $__monk_read_fields" out H.@? "expected array assignment",
+      H.testCase "Delimited multi-var reads keep the combined assignment path" $ do
         out <- translateScript "IFS=: read -u 3 -d : left right"
         T.isInfixOf "__monk_read_capture_delim" out H.@? "expected capture helper"
-        T.isInfixOf "__monk_read_assign" out H.@? "expected multi-var assignment helper",
+        T.isInfixOf "set --global left $__monk_read_fields[1]" out H.@? "expected multi-var assignment",
       H.testCase "Default assignment expansions still lower through conditional set logic" $ do
         out <- translateScript "echo ${name=value}"
         T.isInfixOf "set '-q' 'name'" out H.@? "expected set-check guard"
@@ -69,13 +69,38 @@ unitRefactorTests =
             forbidden = ["Unsafe", "lower"]
             offenders = filter (`T.isInfixOf` exports) forbidden
         offenders H.@?= [],
+      H.testCase "Fish DSL internal nodes are structurally independent from the raw AST" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "DSL" </> "Internal.hs")
+        let forbidden = ["import Language.Fish.AST", "Raw.Fish", "UnsafeExpr", "UnsafeCommand", "UnsafeStmt"]
+            offenders = filter (`T.isInfixOf` contents) forbidden
+        offenders H.@?= [],
+      H.testCase "Translator types facade is backed by the structural DSL" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Types.hs")
+        H.assertBool
+          "translator types still re-export the raw AST"
+          (not ("Language.Fish.AST" `T.isInfixOf` contents)),
+      H.testCase "Raw AST and lowering modules are not public library modules" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "monk.cabal")
+        let publicModules = cabalExposedModules contents
+        H.assertBool "Monk.AST.Raw remains exposed" (not ("Monk.AST.Raw" `T.isInfixOf` publicModules))
+        H.assertBool
+          "Language.Fish.DSL.Lower remains exposed"
+          (not ("Language.Fish.DSL.Lower" `T.isInfixOf` publicModules)),
       H.testCase "Translator construction boundary export list hides unsafe constructors" $ do
         repoRoot <- makeAbsolute "."
         contents <- decodeUtf8 <$> readFileBS (repoRoot </> "src" </> "Language" </> "Fish" </> "Translator" </> "Construction.hs")
         let exports = dslExportList contents
             forbidden = ["Unsafe", "lower"]
             offenders = filter (`T.isInfixOf` exports) forbidden
-        offenders H.@?= []
+        offenders H.@?= [],
+      H.testCase "Recursive inline CLI output uses the combined output-bundle planner" $ do
+        repoRoot <- makeAbsolute "."
+        contents <- decodeUtf8 <$> readFileBS (repoRoot </> "app" </> "Main.hs")
+        H.assertBool "CLI does not call planCombinedOutputBundle" ("planCombinedOutputBundle" `T.isInfixOf` contents)
+        H.assertBool "CLI still bypasses the planner through inlineSourceGraph" (not ("inlineSourceGraph" `T.isInfixOf` contents))
     ]
 
 collectHsFiles :: FilePath -> IO [FilePath]
@@ -166,7 +191,9 @@ constructionBoundaryOnlyImportRoots =
 
 translatorConstructionBoundaryAllowlist :: [FilePath]
 translatorConstructionBoundaryAllowlist =
-  [normalise "src/Language/Fish/Translator/Construction.hs"]
+  [ normalise "src/Language/Fish/Translator/Construction.hs",
+    normalise "src/Language/Fish/Translator/Types.hs"
+  ]
 
 translatorRawTypeBoundaryAllowlist :: [FilePath]
 translatorRawTypeBoundaryAllowlist =
@@ -226,3 +253,10 @@ dslExportList :: Text -> Text
 dslExportList contents =
   case T.breakOn "\nwhere" contents of
     (header, _) -> header
+
+cabalExposedModules :: Text -> Text
+cabalExposedModules contents =
+  case T.breakOn "  build-depends:" libraryBody of
+    (publicSection, _) -> publicSection
+  where
+    libraryBody = snd (T.breakOn "\nlibrary\n" contents)

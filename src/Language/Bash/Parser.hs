@@ -42,7 +42,10 @@ parseBashScript fileName scriptText = do
           { psFilename = fileName,
             psScript = toString scriptText,
             psShellTypeOverride = Just Bash,
-            psCheckSourced = True, -- or False, depending on your needs
+            -- Monk discovers and translates literal sources through its own
+            -- typed source graph. Letting ShellCheck expand them here creates
+            -- parser wrapper nodes and duplicates ownership of source loading.
+            psCheckSourced = False,
             psIgnoreRC = True -- ignore .shellcheckrc
           }
 

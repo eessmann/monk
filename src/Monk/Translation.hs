@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 -- |
@@ -12,18 +13,7 @@ module Monk.Translation
     translateParseResult,
     translateBashFile,
     translateBashScript,
-    translationWarnings,
-    translationStatements,
     renderTranslation,
-    flattenStatements,
-    TranslateState,
-    stateWarnings,
-    stateErrexitEnabled,
-    statePipefailEnabled,
-    Translation (..),
-    WarnFn,
-    inlineStatements,
-    renderFish,
     parseBashFile,
     parseBashScript,
     projectName,
@@ -31,98 +21,182 @@ module Monk.Translation
   )
 where
 
+import Data.Char (isDigit)
+import Data.List.NonEmpty qualified as NE
+import Data.Text qualified as T
 import Language.Bash.Parser (parseBashFile, parseBashScript)
-import Language.Fish.AST (FishStatement (..))
-import Language.Fish.DSL (Script)
-import Language.Fish.DSL.Lower (lowerScript)
-import Language.Fish.Inline (Translation (..), WarnFn, inlineStatements)
-import Language.Fish.Pretty (renderFish)
+import Language.Fish.DSL
+  ( Script,
+    SourcePos (..),
+    SourceRange (..),
+    renderScript,
+  )
 import Language.Fish.Translator qualified as Translator
 import Language.Fish.Translator.Monad
-  ( TranslateState,
-    stateErrexitEnabled,
-    statePipefailEnabled,
+  ( stateRuntimeRequirements,
     stateWarnings,
   )
+import Language.Fish.Translator.Warning
+  ( TranslateError (..),
+    Warning (..),
+    WarningSeverity (..),
+    warnMessage,
+    warningCodeText,
+  )
 import Monk.Translation.Types
-import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
+import ShellCheck.Interface
+  ( Comment (..),
+    ParseResult,
+    Position (..),
+    PositionedComment (..),
+    prComments,
+    prRoot,
+  )
 
--- | Result of a successful translation.
 data TranslationResult = MkTranslationResult
-  { -- | Typed fish script produced by the translator before backend lowering.
-    translationScript :: Script,
-    -- | Final translation state containing warnings and translator flags.
-    translationState :: TranslateState
+  { translationScript :: Script,
+    translationDiagnostics :: [Diagnostic],
+    translationRuntimeRequirements :: [RuntimeRequirement]
   }
   deriving stock (Show, Eq)
 
--- | Failure modes for parse and translation entry points.
-data TranslationFailure
-  = -- | ShellCheck parse errors.
-    ParseErrors [PositionedComment]
-  | -- | Translation failed with a semantic error.
-    TranslateFailure TranslateError
+newtype TranslationFailure = MkTranslationFailure
+  { failureDiagnostics :: NonEmpty Diagnostic
+  }
   deriving stock (Show, Eq)
 
--- | Translate a parsed shell script into fish AST plus translation state.
 translateParseResult ::
   TranslateConfig ->
   ParseResult ->
-  Either TranslateError TranslationResult
-translateParseResult cfg parseResult = do
-  (script, st) <- Translator.translateParseResult cfg parseResult
-  pure (MkTranslationResult script st)
+  Either TranslationFailure TranslationResult
+translateParseResult cfg parseResult =
+  case prRoot parseResult of
+    Nothing -> Left (parseFailure (prComments parseResult))
+    Just _ ->
+      case Translator.translateParseResult cfg parseResult of
+        Left err -> Left (MkTranslationFailure (translateErrorDiagnostic err :| []))
+        Right (script, translatorState) ->
+          Right
+            MkTranslationResult
+              { translationScript = script,
+                translationDiagnostics =
+                  map positionedCommentDiagnostic (prComments parseResult)
+                    <> map warningDiagnostic (stateWarnings translatorState),
+                translationRuntimeRequirements = stateRuntimeRequirements translatorState
+              }
 
--- | Parse and translate a Bash file on disk.
 translateBashFile ::
   TranslateConfig ->
   FilePath ->
   IO (Either TranslationFailure TranslationResult)
 translateBashFile cfg path = do
-  parseResE <- parseBashFile path
+  parseResult <- parseBashFile path
   pure $
-    case parseResE of
-      Left errs -> Left (ParseErrors errs)
-      Right parseRes ->
-        case translateParseResult cfg parseRes of
-          Left err -> Left (TranslateFailure err)
-          Right res -> Right res
+    case parseResult of
+      Left comments -> Left (parseFailure comments)
+      Right parsed -> translateParseResult cfg parsed
 
--- | Parse and translate Bash script text with an explicit source filename.
 translateBashScript ::
   TranslateConfig ->
   FilePath ->
   Text ->
   IO (Either TranslationFailure TranslationResult)
 translateBashScript cfg fileName scriptText = do
-  parseRes <- parseBashScript fileName scriptText
-  pure $
-    case prRoot parseRes of
-      Nothing -> Left (ParseErrors (prComments parseRes))
-      Just _ ->
-        case translateParseResult cfg parseRes of
-          Left err -> Left (TranslateFailure err)
-          Right res -> Right res
+  parsed <- parseBashScript fileName scriptText
+  pure (translateParseResult cfg parsed)
 
--- | Flatten the translated root statement into top-level statements.
-translationWarnings :: TranslationResult -> [Warning]
-translationWarnings = stateWarnings . translationState
-
--- | Lower the typed translated script into backend statements.
-translationStatements :: TranslationResult -> [FishStatement]
-translationStatements = lowerScript . translationScript
-
--- | Render a translation result as fish source text.
 renderTranslation :: TranslationResult -> Text
-renderTranslation = renderFish . translationStatements
+renderTranslation = renderScript . translationScript
 
--- | Convert a root statement into a top-level statement list.
-flattenStatements :: FishStatement -> [FishStatement]
-flattenStatements stmt =
-  case stmt of
-    StmtList xs -> xs
-    other -> [other]
+parseFailure :: [PositionedComment] -> TranslationFailure
+parseFailure comments =
+  MkTranslationFailure
+    ( fromMaybe
+        (genericParseDiagnostic :| [])
+        (NE.nonEmpty (map positionedCommentDiagnostic comments))
+    )
 
--- | Project name used in CLI and benchmark labels.
+positionedCommentDiagnostic :: PositionedComment -> Diagnostic
+positionedCommentDiagnostic comment =
+  MkDiagnostic
+    { diagnosticCode = MkDiagnosticCode ("shellcheck." <> shellCheckCodeText (cCode payload)),
+      diagnosticPhase = PhaseParse,
+      diagnosticSeverity = shellCheckSeverity (show (cSeverity payload)),
+      diagnosticRisk = shellCheckRisk (show (cSeverity payload)),
+      diagnosticMessage = toText (cMessage payload),
+      diagnosticRange = Just (positionRange (pcStartPos comment) (pcEndPos comment))
+    }
+  where
+    payload = pcComment comment
+
+warningDiagnostic :: Warning -> Diagnostic
+warningDiagnostic warning =
+  MkDiagnostic
+    { diagnosticCode = MkDiagnosticCode (warningCodeText (warnCode warning)),
+      diagnosticPhase = PhaseTranslate,
+      diagnosticSeverity = DiagnosticWarning,
+      diagnosticRisk = warningRisk (warnSeverity warning),
+      diagnosticMessage = warnMessage warning,
+      diagnosticRange = warnRange warning
+    }
+
+translateErrorDiagnostic :: TranslateError -> Diagnostic
+translateErrorDiagnostic = \case
+  Unsupported warning ->
+    (warningDiagnostic warning)
+      { diagnosticSeverity = DiagnosticError,
+        diagnosticRisk = Unsafe
+      }
+  InternalError message ->
+    MkDiagnostic
+      { diagnosticCode = MkDiagnosticCode "monk.internal",
+        diagnosticPhase = PhaseTranslate,
+        diagnosticSeverity = DiagnosticError,
+        diagnosticRisk = Unsafe,
+        diagnosticMessage = message,
+        diagnosticRange = Nothing
+      }
+
+genericParseDiagnostic :: Diagnostic
+genericParseDiagnostic =
+  MkDiagnostic
+    { diagnosticCode = MkDiagnosticCode "shellcheck.parse",
+      diagnosticPhase = PhaseParse,
+      diagnosticSeverity = DiagnosticError,
+      diagnosticRisk = Unsafe,
+      diagnosticMessage = "Unable to parse Bash input",
+      diagnosticRange = Nothing
+    }
+
+warningRisk :: WarningSeverity -> ReviewRisk
+warningRisk = \case
+  WarnHigh -> Unsafe
+  WarnMedium -> Review
+  WarnLow -> Review
+
+shellCheckSeverity :: Text -> DiagnosticSeverity
+shellCheckSeverity rendered
+  | "Error" `T.isInfixOf` rendered = DiagnosticError
+  | "Info" `T.isInfixOf` rendered || "Style" `T.isInfixOf` rendered = DiagnosticNote
+  | otherwise = DiagnosticWarning
+
+shellCheckRisk :: Text -> ReviewRisk
+shellCheckRisk rendered
+  | "Error" `T.isInfixOf` rendered = Unsafe
+  | otherwise = Review
+
+shellCheckCodeText :: (Show code) => code -> Text
+shellCheckCodeText = toText . filter isDigit . show
+
+positionRange :: Position -> Position -> SourceRange
+positionRange start end = MkSourceRange (position start) (position end)
+  where
+    position source =
+      MkSourcePos
+        { srcFile = toText (posFile source),
+          srcLine = fromInteger (posLine source),
+          srcColumn = fromInteger (posColumn source)
+        }
+
 projectName :: Text
 projectName = "monk"

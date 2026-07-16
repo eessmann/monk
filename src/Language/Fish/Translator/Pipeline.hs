@@ -19,6 +19,7 @@ import Language.Fish.Translator.Monad
     TranslateState (..),
     TranslationContext (..),
     isErrexitEnabled,
+    isErrexitGuardSuppressed,
     isPipefailEnabled,
   )
 import Language.Fish.Translator.Pipefail (ensurePipefailHelper)
@@ -44,8 +45,9 @@ jobPipelineFromListWithTime timed (cmd NE.:| rest) =
 wrapErrexitIfEnabled :: FishCommand TStatus -> TranslateM (FishCommand TStatus)
 wrapErrexitIfEnabled cmd = do
   enabled <- isErrexitEnabled
+  suppressed <- isErrexitGuardSuppressed
   inCmdSubst <- State.gets (inCommandSubst . context)
-  if not enabled || inCmdSubst || not (shouldWrapErrexit cmd)
+  if not enabled || suppressed || inCmdSubst || not (shouldWrapErrexit cmd)
     then pure cmd
     else pure (wrapErrexitStatusCommand cmd)
 

@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module Unit.TranslatorMonad
   ( unitTranslatorMonadTests,
@@ -8,21 +9,17 @@ where
 import Data.Text qualified as T
 import Monk.AST (SourcePos (..), SourceRange (..))
 import Monk.Translation
-  ( TranslateError (..),
-    TranslateState,
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
+  ( Diagnostic (..),
+    DiagnosticCode (..),
+    ReviewRisk (..),
+    TranslationFailure (..),
+    TranslationResult,
     defaultConfig,
     parseBashScript,
     renderTranslation,
-    stateErrexitEnabled,
-    statePipefailEnabled,
-    stateWarnings,
     strictConfig,
     translateParseResult,
-    translationState,
-    warnMessage,
+    translationDiagnostics,
   )
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -51,13 +48,12 @@ unitTranslatorMonadTests =
       H.testCase "Strict mode raises error for unsupported" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi"
         case translateParseResult strictConfig result of
-          Left (Unsupported warning) -> do
+          Left (MkTranslationFailure (warning :| _)) -> do
             warnCode warning @?= UnsupportedConstruct
             warnMessage warning @?= "Coprocess (coproc)"
             case warnRange warning of
               Just range -> srcLine (rangeStart range) @?= 1
               Nothing -> H.assertFailure "expected warning range in strict mode"
-          Left err -> H.assertFailure ("unexpected error: " <> show err)
           Right _ -> H.assertFailure "expected error in strict mode",
       H.testCase "Warnings accumulate in order" $ do
         result <- parseBashScript "spec.sh" "coproc echo hi\ncoproc echo bye"
@@ -152,8 +148,7 @@ unitTranslatorMonadTests =
             H.assertBool "expected nounset warning" ("Bash set -u/nounset has no fish equivalent; manual review required" `elem` msgs)
             H.assertBool "unexpected errexit warning" ("Bash set -e/errexit has no fish equivalent; manual review required" `notElem` msgs)
             H.assertBool "unexpected pipefail warning" ("Bash set -o pipefail has no fish equivalent; manual review required" `notElem` msgs)
-            H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
-            H.assertBool "expected pipefail enabled" (statePipefailEnabled st),
+            pure (),
       H.testCase "set -- clears argv without warning" $ do
         (out, st) <- translateWithState "set --"
         out @?= "set argv"
@@ -165,7 +160,6 @@ unitTranslatorMonadTests =
       H.testCase "set options before -- still assign argv" $ do
         (out, st) <- translateWithState "set -e -- a b"
         out @?= "set argv 'a' 'b'"
-        H.assertBool "expected errexit enabled" (stateErrexitEnabled st)
         H.assertBool "unexpected set warning" (not (any ((== SetOptionIssue) . warnCode) (stateWarnings st))),
       H.testCase "ambiguous set arguments warn and stay raw" $ do
         (out, st) <- translateWithState "set a b"
@@ -194,10 +188,9 @@ unitTranslatorMonadTests =
       H.testCase "strict mode fails on source issues" $ do
         result <- parseBashScript "spec.sh" "source \"$child\""
         case translateParseResult strictConfig result of
-          Left (Unsupported warning) -> do
+          Left (MkTranslationFailure (warning :| _)) -> do
             warnCode warning @?= SourceIssue
             warnMessage warning @?= "non-literal source path requires manual review"
-          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
           Right _ -> H.assertFailure "expected strict source issue failure",
       H.testCase "argument-position output process substitution warns for manual review" $ do
         (out, st) <- translateWithState "echo >(cat)"
@@ -207,10 +200,9 @@ unitTranslatorMonadTests =
       H.testCase "strict mode fails on argument-position output process substitution" $ do
         result <- parseBashScript "spec.sh" "echo >(cat)"
         case translateParseResult strictConfig result of
-          Left (Unsupported warning) -> do
+          Left (MkTranslationFailure (warning :| _)) -> do
             warnCode warning @?= ProcessSubstitutionIssue
             warnMessage warning @?= "output process substitution in argument position requires manual review"
-          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
           Right _ -> H.assertFailure "expected strict process substitution issue failure",
       H.testCase "unsupported output process substitution consumer warns instead of silently dropping body" $ do
         (out, st) <- translateWithState "printf hi > >(case x in x) cat ;; esac)"
@@ -220,10 +212,9 @@ unitTranslatorMonadTests =
       H.testCase "strict mode fails on unsupported output process substitution consumer" $ do
         result <- parseBashScript "spec.sh" "printf hi > >(case x in x) cat ;; esac)"
         case translateParseResult strictConfig result of
-          Left (Unsupported warning) -> do
+          Left (MkTranslationFailure (warning :| _)) -> do
             warnCode warning @?= ProcessSubstitutionIssue
             warnMessage warning @?= "output process substitution consumer requires manual review"
-          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
           Right _ -> H.assertFailure "expected strict process substitution consumer failure",
       H.testCase "stderr output process substitution stays on warning-driven generic path" $ do
         (out, st) <- translateWithState "printf hi 2> >(wc -c > err.count)"
@@ -232,48 +223,42 @@ unitTranslatorMonadTests =
           "unexpected stdout exact temp-file path"
           (not (T.isInfixOf "set --local __monk_psub_file $__monk_psub_dir'/stdout'" out))
         H.assertBool "expected process substitution warning code" (any ((== ProcessSubstitutionIssue) . warnCode) (stateWarnings st)),
-      H.testCase "unsupported status-context case expression warns instead of silently succeeding" $ do
+      H.testCase "case expression preserves status in a conjunction" $ do
         (out, st) <- translateWithState "case x in x) false ;; esac && echo bad"
-        H.assertBool "expected unsupported status warning code" (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st))
-        assertHasWarningContaining "status context" st
+        H.assertBool "unexpected unsupported status warning code" (not (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st)))
+        T.isInfixOf "switch 'x'" out H.@? "expected translated case expression"
         assertHasRenderedLine "false" out
         T.isInfixOf "and echo 'bad'" out H.@? "expected conjunction branch to remain visible"
         H.assertBool
           ("unexpected silent true status fallback: " <> T.unpack out)
           (not (T.isInfixOf "true\nand echo 'bad'" out)),
-      H.testCase "unsupported if-condition status expression warns instead of silently succeeding" $ do
+      H.testCase "case expression preserves status in an if condition" $ do
         (out, st) <- translateWithState "if case x in x) false ;; esac; then echo bad; else echo ok; fi"
-        H.assertBool "expected unsupported status warning code" (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st))
-        assertHasWarningContaining "status context" st
-        T.isInfixOf "if false" out H.@? "expected condition to fail closed"
-        H.assertBool
-          ("unexpected silent true condition: " <> T.unpack out)
-          (not (T.isInfixOf "if true" out)),
+        H.assertBool "unexpected unsupported status warning code" (not (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st)))
+        T.isInfixOf "if switch 'x'" out H.@? "expected translated case condition"
+        T.isInfixOf "echo 'ok'" out H.@? "expected else branch",
       H.testCase "banged pipefail pipeline remains supported in status context" $ do
         (out, st) <- translateWithState "set -o pipefail\nif ! false | true; then echo ok; else echo bad; fi"
-        statePipefailEnabled st @?= True
         H.assertBool
           "unexpected unsupported status warning"
           (not (any ((== UnsupportedConstruct) . warnCode) (stateWarnings st)))
         T.isInfixOf "if not begin" out H.@? "expected banged pipeline wrapper"
         T.isInfixOf "__monk_pipefail $pipestatus" out H.@? "expected pipefail helper inside wrapper",
-      H.testCase "strict mode fails on unsupported status-context expression" $ do
+      H.testCase "strict mode accepts supported compound status expressions" $ do
         result <- parseBashScript "spec.sh" "case x in x) false ;; esac && echo bad"
         case translateParseResult strictConfig result of
-          Left (Unsupported warning) -> do
-            warnCode warning @?= UnsupportedConstruct
+          Left failure -> H.assertFailure ("unexpected strict failure: " <> show failure)
+          Right translation ->
             H.assertBool
-              ("unexpected warning message: " <> T.unpack (warnMessage warning))
-              ("status context" `T.isInfixOf` warnMessage warning)
-          Left err -> H.assertFailure ("unexpected strict error: " <> show err)
-          Right _ -> H.assertFailure "expected strict unsupported status-context failure",
+              "unexpected strict diagnostic"
+              (not (any ((== UnsupportedConstruct) . warnCode) (stateWarnings (translationState translation)))),
       H.testCase "read -d lowers to exact helper without semantic warning" $ do
         (out, st) <- translateWithState "read -d : first second"
         H.assertBool
           "unexpected warning for exact read delimiter helper"
           (not (any ((== "read delimiter semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
         H.assertBool "expected exact delimiter capture helper" (T.isInfixOf "__monk_read_capture_delim" out)
-        H.assertBool "expected exact variable assignment helper" (T.isInfixOf "__monk_read_assign" out),
+        H.assertBool "expected exact variable assignment" (T.isInfixOf "set --global first $__monk_read_fields[1]" out),
       H.testCase "read without variables assigns REPLY exactly" $ do
         (out, st) <- translateWithState "read"
         H.assertBool
@@ -304,7 +289,7 @@ unitTranslatorMonadTests =
         H.assertBool
           "unexpected IFS warning for exact null-delimited array path"
           (not (any ((== "read IFS splitting semantics may differ between bash and fish") . warnMessage) (stateWarnings st)))
-        H.assertBool "expected exact array assignment helper" (T.isInfixOf "__monk_read_assign" out),
+        H.assertBool "expected exact array assignment" (T.isInfixOf "set --global items $__monk_read_fields" out),
       H.testCase "numeric fd read lowers to exact helper without semantic warnings" $ do
         (out, st) <- translateWithState "read -u 3 -r tail"
         H.assertBool
@@ -438,6 +423,65 @@ translateWithState script = do
   case translateParseResult defaultConfig result of
     Left err -> H.assertFailure ("unexpected error: " <> show err) >> pure ("", error "unreachable")
     Right translation -> pure (renderTranslation translation, translationState translation)
+
+type TranslateState = TranslationResult
+
+type Warning = Diagnostic
+
+data WarningSeverity
+  = WarnHigh
+  | WarnMedium
+  | WarnLow
+  deriving stock (Eq, Show)
+
+pattern UnsupportedConstruct :: DiagnosticCode
+pattern UnsupportedConstruct = MkDiagnosticCode "monk.unsupported"
+
+pattern BackgroundTracking :: DiagnosticCode
+pattern BackgroundTracking = MkDiagnosticCode "monk.background-tracking"
+
+pattern SetOptionIssue :: DiagnosticCode
+pattern SetOptionIssue = MkDiagnosticCode "monk.set-option"
+
+pattern SourceIssue :: DiagnosticCode
+pattern SourceIssue = MkDiagnosticCode "monk.source"
+
+pattern ProcessSubstitutionIssue :: DiagnosticCode
+pattern ProcessSubstitutionIssue = MkDiagnosticCode "monk.process-substitution"
+
+pattern ReadIssue :: DiagnosticCode
+pattern ReadIssue = MkDiagnosticCode "monk.read"
+
+pattern ReadonlyNotEnforced :: DiagnosticCode
+pattern ReadonlyNotEnforced = MkDiagnosticCode "monk.readonly"
+
+pattern TrapIssue :: DiagnosticCode
+pattern TrapIssue = MkDiagnosticCode "monk.trap"
+
+pattern BestEffortSubshell :: DiagnosticCode
+pattern BestEffortSubshell = MkDiagnosticCode "monk.subshell.best-effort"
+
+translationState :: TranslationResult -> TranslateState
+translationState = id
+
+stateWarnings :: TranslateState -> [Warning]
+stateWarnings = translationDiagnostics
+
+warnCode :: Warning -> DiagnosticCode
+warnCode = diagnosticCode
+
+warnSeverity :: Warning -> WarningSeverity
+warnSeverity warning =
+  case diagnosticRisk warning of
+    Unsafe -> WarnHigh
+    Review -> WarnMedium
+    Clean -> WarnLow
+
+warnMessage :: Warning -> Text
+warnMessage = diagnosticMessage
+
+warnRange :: Warning -> Maybe SourceRange
+warnRange = diagnosticRange
 
 assertHasWarning :: T.Text -> TranslateState -> Assertion
 assertHasWarning msg st =

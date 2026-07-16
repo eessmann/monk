@@ -38,12 +38,15 @@ import Language.Fish.Translator.Variables.Expressions.Words
     wordNeedsSplit,
   )
 import Language.Fish.Translator.Variables.Glob
-  ( extglobShimListExpr,
+  ( braceExpandedGlobList,
+    extglobShimListExpr,
+    extglobShimListExprM,
     parseGlobPattern,
     renderExtglobForFish,
     renderExtglobRaw,
     renderGlobWord,
     renderGlobWordRaw,
+    wordHasBraceExpansion,
     wordIsGlob,
     wordNeedsExtglobShim,
   )
@@ -74,6 +77,7 @@ translateTokenToListExprWith translateTokenToExpr translateDollarBraced commandS
         case renderExtglobForFish op parts of
           Just pat -> ExprGlob (parseGlobPattern pat)
           Nothing -> extglobShimListExpr (renderExtglobRaw op parts)
+      token@T_BraceExpansion {} -> braceExpandedGlobList [token]
       T_SingleQuoted _ s -> ExprListLiteral [ExprLiteral (T.pack s)]
       T_DoubleQuoted _ parts ->
         case parts of
@@ -93,6 +97,7 @@ translateTokenToListExprWith translateTokenToExpr translateDollarBraced commandS
                       then splitOnIfsExpr expr
                       else ExprListLiteral [expr]
           _
+            | wordHasBraceExpansion parts -> braceExpandedGlobList parts
             | wordIsGlob parts ->
                 if wordNeedsExtglobShim parts
                   then extglobShimListExpr (renderGlobWordRaw parts)
@@ -108,6 +113,8 @@ translateTokenToListExprWith translateTokenToExpr translateDollarBraced commandS
         | isNoSplitParamExpansion word -> translateDollarBraced word
         | otherwise -> splitOnIfsListExpr (translateDollarBraced word)
       T_DollarArithmetic _ exprTok ->
+        ExprCommandSubst (Stmt (mathCommandFromToken False exprTok) NE.:| [])
+      T_DollarBracket _ exprTok ->
         ExprCommandSubst (Stmt (mathCommandFromToken False exprTok) NE.:| [])
       T_Arithmetic _ exprTok ->
         ExprCommandSubst (Stmt (mathCommandFromToken True exprTok) NE.:| [])
@@ -150,7 +157,11 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
       T_Extglob _ op parts ->
         case renderExtglobForFish op parts of
           Just pat -> hoistM [] (ExprGlob (parseGlobPattern pat))
-          Nothing -> hoistM [] (extglobShimListExpr (renderExtglobRaw op parts))
+          Nothing -> do
+            expr <- extglobShimListExprM (renderExtglobRaw op parts)
+            hoistM [] expr
+      token@T_BraceExpansion {} ->
+        hoistM [] (braceExpandedGlobList [token])
       T_SingleQuoted _ s -> hoistM [] (ExprListLiteral [ExprLiteral (T.pack s)])
       T_DoubleQuoted _ parts ->
         case parts of
@@ -176,9 +187,12 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
                         else ExprListLiteral [expr]
                 hoistM pre listExpr
           _
+            | wordHasBraceExpansion parts -> hoistM [] (braceExpandedGlobList parts)
             | wordIsGlob parts ->
                 if wordNeedsExtglobShim parts
-                  then hoistM [] (extglobShimListExpr (renderGlobWordRaw parts))
+                  then do
+                    expr <- extglobShimListExprM (renderGlobWordRaw parts)
+                    hoistM [] expr
                   else hoistM [] (ExprGlob (parseGlobPattern (renderGlobWord parts)))
             | otherwise -> do
                 MkHoisted pre expr <- translateWordPartsToExprMWith translateTokenToExprM parts
@@ -197,6 +211,10 @@ translateTokenToListExprMWith translateTokenToExprM translateDollarBracedWithPre
             then expr
             else splitOnIfsListExpr expr
       T_DollarArithmetic _ exprTok -> do
+        MkHoisted pre args <- arithArgsPlanM exprTok
+        let cmd = mathCommandFromArgs False args
+        hoistM pre (ExprCommandSubst (Stmt cmd NE.:| []))
+      T_DollarBracket _ exprTok -> do
         MkHoisted pre args <- arithArgsPlanM exprTok
         let cmd = mathCommandFromArgs False args
         hoistM pre (ExprCommandSubst (Stmt cmd NE.:| []))

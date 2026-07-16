@@ -7,8 +7,6 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.DSL
-import Language.Fish.DSL.Lower (lowerScript)
-import Monk.Translation (renderFish)
 import Relude hiding (stdout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
@@ -34,7 +32,7 @@ unitDslTests =
                     )
               ]
           )
-        @?= "printf '%s\\n' 'hello' | string 'upper'",
+        @?= "printf \"%s\\\\n\" 'hello' | string 'upper'",
       testCase "lowers blocks with non-empty bodies"
         $ renderDsl
           ( script
@@ -101,4 +99,4 @@ unitDslTests =
     ]
 
 renderDsl :: Script -> Text
-renderDsl = renderFish . lowerScript
+renderDsl = renderScript

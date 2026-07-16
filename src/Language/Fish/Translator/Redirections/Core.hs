@@ -12,6 +12,10 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.Translator.Hoist (Hoisted (..), hoist)
 import Language.Fish.Translator.Hoist.Monad (HoistedM, hoistM)
+import Language.Fish.Translator.Monad
+  ( WarningCode (HereStringIssue),
+    unsupported,
+  )
 import Language.Fish.Translator.Types
 import ShellCheck.AST
 
@@ -54,6 +58,7 @@ translateFdRedirectMWith translateExprM src = \case
         hoistM [] (MkRedirect (sourceFromFd src dir) redirOp <$> redirectTargetFromDup target)
       Nothing -> hoistM [] Nothing
   T_HereString _ word -> do
+    unsupported HereStringIssue (Just "here-string is approximated with an in-memory printf pipe")
     MkHoisted pre expr <- hereStringExprM translateExprM [word]
     hoistM pre (Just (MkRedirect (sourceFromFd src InputRedirect) RedirectIn (RedirectFile expr)))
   T_HereDoc _ _ _ _ toks -> do

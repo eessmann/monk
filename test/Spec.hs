@@ -7,11 +7,13 @@ import Property.Pretty
 import Property.Translation
 import RealWorld
 import Test.Tasty (TestTree, defaultMain, testGroup)
+import Unit.API04
 import Unit.Bakeoff
 import Unit.DSL
 import Unit.Diagnostics
 import Unit.Harness
 import Unit.Inline
+import Unit.OutputBundle
 import Unit.Pipefail
 import Unit.Pretty
 import Unit.Refactor
@@ -31,9 +33,11 @@ tests =
       unitDiagnosticsTests,
       unitDslTests,
       unitInlineTests,
+      unitOutputBundleTests,
       unitSourceTests,
       unitHarnessTests,
       unitBakeoffTests,
+      unitApi04Tests,
       unitRefactorTests,
       unitTranslatorMonadTests,
       unitPipefailTests,

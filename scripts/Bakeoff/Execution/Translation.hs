@@ -22,31 +22,35 @@ import Bakeoff.Process
   )
 import Bakeoff.Types
 import Control.Exception (evaluate)
+import Data.ByteString qualified as BS
+import Data.List qualified as L
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
+import Monk.AST (renderScript)
 import Monk.Diagnostics
-  ( WarningCounts (..),
-    confidenceScore,
-    renderParseComment,
-    renderTranslateError,
+  ( DiagnosticCounts (..),
+    renderDiagnostic,
+    renderRuntimeRequirement,
     renderTranslationNotes,
-    renderWarning,
-    summarizeWarnings,
+    reviewRisk,
+    summarizeDiagnostics,
     translationNoteCount,
   )
 import Monk.Source
   ( SourceGraph (..),
     SourceGraphFailure (..),
+    Translation (..),
+    inlineSourceGraph,
     translateSourceGraph,
   )
 import Monk.Translation
-  ( Translation (..),
-    Warning,
+  ( Diagnostic (..),
+    ReviewRisk (..),
+    RuntimeProgram (..),
+    RuntimeRequirement (..),
+    TranslationFailure (..),
     defaultConfig,
-    inlineStatements,
-    renderFish,
-    stateWarnings,
   )
 import Path
   ( Abs,
@@ -60,7 +64,8 @@ import System.Timeout (timeout)
 
 data MonkTranslationArtifact = MkMonkTranslationArtifact
   { mtaOutput :: Text,
-    mtaWarnings :: [Warning],
+    mtaDiagnostics :: [Diagnostic],
+    mtaRuntimeRequirements :: [RuntimeRequirement],
     mtaNoteCount :: Int,
     mtaStderrLines :: [Text]
   }
@@ -79,12 +84,16 @@ buildMonkTranslationReport cfg fixture artifacts =
               { translationTool = ToolMonk,
                 translationStatus = CommandTimedOut,
                 translationExitCode = Nothing,
+                translationErrorCount = 0,
                 translationWarningCount = 0,
                 translationNotesCount = 0,
-                translationHighWarnings = 0,
-                translationMediumWarnings = 0,
-                translationLowWarnings = 0,
-                translationConfidenceScore = Nothing,
+                translationReviewRisk = Nothing,
+                translationInputBytes = Nothing,
+                translationOutputBytes = Nothing,
+                translationExpansionRatio = Nothing,
+                translationHelperBytes = Nothing,
+                translationHelperInvocations = 0,
+                translationExternalRequirements = [],
                 translationOutputPath = Nothing,
                 translationStderrPath = Just (faMonkTranslateStderr artifacts),
                 translationErrorMessage = Just "translation timed out"
@@ -96,20 +105,24 @@ buildMonkTranslationReport cfg fixture artifacts =
               { translationTool = ToolMonk,
                 translationStatus = CommandFailed,
                 translationExitCode = Just 1,
+                translationErrorCount = 1,
                 translationWarningCount = 0,
                 translationNotesCount = 0,
-                translationHighWarnings = 0,
-                translationMediumWarnings = 0,
-                translationLowWarnings = 0,
-                translationConfidenceScore = Nothing,
+                translationReviewRisk = Just "unsafe",
+                translationInputBytes = Nothing,
+                translationOutputBytes = Nothing,
+                translationExpansionRatio = Nothing,
+                translationHelperBytes = Nothing,
+                translationHelperInvocations = 0,
+                translationExternalRequirements = [],
                 translationOutputPath = Nothing,
                 translationStderrPath = Just (faMonkTranslateStderr artifacts),
                 translationErrorMessage = Just errText
               }
         Just (Right artifact) -> do
-          let MkWarningCounts {wcHigh, wcMedium, wcLow} = summarizeWarnings (mtaWarnings artifact)
-              warnCount = length (mtaWarnings artifact)
-              confidence = confidenceScore (mtaWarnings artifact)
+          inputBytes <- BS.length <$> readFileBS (toFilePath (specPath fixture))
+          let MkDiagnosticCounts {dcErrors, dcWarnings} = summarizeDiagnostics (mtaDiagnostics artifact)
+              outputBytes = textBytes (mtaOutput artifact)
           writeTextFile (faMonkFish artifacts) (mtaOutput artifact)
           writeTextFile (faMonkTranslateStderr artifacts) (T.unlines (mtaStderrLines artifact))
           pure
@@ -117,12 +130,16 @@ buildMonkTranslationReport cfg fixture artifacts =
               { translationTool = ToolMonk,
                 translationStatus = CommandSucceeded,
                 translationExitCode = Just 0,
-                translationWarningCount = warnCount,
+                translationErrorCount = dcErrors,
+                translationWarningCount = dcWarnings,
                 translationNotesCount = mtaNoteCount artifact,
-                translationHighWarnings = wcHigh,
-                translationMediumWarnings = wcMedium,
-                translationLowWarnings = wcLow,
-                translationConfidenceScore = Just confidence,
+                translationReviewRisk = Just (reviewRiskText (reviewRisk (mtaDiagnostics artifact))),
+                translationInputBytes = Just inputBytes,
+                translationOutputBytes = Just outputBytes,
+                translationExpansionRatio = expansionRatio inputBytes outputBytes,
+                translationHelperBytes = Just (helperFootprintBytes (mtaOutput artifact)),
+                translationHelperInvocations = helperInvocationCount (mtaOutput artifact),
+                translationExternalRequirements = map (runtimeProgramText . requirementProgram) (mtaRuntimeRequirements artifact),
                 translationOutputPath = Just (faMonkFish artifacts),
                 translationStderrPath = Just (faMonkTranslateStderr artifacts),
                 translationErrorMessage = Nothing
@@ -150,12 +167,16 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
               { translationTool = ToolBabelfish,
                 translationStatus = CommandTimedOut,
                 translationExitCode = Nothing,
+                translationErrorCount = 0,
                 translationWarningCount = 0,
                 translationNotesCount = 0,
-                translationHighWarnings = 0,
-                translationMediumWarnings = 0,
-                translationLowWarnings = 0,
-                translationConfidenceScore = Nothing,
+                translationReviewRisk = Nothing,
+                translationInputBytes = Just (textBytes bashSource),
+                translationOutputBytes = Nothing,
+                translationExpansionRatio = Nothing,
+                translationHelperBytes = Nothing,
+                translationHelperInvocations = 0,
+                translationExternalRequirements = [],
                 translationOutputPath = Nothing,
                 translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
                 translationErrorMessage = Just "translation timed out"
@@ -171,12 +192,16 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                   { translationTool = ToolBabelfish,
                     translationStatus = CommandSucceeded,
                     translationExitCode = Just exitCodeInt,
+                    translationErrorCount = 0,
                     translationWarningCount = 0,
                     translationNotesCount = 0,
-                    translationHighWarnings = 0,
-                    translationMediumWarnings = 0,
-                    translationLowWarnings = 0,
-                    translationConfidenceScore = Nothing,
+                    translationReviewRisk = Just "clean",
+                    translationInputBytes = Just (textBytes bashSource),
+                    translationOutputBytes = Just (textBytes poStdout),
+                    translationExpansionRatio = expansionRatio (textBytes bashSource) (textBytes poStdout),
+                    translationHelperBytes = Nothing,
+                    translationHelperInvocations = 0,
+                    translationExternalRequirements = [],
                     translationOutputPath = Just (faBabelfishFish artifacts),
                     translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
                     translationErrorMessage = Nothing
@@ -187,12 +212,16 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                   { translationTool = ToolBabelfish,
                     translationStatus = CommandFailed,
                     translationExitCode = Just exitCodeInt,
+                    translationErrorCount = 1,
                     translationWarningCount = 0,
                     translationNotesCount = 0,
-                    translationHighWarnings = 0,
-                    translationMediumWarnings = 0,
-                    translationLowWarnings = 0,
-                    translationConfidenceScore = Nothing,
+                    translationReviewRisk = Just "unsafe",
+                    translationInputBytes = Just (textBytes bashSource),
+                    translationOutputBytes = Nothing,
+                    translationExpansionRatio = Nothing,
+                    translationHelperBytes = Nothing,
+                    translationHelperInvocations = 0,
+                    translationExternalRequirements = [],
                     translationOutputPath = Nothing,
                     translationStderrPath = Just (faBabelfishTranslateStderr artifacts),
                     translationErrorMessage = Just (translationFailureMessage poExitCode poStderr)
@@ -221,22 +250,16 @@ buildMonkArtifactFromGraph recursive path graph = do
   let rootPath = toFilePath path
       orderedTranslations =
         mapMaybe (`M.lookup` sgTranslations graph) (sgOrder graph)
-      translationWarnings = map (stateWarnings . trState) orderedTranslations
-      allWarnings = concat translationWarnings
-      totalNotes = sum (map translationNoteCount translationWarnings)
+      translationDiagnostics = map trDiagnostics orderedTranslations
+      allDiagnostics = concat translationDiagnostics
+      allRequirements = L.nub (concatMap trRuntimeRequirements orderedTranslations)
+      totalNotes = sum (map translationNoteCount translationDiagnostics)
       stderrLines = concatMap (stderrLinesForPath graph) (sgOrder graph)
   (renderedOutput, inlineWarns) <-
     if recursive
       then do
-        inlineWarnsRef <- newIORef []
-        inlined <-
-          inlineStatements
-            (\msg -> modifyIORef' inlineWarnsRef (\msgs -> msgs <> [msg]))
-            (sgTranslations graph)
-            mempty
-            rootPath
-        inlineWarns <- readIORef inlineWarnsRef
-        pure (renderFish inlined, inlineWarns)
+        (inlined, inlineDiagnostics) <- inlineSourceGraph graph rootPath
+        pure (renderScript inlined, map renderDiagnostic inlineDiagnostics)
       else case M.lookup rootPath (sgTranslations graph) of
         Just translation ->
           pure (renderTranslationSingle translation, [])
@@ -245,28 +268,28 @@ buildMonkArtifactFromGraph recursive path graph = do
   pure
     MkMonkTranslationArtifact
       { mtaOutput = renderedOutput,
-        mtaWarnings = allWarnings,
+        mtaDiagnostics = allDiagnostics,
+        mtaRuntimeRequirements = allRequirements,
         mtaNoteCount = totalNotes,
         mtaStderrLines = stderrLines <> inlineWarns
       }
 
 stderrLinesForPath :: SourceGraph -> FilePath -> [Text]
 stderrLinesForPath graph path =
-  map renderParseComment (M.findWithDefault [] path (sgParseComments graph))
-    <> case M.lookup path (sgTranslations graph) of
-      Nothing -> []
-      Just translation ->
-        let warns = stateWarnings (trState translation)
-         in map renderWarning warns <> renderTranslationNotes path warns
+  case M.lookup path (sgTranslations graph) of
+    Nothing -> []
+    Just translation ->
+      map renderDiagnostic (trDiagnostics translation)
+        <> renderTranslationNotes path (trDiagnostics translation)
+        <> map renderRuntimeRequirement (trRuntimeRequirements translation)
 
 renderTranslationSingle :: Translation -> Text
 renderTranslationSingle translation =
-  renderFish (trStatements translation)
+  renderScript (trScript translation)
 
 renderSourceGraphFailureText :: SourceGraphFailure -> Text
 renderSourceGraphFailureText = \case
-  SourceGraphParseErrors _ errs -> T.unlines (map renderParseComment errs)
-  SourceGraphTranslateFailure _ err -> renderTranslateError err
+  SourceGraphFailure _ failure -> T.unlines (map renderDiagnostic (toList (failureDiagnostics failure)))
 
 translationFailureMessage :: ExitCode -> Text -> Text
 translationFailureMessage exitCode stderrText
@@ -276,6 +299,52 @@ translationFailureMessage exitCode stderrText
 timeoutIO :: Int -> IO a -> IO (Maybe a)
 timeoutIO seconds =
   timeout (seconds * 1_000_000)
+
+textBytes :: Text -> Int
+textBytes = BS.length . encodeUtf8
+
+expansionRatio :: Int -> Int -> Maybe Double
+expansionRatio inputBytes outputBytes
+  | inputBytes <= 0 = Nothing
+  | otherwise = Just (fromIntegral outputBytes / fromIntegral inputBytes)
+
+reviewRiskText :: ReviewRisk -> Text
+reviewRiskText = \case
+  Clean -> "clean"
+  Review -> "review"
+  Unsafe -> "unsafe"
+
+runtimeProgramText :: RuntimeProgram -> Text
+runtimeProgramText = \case
+  RequiresCommand commandName -> commandName
+  RequiresFishFeature featureName -> "fish:" <> featureName
+
+helperFootprintBytes :: Text -> Int
+helperFootprintBytes = textBytes . T.unlines . fst . helperTextParts
+
+helperInvocationCount :: Text -> Int
+helperInvocationCount output =
+  let (helperLines, userLines) = helperTextParts output
+      helperNames = mapMaybe helperName helperLines
+      userText = T.unlines userLines
+   in sum (map (`T.count` userText) helperNames)
+
+helperTextParts :: Text -> ([Text], [Text])
+helperTextParts = go False [] [] . T.lines
+  where
+    go _ helperLines userLines [] = (reverse helperLines, reverse userLines)
+    go inHelper helperLines userLines (line : rest)
+      | not inHelper && isHelperStart line = go True (line : helperLines) userLines rest
+      | inHelper && line == "end" = go False (line : helperLines) userLines rest
+      | inHelper = go True (line : helperLines) userLines rest
+      | otherwise = go False helperLines (line : userLines) rest
+    isHelperStart = T.isPrefixOf "function __monk_"
+
+helperName :: Text -> Maybe Text
+helperName line =
+  case T.words line of
+    "function" : name : _ | "__monk_" `T.isPrefixOf` name -> Just name
+    _ -> Nothing
 
 runWorkerFixture :: ToolName -> Path Abs File -> Path Abs File -> IO (Maybe ToolName)
 runWorkerFixture tool babelfishPath path =

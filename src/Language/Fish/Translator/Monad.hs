@@ -25,6 +25,7 @@ module Language.Fish.Translator.Monad
     stateWarnings,
     stateErrexitEnabled,
     statePipefailEnabled,
+    stateRuntimeRequirements,
     addWarning,
     addWarningOnce,
     unsupported,
@@ -32,12 +33,15 @@ module Language.Fish.Translator.Monad
     unsupportedStmt,
     ensureHelper,
     ensureHelperScript,
+    requireRuntime,
     withFunctionScope,
     withCommandSubstScope,
+    withErrexitGuardSuppressed,
     addLocalVars,
     isLocalVar,
     withTokenRange,
     isErrexitEnabled,
+    isErrexitGuardSuppressed,
     isPipefailEnabled,
     setErrexitEnabled,
     setPipefailEnabled,
@@ -46,21 +50,20 @@ module Language.Fish.Translator.Monad
 where
 
 import Control.Monad.Except (MonadError, catchError, throwError)
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.DSL qualified as DSL
 import Language.Fish.Translator.Construction (toRawScript)
 import Language.Fish.Translator.Hoist (Hoisted (..))
 import Language.Fish.Translator.Types
+import Language.Fish.Translator.Warning
 import Monk.Translation.Types
-  ( TranslateConfig (..),
-    TranslateError (..),
-    Warning (..),
-    WarningCode (..),
-    WarningSeverity (..),
+  ( RequirementUse (..),
+    RuntimeProgram (..),
+    RuntimeRequirement (..),
+    TranslateConfig (..),
     defaultConfig,
-    warnMessage,
-    warningCodeSeverity,
   )
 import ShellCheck.AST (Id, Token, getId)
 import ShellCheck.Interface (Position (..))
@@ -92,10 +95,12 @@ data TranslateState = MkTranslateState
     context :: TranslationContext,
     rangeStack :: [SourceRange],
     errexitEnabled :: Bool,
+    errexitGuardSuppressed :: Bool,
     pipefailEnabled :: Bool,
     registeredHelpers :: Set.Set HelperId,
     warningOnceCodes :: Set.Set WarningCode,
-    preamble :: [FishStatement]
+    preamble :: [FishStatement],
+    runtimeRequirements :: M.Map RuntimeProgram (NonEmpty RequirementUse)
   }
   deriving stock (Show, Eq)
 
@@ -133,10 +138,12 @@ runTranslateWithPositions cfg positions (MkTranslateM m) =
             context = MkTranslationContext False False Set.empty,
             rangeStack = [],
             errexitEnabled = False,
+            errexitGuardSuppressed = False,
             pipefailEnabled = False,
             registeredHelpers = Set.empty,
             warningOnceCodes = Set.empty,
-            preamble = []
+            preamble = [],
+            runtimeRequirements = mempty
           }
    in runStateT (runReaderT m env) initState
 
@@ -176,6 +183,10 @@ stateErrexitEnabled = errexitEnabled
 statePipefailEnabled :: TranslateState -> Bool
 statePipefailEnabled = pipefailEnabled
 
+stateRuntimeRequirements :: TranslateState -> [RuntimeRequirement]
+stateRuntimeRequirements =
+  map (uncurry MkRuntimeRequirement) . M.toAscList . runtimeRequirements
+
 addWarning :: (MonadState TranslateState m) => WarningCode -> Maybe Text -> m ()
 addWarning code detail = do
   range <- currentRange
@@ -207,25 +218,74 @@ noteUnsupported code detail = do
 unsupportedStmt :: (MonadTranslate m) => WarningCode -> Maybe Text -> m FishStatement
 unsupportedStmt code detail = do
   unsupported code detail
-  pure (Comment ("Unsupported: " <> warnMessage (mkWarning code detail Nothing)))
+  pure
+    ( StmtList
+        [ Comment ("Unsupported: " <> warnMessage (mkWarning code detail Nothing)),
+          Stmt (Command "false" [])
+        ]
+    )
 
-ensureHelper :: (MonadState TranslateState m) => HelperId -> [FishStatement] -> m ()
-ensureHelper helper stmts = do
+ensureHelper :: (MonadState TranslateState m) => HelperId -> Text -> [FishStatement] -> m ()
+ensureHelper helper reason stmts = do
   st <- get
-  if Set.member helper (registeredHelpers st)
-    then pure ()
-    else
-      modify
-        ( \s ->
-            s
-              { registeredHelpers = Set.insert helper (registeredHelpers s),
-                preamble = preamble s <> stmts
-              }
-        )
+  range <- currentRange
+  modify
+    ( \s ->
+        s
+          { registeredHelpers = Set.insert helper (registeredHelpers s),
+            preamble =
+              if Set.member helper (registeredHelpers st)
+                then preamble s
+                else preamble s <> stmts,
+            runtimeRequirements =
+              foldl'
+                (registerHelperRequirement reason range)
+                (runtimeRequirements s)
+                (helperRuntimePrograms helper)
+          }
+    )
 
-ensureHelperScript :: (MonadState TranslateState m) => HelperId -> DSL.Script -> m ()
-ensureHelperScript helper =
-  ensureHelper helper . toRawScript
+registerHelperRequirement ::
+  Text ->
+  Maybe SourceRange ->
+  M.Map RuntimeProgram (NonEmpty RequirementUse) ->
+  RuntimeProgram ->
+  M.Map RuntimeProgram (NonEmpty RequirementUse)
+registerHelperRequirement reason range requirements program =
+  M.insertWith appendUnique program (MkRequirementUse reason range :| []) requirements
+  where
+    appendUnique new existing =
+      case NE.nonEmpty (filter (`notElem` toList existing) (toList new)) of
+        Nothing -> existing
+        Just additions -> existing <> additions
+
+helperRuntimePrograms :: HelperId -> [RuntimeProgram]
+helperRuntimePrograms = \case
+  HelperPipefail -> []
+  HelperBackground -> RequiresCommand <$> ["mktemp", "sleep", "cat", "rm"]
+  HelperReadRuntime -> RequiresCommand <$> ["python3", "mktemp", "cat", "rm"]
+  HelperProcSubOut -> RequiresCommand <$> ["mktemp", "mkfifo", "cat", "rm", "rmdir"]
+
+ensureHelperScript :: (MonadState TranslateState m) => HelperId -> Text -> DSL.Script -> m ()
+ensureHelperScript helper reason =
+  ensureHelper helper reason . toRawScript
+
+requireRuntime :: (MonadState TranslateState m) => RuntimeProgram -> Text -> m ()
+requireRuntime program reason = do
+  range <- currentRange
+  let use = MkRequirementUse reason range
+  modify
+    ( \st ->
+        st
+          { runtimeRequirements =
+              M.insertWith appendUnique program (use :| []) (runtimeRequirements st)
+          }
+    )
+  where
+    appendUnique new existing =
+      case NE.nonEmpty (filter (`notElem` toList existing) (toList new)) of
+        Nothing -> existing
+        Just additions -> existing <> additions
 
 withScopedField ::
   (MonadState TranslateState m, MonadError TranslateError m) =>
@@ -278,6 +338,13 @@ withCommandSubstScope ::
 withCommandSubstScope =
   withScopedContext (\ctx -> ctx {inCommandSubst = True})
 
+withErrexitGuardSuppressed ::
+  (MonadState TranslateState m, MonadError TranslateError m) =>
+  m a ->
+  m a
+withErrexitGuardSuppressed =
+  withScopedField errexitGuardSuppressed (\suppressed st -> st {errexitGuardSuppressed = suppressed}) (const True)
+
 addLocalVars :: (MonadState TranslateState m) => [Text] -> m ()
 addLocalVars names =
   modify
@@ -306,6 +373,9 @@ withTokenRange tok action = do
 
 isErrexitEnabled :: (MonadState TranslateState m) => m Bool
 isErrexitEnabled = gets errexitEnabled
+
+isErrexitGuardSuppressed :: (MonadState TranslateState m) => m Bool
+isErrexitGuardSuppressed = gets errexitGuardSuppressed
 
 isPipefailEnabled :: (MonadState TranslateState m) => m Bool
 isPipefailEnabled = gets pipefailEnabled

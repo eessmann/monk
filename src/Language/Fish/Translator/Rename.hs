@@ -68,6 +68,7 @@ renameStatementVariable old new = renameStmt
       ExprStringConcat left right -> ExprStringConcat (renameExpr left) (renameExpr right)
       ExprStringOp op expr -> ExprStringOp op (renameExpr expr)
       ExprJoinList expr -> ExprJoinList (renameExpr expr)
+      ExprFileRelative path -> ExprFileRelative path
       ExprMath args -> ExprMath (fmap renameExpr args)
       ExprCommandSubst stmts -> ExprCommandSubst (fmap renameStmt stmts)
       ExprListLiteral exprs -> ExprListLiteral (map renameExpr exprs)

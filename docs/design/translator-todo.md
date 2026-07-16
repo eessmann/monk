@@ -1,124 +1,118 @@
-# Bash to Fish Translator - Active Backlog
+# Monk 0.4 Translator Roadmap
 
-Last refreshed: 2026-06-06
+Last refreshed: 2026-07-16
 
-This file is the active backlog for Monk's translator work.
+This roadmap records evidence, blockers, and remaining work. A feature is only
+marked verified when a reproducible local or CI command supports the claim.
+`docs/design/translator-audit.md` remains the semantic fidelity matrix and
+`docs/migration-guide.md` remains the user-facing cleanup guide.
 
-- `docs/design/translator-audit.md` is the fidelity source of truth.
-- `docs/migration-guide.md` is the user-facing cleanup guide.
-- Checkboxes here mean "actionable engineering work remains", not "semantic parity is solved everywhere".
+## Verified
 
-Current local baseline:
+- The public Fish DSL is structural. Its core types live independently in
+  `Language.Fish.DSL.Types` and `Language.Fish.DSL.Internal`; no public raw AST
+  or lowering module is exposed.
+- Translation, simplification, renaming, source rewriting, and inlining now
+  exchange structural `Script` values. `Monk.AST.Raw` has been removed.
+- `TranslationResult` exposes only a structural `Script`, ordered structured
+  diagnostics, and deduplicated runtime requirements. Strict failures contain a
+  nonempty diagnostic collection.
+- Diagnostics use explicit stable codes, phases, severities, ranges, and
+  `ReviewRisk = Clean | Review | Unsafe`; confidence percentages are retired.
+- ShellCheck source expansion is disabled. Monk's typed `SourceGraph` owns
+  recursive literal source discovery.
+- Standalone `!`, compound commands in covered status positions, fail-closed
+  unsupported statements, extglob compatibility requirements, and dedicated
+  here-string diagnostics have focused tests.
+- Structural `StatusPlan` lowering covers conditionals, cases, loops,
+  selections, functions, and background constructs in conjunction/condition
+  positions. Compound pipeline stages have a Bash/Fish differential fixture.
+- Brace expansion, dollar-single-quoted strings, deprecated dollar-bracket
+  arithmetic, source wrappers, standalone negation, and Bats scope are recorded
+  in an explicit ShellCheck syntax inventory with executable coverage for the
+  supported Bash forms.
+- Separate recursive output is represented as an `OutputBundle`. Generated
+  helper preambles are extracted, structurally deduplicated, and emitted as at
+  most one `_monk_runtime.fish`. Source paths are quoted and resolved relative
+  to `status current-filename`, so nested bundles do not depend on the caller's
+  working directory. An execution test covers two sourced helper consumers.
+  Duplicate user/runtime targets are rejected with
+  `monk.output.duplicate-target` before any file is written.
+- Recursive inlining traverses typed conditions, pipelines, conjunctions,
+  wrappers, redirects, indexes, and command/process substitutions. The CLI's
+  inline mode uses the combined bundle planner, including global helper
+  deduplication and merged runtime requirements. Sources with argv and
+  redirections restore argv and then reproduce the sourced script's exact exit
+  status; a status-7 differential fixture covers `$status` and conditionals.
+- Arbitrary-delimiter multi-variable and array reads use one Python process and
+  no nested Fish process. A proven raw single-variable delimiter path uses Fish
+  4.6 primitives and retains the Python exact fallback for harder cases.
+- On the local `read-delimiter` fixture, generated output moved from 5,326 to
+  936 bytes (82.4% smaller) and the 20-run Hyperfine mean moved from 73.5 ms to
+  9.3 ms (87.3% faster) on the same machine. All six local delimiter/IFS
+  differential fixtures pass.
+- Full neofetch output is valid Fish and measures 665,372 bytes for 376,936
+  input bytes, a 1.7652 expansion ratio. Bounded command-substitution indentation
+  removed alignment-driven whitespace without changing structural nesting.
+- The bake-off report records translated bytes, expansion ratio, helper bytes,
+  helper invocations, declared external requirements, diagnostic counts, and
+  review risk. Its Hyperfine runtime suites replay fixture args, stdin, and run
+  mode against original Bash and generated Fish, then report medians, means,
+  and standard deviations. Runtime plans admit only successful Monk
+  translations, preflight Bash and Fish syntax before Hyperfine, and reject
+  missing artifacts while continuing to allow intentional nonzero script exits.
+- Deduplicated runtime requirements retain operation-specific reasons and every
+  available source range, including repeated uses of the same shared helper.
+- The local suite contains 339 passing tests. With integrations enabled, all
+  locally runnable Bash/Fish differential fixtures pass; six Linux-only output
+  process-substitution fixtures remain skipped on macOS.
+- The parity manifest translates and Fish-syntax-checks all 76 Bash fixtures,
+  recording hashes, bytes, diagnostic codes, helper counts, external
+  requirements, translation success, and syntax success.
+- CI defines bounded Ubuntu jobs for GHC 9.12.2 and 9.14.1 against pinned Fish
+  4.6.0 and the moving official Fish 4 PPA. It gates HLint, Ormolu check mode,
+  build, Haddock, the complete integration suite, the Linux `procsub-output`
+  selector, Fish syntax validation, and parity-manifest upload.
+- GitHub Actions is enabled for `eessmann/monk` with all actions allowed.
 
-- Focused local checks now cover the public diagnostics contract, translator state/warning ordering, shared status/conjunction lowering, bake-off tool preflight messaging, fixture sidecars, and Linux-gated process-substitution output fixtures.
-- The current phase also landed explicit warning code/severity rendering, non-literal/missing `source` diagnostics, exact `set --` argv updates, redirected `shopt` lowering, expanded exact `read` handling, numeric/named `trap` hardening, shell-run timeouts, checked-in bake-off-compatible list coverage, and temp-file-backed status-preserving lowering for covered `>(...)` redirect targets.
+## Blocked
 
-## Current Position
+- Linux output-process-substitution evidence remains open until the new Ubuntu
+  jobs run successfully. Local macOS skips for the six `>(...)` fixtures are not
+  evidence.
+- The workflow has not yet run for this unpublished worktree branch. Ubuntu
+  evidence remains blocked until the branch is pushed and Actions completes.
+- The moving PPA can lag the newest Fish release. Pinned 4.6.0 is the minimum
+  runtime gate; the PPA job is the moving compatibility signal.
 
-Monk is a correctness-first conservative migrator, not a prove-exact transpiler. The translator should prefer:
+## Next
 
-- one consistent lowering policy per construct across all contexts
-- explicit warnings for best-effort branches
-- strict-mode failure for constructs we cannot lower safely
-- runtime evidence before promoting a feature from documented best-effort to exact
+- Capture the first Ubuntu parity manifest and compare its rendered hashes,
+  bytes, diagnostic codes, helper counts, requirements, and success flags with
+  the local architecture checkpoint.
 
-## Active Backlog
+## Deferred
 
-### P0: Keep the remaining best-effort surfaces conservative and explicit
+- Wider compatibility work: `shopt`, traps, coprocesses, nonliteral sources,
+  subshell isolation, broader `set -e`/`pipefail`, and asynchronous output
+  process substitution.
+- External corpus ingestion and mutation/fuzz differential testing.
+- Translator-throughput profiling (`-N1`, sequence-backed accumulation, source
+  queue behavior, and parser configuration) after output-quality work.
+- Comment and shebang preservation unless a concrete consumer requires them.
+- Repository remote-alias cleanup; it is hygiene rather than a translator
+  blocker.
 
-- [x] Expand evidence around residual `set -e` / `pipefail` compound-list edge cases.
-- [x] Expand the exact helper-backed `read` surface and keep residual warnings narrow.
-  - [x] no-variable reads via `REPLY`
-  - [x] no-variable delimiter reads
-  - [x] newline-delimited array and multi-variable reads
-  - [x] non-numeric `-u` values
-  - [x] unsupported flag clusters
-- [ ] Record explicit Linux runtime evidence for covered `>(...)` redirect-target lowering before upgrading it beyond best-effort overall.
-  - [x] Add fast-fail shell-run timeouts so deadlocks fail instead of hanging.
-  - [x] Add local Linux runtime evidence for the `procsub-output*` fixtures, including producer-status, `set -e`, ignored-consumer-status, and compound-consumer behavior.
-  - [x] Add a dedicated Ubuntu CI selector for the Linux-gated `procsub-output*` fixtures.
-  - [ ] Close this item after that evidence step passes on Ubuntu.
+## Release Gates
 
-### P1: Preserve documentation and diagnostics discipline
+Release 0.4.0 only when:
 
-- [ ] Keep this file, `docs/design/translator-audit.md`, and `docs/migration-guide.md` in lockstep whenever a best-effort branch changes status.
-- [ ] Keep warning codes, severities, and rendered CLI text aligned as one documented contract.
-- [ ] Keep bake-off-compatible fixture selection current when new parity fixtures are added.
-
-### P1: Leave these surfaces warning-driven unless exactness is proven
-
-- [ ] non-literal `source`
-- [ ] option-heavy `trap`
-- [ ] `shopt`
-- [ ] `coproc`
-
-### P2: Optimization work only with measurement
-
-- [x] Re-run `cabal bench` once the local Cabal benchmark setup is healthy again.
-- [ ] Extend simplifier and helper cleanups only when the rewrite is semantics-preserving and benchmarked.
-
-## Evidence Required Before Closing Items
-
-- Add a focused runtime fixture or bake-off result for semantic changes, not only translation-shape tests.
-- Add direct unit coverage when changing warning codes, warning severities, or helper registration behavior.
-- Treat Linux as the acceptance source of truth for helper-backed `>(...)`; close that item only after the dedicated Ubuntu CI evidence step passes.
-
-## Archive
-
-The following milestones were completed in the correctness-first pass and are kept here as historical context rather than active backlog.
-
-### Core translator architecture
-
-- [x] `mtl`-based translation monad with source-range tracking, warnings, and strict-mode failures
-- [x] Modular translator split across `Variables`, `Commands`, `Control`, `IO`, `Redirections`, and related helper modules
-- [x] Public library split into `Monk.Translation`, `Monk.AST`, `Monk.Source`, and a thin `Monk` facade
-- [x] `Monk.AST` now exposes the typed Fish DSL; raw constructors moved behind the explicit `Monk.AST.Raw` escape hatch
-- [x] Translator handoff now emits a DSL `Script` and lowers through `Language.Fish.DSL.Lower` before rendering
-- [x] Central pipeline helpers now require `NonEmpty` stages instead of accepting empty lists with a silent `true` fallback
-- [x] Translator modules now import raw AST constructors through `Language.Fish.Translator.Types` instead of importing `Language.Fish.AST` directly
-- [x] Repeated redirect-attachment helpers are centralized behind the translator construction boundary
-- [x] Command-substitution and status-context redirection planning now share one parser/lowerer and carry typed DSL `Arg` values until final raw attachment
-- [x] Unsupported status-context tokens now lower warning-driven to `false` instead of silently succeeding as `true`; `--strict` fails through the normal warning path
-- [x] Generated helper/runtime construction now has a single DSL-to-raw lowering boundary
-- [x] Retired `Language.Fish.Translator.Syntax`; translator implementation imports are split between the raw `Types` facade, public DSL constructors, and the `Construction` lowering boundary
-- [x] Bake-off moved into a separate private library/executable under `scripts/`
-
-### Correctness fixes landed
-
-- [x] Side-effecting parameter expansion now hoists correctly in command arguments, redirections, heredocs, and `case`
-- [x] `${var:?err}` / `${var?err}` abort semantics now hoist correctly
-- [x] `((expr))` status semantics and arithmetic side effects are modeled on the covered surface
-- [x] `until` now negates the whole compound condition list
-- [x] `case` pattern lowering preserves glob semantics on the covered surface
-- [x] Recursive separate `source` output now supports output-rooted bundles and rewrites literal child paths relative to the emitted bundle
-- [x] Bake-off selector files now resolve relative entries from the selector file directory instead of the process cwd
-- [x] `trap` now clears Monk-generated handlers on covered reset forms and degrades pseudo-signals to explicit manual-review notes instead of invalid fish
-- [x] Shared subshell policy now applies across statement, status, and command-substitution contexts
-  - [x] normal mode emits the stable `BestEffortSubshell` warning and lowers to non-isolating `begin ... end`
-  - [x] `--strict` fails on subshells in all covered contexts
-- [x] Command-substitution subshells no longer silently collapse to `true`
-- [x] Unsupported compound status contexts no longer silently collapse to successful `true` in pipelines, conjunctions, conditions, or command substitutions
-
-### Diagnostics and API cleanup
-
-- [x] Typed warnings now carry stable code, severity, detail, and range
-- [x] CLI diagnostics render from structured warnings instead of string matching
-- [x] `Monk.Translation` no longer exposes translator-state constructors publicly
-- [x] Dead translator state (`preserveComments`, `inLoop`, unused source-map field) was removed from the translation state machine
-
-### Helper management and simplification
-
-- [x] Helper registration is now keyed by helper ID instead of per-helper booleans or preamble scans
-- [x] Pipefail, background runtime, exact `read`, and `>(...)` helpers are deduplicated through the shared registry
-- [x] Exact `read` assignment helpers were folded into one mode-driven helper
-- [x] The simplifier now removes synthetic `else true` branches and other trivial wrapper patterns where semantics are unchanged
-
-### Testing and evidence
-
-- [x] Golden, unit, property, integration, real-world, and bake-off seam coverage are all in place
-- [x] Focused parity fixtures cover side-effecting parameter expansion, generalized covered `read -d`, simple `<(...)`, recursive literal `source`, translated background `wait`, and simple `trap ... EXIT`
-- [x] Focused parity fixtures now also cover the subshell-status regression surface:
-  - [x] parent-variable access
-  - [x] exact `read -d` helpers
-  - [x] pipefail helpers
-- [x] Focused parity and unit coverage now also cover exact `set --` argv updates, no-variable/default-newline `read` helpers, redirected `shopt`, numeric and named uncatchable `trap` signals, checked-in bake-off-compatible selectors, and Linux `procsub-output*` fixtures.
+1. raw constructors and lowering internals remain private and unused outside
+   renderer boundaries;
+2. the public API migration is documented in README, architecture, migration
+   guide, audit, and changelog;
+3. semantic and generated-runtime tests pass locally, including Fish syntax and
+   Bash/Fish differential checks;
+4. the parity manifest is captured in Ubuntu CI;
+5. the pinned Fish 4.6.0 and moving Fish 4 jobs are green; and
+6. the Linux `procsub-output` selector supplies current evidence.

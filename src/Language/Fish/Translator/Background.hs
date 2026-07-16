@@ -23,7 +23,7 @@ import Language.Fish.Translator.Types
 
 ensureBackgroundRuntime :: TranslateM ()
 ensureBackgroundRuntime =
-  ensureHelper HelperBackground backgroundRuntimeStatements
+  ensureHelper HelperBackground "track background jobs and preserve their status" backgroundRuntimeStatements
 
 noteBackgroundTracking :: TranslateM ()
 noteBackgroundTracking = do

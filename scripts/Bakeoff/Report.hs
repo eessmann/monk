@@ -25,6 +25,7 @@ newtype HyperfineEnvelope = MkHyperfineEnvelope
 data HyperfineEntry = MkHyperfineEntry
   { command :: Text,
     mean :: Double,
+    median :: Double,
     stddev :: Double
   }
   deriving stock (Eq, Show, Generic)
@@ -38,20 +39,24 @@ readHyperfineSummary title jsonPath markdownPath = do
     else do
       MkHyperfineEnvelope {results} <- readJsonFile jsonPath
       pure $
-        Just
-          MkHyperfineSummary
-            { hyperfineTitle = title,
-              hyperfineJsonPath = jsonPath,
-              hyperfineMarkdownPath = markdownPath,
-              hyperfineResults =
-                [ MkHyperfineResult
-                    { hyperfineCommand = command entry,
-                      hyperfineMean = mean entry,
-                      hyperfineStddev = stddev entry
-                    }
-                | entry <- results
-                ]
-            }
+        if null results
+          then Nothing
+          else
+            Just
+              MkHyperfineSummary
+                { hyperfineTitle = title,
+                  hyperfineJsonPath = jsonPath,
+                  hyperfineMarkdownPath = markdownPath,
+                  hyperfineResults =
+                    [ MkHyperfineResult
+                        { hyperfineCommand = command entry,
+                          hyperfineMean = mean entry,
+                          hyperfineMedian = median entry,
+                          hyperfineStddev = stddev entry
+                        }
+                    | entry <- results
+                    ]
+                }
 
 renderSummaryMarkdown :: MetaReport -> [FixtureReport] -> [HyperfineSummary] -> Text
 renderSummaryMarkdown meta fixtures benchmarkSummaries =
@@ -78,6 +83,11 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
            "- Babelfish translation: " <> renderStatusCounts babelfishTranslationCounts,
            "- Monk runtime: " <> renderStatusCounts monkRuntimeCounts,
            "- Babelfish runtime: " <> renderStatusCounts babelfishRuntimeCounts,
+           "- Monk translated bytes: " <> show monkOutputBytes,
+           "- Monk expansion ratio: " <> maybe "n/a" show monkExpansionRatio,
+           "- Monk helper bytes: " <> show monkHelperBytes,
+           "- Monk helper invocations: " <> show monkHelperInvocations,
+           "- Monk external requirements: " <> renderRequirements monkRequirements,
            "- Fixtures with any runtime diff: " <> show mismatchingFixtures
          ]
       <> skipSection
@@ -90,6 +100,15 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
     babelfishTranslationCounts = collectTranslationCounts fixtureReportBabelfishTranslation fixtures
     monkRuntimeCounts = collectRuntimeCounts fixtureReportMonkRuntime fixtures
     babelfishRuntimeCounts = collectRuntimeCounts fixtureReportBabelfishRuntime fixtures
+    monkReports = mapMaybe fixtureReportMonkTranslation fixtures
+    monkInputBytes = sum (mapMaybe translationInputBytes monkReports)
+    monkOutputBytes = sum (mapMaybe translationOutputBytes monkReports)
+    monkExpansionRatio
+      | monkInputBytes <= 0 = Nothing
+      | otherwise = Just (fromIntegral monkOutputBytes / fromIntegral monkInputBytes :: Double)
+    monkHelperBytes = sum (mapMaybe translationHelperBytes monkReports)
+    monkHelperInvocations = sum (map translationHelperInvocations monkReports)
+    monkRequirements = ordNub (concatMap translationExternalRequirements monkReports)
     mismatches = filter fixtureHasMismatch fixtures
     mismatchingFixtures = length mismatches
     skipCounts = countSkipReasons fixtures
@@ -121,6 +140,10 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
             ""
           ]
             <> concatMap renderBenchmark benchmarkSummaries
+
+    renderRequirements = \case
+      [] -> "none"
+      requirements -> T.intercalate ", " requirements
 
 renderStatusCounts :: [(CommandStatus, Int)] -> Text
 renderStatusCounts counts =
@@ -224,7 +247,7 @@ renderBenchmark summary =
     "- JSON: `" <> fileText (hyperfineJsonPath summary) <> "`",
     "- Markdown: `" <> fileText (hyperfineMarkdownPath summary) <> "`"
   ]
-    <> [ "- " <> hyperfineCommand result <> ": mean=" <> formatSeconds (hyperfineMean result) <> "s, stddev=" <> formatSeconds (hyperfineStddev result) <> "s"
+    <> [ "- " <> hyperfineCommand result <> ": median=" <> formatSeconds (hyperfineMedian result) <> "s, mean=" <> formatSeconds (hyperfineMean result) <> "s, stddev=" <> formatSeconds (hyperfineStddev result) <> "s"
        | result <- hyperfineResults summary
        ]
     <> [""]

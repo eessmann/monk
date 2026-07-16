@@ -12,12 +12,12 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Language.Fish.Translator.Commands
-  ( stripTimePrefix,
+  ( stmtToStatusCommand,
+    stripTimePrefix,
     translateCommandTokensToStatus,
     translateTokenToStatusCmd,
-    translateTokenToStatusCmdM,
   )
-import Language.Fish.Translator.Monad (TranslateM)
+import Language.Fish.Translator.Monad (TranslateM, withErrexitGuardSuppressed)
 import Language.Fish.Translator.Pipeline
   ( applyPipefailIfEnabled,
     jobPipelineFromList,
@@ -43,10 +43,13 @@ translatePipeline bang cmds =
           let pipe = Pipeline (jobPipelineFromListWithTime timed (c NE.:| cs))
            in if tokensHaveBang bang then Stmt (Not pipe) else Stmt pipe
 
-translatePipelineM :: [Token] -> [Token] -> TranslateM FishStatement
-translatePipelineM bang cmds = do
+translatePipelineM :: (Token -> TranslateM FishStatement) -> [Token] -> [Token] -> TranslateM FishStatement
+translatePipelineM translateStmt bang cmds = do
   let (timed, cmds') = stripTimePrefix cmds
-  cmds'' <- mapM translateTokenToStatusCmdM cmds'
+  cmds'' <-
+    mapM
+      (fmap stmtToStatusCommand . withErrexitGuardSuppressed . translateStmt)
+      cmds'
   case cmds'' of
     [] -> pure (Stmt (Command "true" []))
     (c : cs) -> do
@@ -66,6 +69,9 @@ translateTokenToMaybeStatusCmd token =
     T_Pipeline _ bang cmds -> Just (translatePipelineToStatus bang cmds)
     T_AndIf _ l r -> Just (statusConjunction ConjAnd (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
     T_OrIf _ l r -> Just (statusConjunction ConjOr (translateTokenToStatusCmd l) (translateTokenToStatusCmd r))
+    T_Annotation _ _ inner -> translateTokenToMaybeStatusCmd inner
+    T_Include _ inner -> translateTokenToMaybeStatusCmd inner
+    T_SourceCommand _ original _ -> translateTokenToMaybeStatusCmd original
     _ -> Just (Command "false" [])
 
 translatePipelineToStatus :: [Token] -> [Token] -> FishCommand TStatus

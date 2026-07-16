@@ -1,6 +1,6 @@
 cabal-version:       3.14
 name:                monk
-version:             0.3.0
+version:             0.4.0
 synopsis:            Side-project Bash-to-fish translator.
 description:
     Monk is a Haskell project for translating Bash scripts into fish.
@@ -75,14 +75,12 @@ library
   hs-source-dirs:      src
   exposed-modules:     Monk
                      , Monk.AST
-                     , Monk.AST.Raw
                      , Monk.Source
                      , Monk.Translation
                      , Monk.Translation.Types
                      , Language.Fish.DSL
-                     , Language.Fish.DSL.Lower
-                     , Language.Fish.Inline
                      , Monk.Diagnostics
+                     , Monk.Output
   build-depends:       containers
                      , directory
                      , filepath
@@ -91,6 +89,9 @@ library
                      , Language.Fish.AST.Example
                      , Language.Fish.AST.Types
                      , Language.Fish.DSL.Internal
+                     , Language.Fish.DSL.Lower
+                     , Language.Fish.DSL.Types
+                     , Language.Fish.Inline
                      , Language.Fish.Pretty
                      , Language.Fish.Pretty.Command
                      , Language.Fish.Pretty.Expr
@@ -145,6 +146,7 @@ library
                      , Language.Fish.Translator.Variables.ParamParse
                      , Language.Fish.Translator.Variables.ProcessSubst
                      , Language.Fish.Translator.Variables.Substitution
+                     , Language.Fish.Translator.Warning
                      , Language.Fish.Translator.Commands
                      , Language.Fish.Translator.Commands.Args
                      , Language.Fish.Translator.Commands.CommandTokens
@@ -191,6 +193,7 @@ library monk-bakeoff-lib
                      , Bakeoff.Artifacts
                      , Bakeoff.Benchmark
                      , Bakeoff.Execution
+                     , Bakeoff.Execution.Runtime
                      , Bakeoff.Process
                      , Bakeoff.Report
                      , Bakeoff.Runner
@@ -199,7 +202,6 @@ library monk-bakeoff-lib
                      , Bakeoff.Tools
                      , Bakeoff.Types
   other-modules:       Bakeoff.Execution.Diff
-                     , Bakeoff.Execution.Runtime
                      , Bakeoff.Execution.Shared
                      , Bakeoff.Execution.Translation
   build-depends:       monk
@@ -246,6 +248,7 @@ test-suite monk-test
   hs-source-dirs:      test
   main-is:             Spec.hs
   other-modules:       Gen
+                     , Unit.API04
                      , FixtureSupport
                      , TestSupport
                      , ShellSupport
@@ -253,6 +256,7 @@ test-suite monk-test
                      , Golden
                      , Integration
                      , Unit.Inline
+                     , Unit.OutputBundle
                      , Unit.Bakeoff
                      , Unit.Diagnostics
                      , Unit.DSL

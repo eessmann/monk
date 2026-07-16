@@ -1,4 +1,4 @@
-# Translator Audit (2026-06-06)
+# Translator Audit (2026-07-16)
 
 This audit evaluates Monk as a conservative Bash-to-Fish migrator.
 
@@ -32,19 +32,23 @@ The current subshell policy is consistent:
 - `--strict` fails on subshells in statement, status, and command-substitution contexts
 - focused runtime fixtures now cover parent-variable access, exact `read -d`, and pipefail inside status-context subshells
 
-The diagnostics model is also materially stronger than before:
+The public diagnostics model is also materially stronger than before:
 
-- warnings are typed (`WarningCode`, `WarningSeverity`, optional detail, optional range)
-- rendered warning/error text includes the stable code and severity, for example `warning[ReadIssue][medium]`
-- `Monk.Translation.Types` is now the single public owner of translation config, warning metadata, and warning text/severity mapping
-- CLI and reporting layers render user-facing text from those typed diagnostics
-- tests now assert stable warning codes/severities directly instead of relying on string heuristics
-- warning severity and default-message metadata now share one descriptor table, with `allWarningCodes` exposing the public code list for contract checks
+- `Diagnostic` carries a stable explicit code, phase, severity, risk, message,
+  and optional source range
+- rendered text includes stable values such as `warning[monk.read][review]`
+- `ReviewRisk = Clean | Review | Unsafe` replaces lossy confidence percentages
+- `RuntimeRequirement` deduplicates external programs/facilities while retaining
+  use reasons and optional ranges
+- private translator warnings are converted at the public boundary and raw
+  ShellCheck AST dumps are not part of user-facing diagnostics
 
 Helper emission is likewise in better shape:
 
-- pipefail, background runtime, exact `read`, and fallback helper-backed process substitution paths now go through one helper registry keyed by helper ID
-- helper deduplication has direct unit coverage
+- pipefail, background runtime, exact `read`, and fallback helper-backed process substitution paths go through one helper registry keyed by helper ID
+- separate recursive bundles extract live preambles into one shared runtime file
+- arbitrary-delimiter hard cases use one Python process and no nested Fish;
+  a proven raw single-variable path is native Fish 4.6
 
 ## Capability Matrix
 
@@ -55,12 +59,12 @@ Helper emission is likewise in better shape:
 | Command-substitution subshells | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit coverage | no longer silently collapse to `true` |
 | Side-effecting parameter expansion in args / redirections / `case` | exact on covered forms | no warning on covered forms | focused runtime integration plus unit coverage | one of the strongest semantic areas now |
 | Arrays and 0-based to 1-based indexing | exact on covered forms | no warning | unit, property, and runtime evidence | stable area |
-| `read` covered helper path | exact on covered forms | no warning on covered helper-backed forms | focused runtime integration plus unit coverage | covered surface includes empty delimiters, arrays, multi-variable assignment, supported mixed flag clusters, numeric `-u`, no-variable `REPLY`, no-variable delimiter reads, and newline-delimited array/multi-variable reads |
+| `read` covered exact path | exact on covered forms | no warning on covered forms; explicit `python3` requirement on hard paths | focused runtime integration, unit coverage, and measured size/runtime gate | covered surface includes a Fish-native raw single-variable delimiter path plus one-Python hard paths for empty delimiters, arrays, multi-variable assignment, supported clusters, numeric `-u`, and `REPLY` |
 | Residual `read` fallback surface | best-effort | `ReadIssue` warnings | direct unit coverage | non-numeric `-u`, unsupported clusters, and unsupported option combinations remain warning-driven |
-| Here-strings `<<<` | best-effort | no dedicated warning | focused runtime integration | simple cases are covered directly |
+| Here-strings `<<<` | best-effort / unsupported in `--strict` | stable `monk.here-string` diagnostic | focused unit and runtime integration | normal mode retains the covered printf approximation |
 | Process substitution `<(...)` | exact on covered forms | no dedicated warning | focused runtime integration | current simple surface is in good shape |
 | Process substitution `>(...)` | exact on covered Linux redirect-target fixtures / best-effort overall | no warning on covered redirect-target forms; `ProcessSubstitutionIssue` on argument-position output forms | temp-file-backed status-preserving lowering, unit coverage, Linux-gated fixtures, dedicated Ubuntu CI selector | covered `cmd > >(consumer)` forms preserve producer status, honor parent `set -e`, and ignore consumer status; broader async shapes and argument-position forms remain conservative |
-| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph unit coverage, relocated bundle coverage, plus runtime integration | cwd-relative and parent-relative resolution are both exercised, and `--recursive --sources separate --output FILE` now rewrites literal children relative to the emitted bundle |
+| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph, shared-runtime bundle, relocation, and runtime integration coverage | ShellCheck source expansion is disabled; Monk owns discovery and separate bundles use one optional shared runtime with relative quoted paths |
 | Background jobs / translated `wait` | exact on covered translated-wait surface / best-effort otherwise | warning on PID-specific `$!` follow-ons | focused runtime integration | `kill $!`-style PID assumptions remain manual-review territory |
 | `trap` | best-effort overall / exact on covered `EXIT`, reset, named real-signal, and numeric-signal forms | typed warnings for pseudo-signals, named uncatchable signals, and unsupported option surfaces | unit diagnostics plus simple `EXIT` runtime integration | numeric signals stay numeric to avoid platform-specific name mapping; named `KILL`/`STOP` warn instead of registering invalid handlers |
 | `readonly` / `declare -r` | best-effort | stable readonly warning | unit coverage plus incidental runtime evidence | fish has no readonly enforcement |
@@ -80,6 +84,7 @@ The project now has a cleaner documentation split:
 
 - `docs/design/translator-todo.md`: active engineering backlog
 - `docs/design/translator-audit.md`: fidelity source of truth
+- `docs/design/shellcheck-syntax-inventory.md`: parser-node support and scope
 - `docs/migration-guide.md`: user-facing cleanup guide for warning-driven areas
 
 Those three documents should move together whenever a best-effort branch changes status.

@@ -414,4 +414,4 @@ substStatusTokenDescription = \case
   T_CoProcBody {} -> "coprocess body (coproc)"
   T_Backgrounded {} -> "background job"
   T_Script {} -> "script"
-  other -> T.pack (show other)
+  _ -> "unknown ShellCheck token"

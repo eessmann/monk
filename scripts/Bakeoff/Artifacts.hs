@@ -34,7 +34,11 @@ data BakeoffOutputs = MkBakeoffOutputs
     boHyperfineAllJsonPath :: Path Abs File,
     boHyperfineAllMarkdownPath :: Path Abs File,
     boHyperfineBenchmarkJsonPath :: Path Abs File,
-    boHyperfineBenchmarkMarkdownPath :: Path Abs File
+    boHyperfineBenchmarkMarkdownPath :: Path Abs File,
+    boHyperfineRuntimeAllJsonPath :: Path Abs File,
+    boHyperfineRuntimeAllMarkdownPath :: Path Abs File,
+    boHyperfineRuntimeBenchmarkJsonPath :: Path Abs File,
+    boHyperfineRuntimeBenchmarkMarkdownPath :: Path Abs File
   }
 
 data FixtureArtifacts = MkFixtureArtifacts
@@ -91,6 +95,10 @@ bakeoffOutputs outputDir = do
   hyperfineAllMarkdownPath <- (outputDir </>) <$> parseRelFile "hyperfine-all.md"
   hyperfineBenchmarkJsonPath <- (outputDir </>) <$> parseRelFile "hyperfine-benchmark.json"
   hyperfineBenchmarkMarkdownPath <- (outputDir </>) <$> parseRelFile "hyperfine-benchmark.md"
+  hyperfineRuntimeAllJsonPath <- (outputDir </>) <$> parseRelFile "hyperfine-runtime-all.json"
+  hyperfineRuntimeAllMarkdownPath <- (outputDir </>) <$> parseRelFile "hyperfine-runtime-all.md"
+  hyperfineRuntimeBenchmarkJsonPath <- (outputDir </>) <$> parseRelFile "hyperfine-runtime-benchmark.json"
+  hyperfineRuntimeBenchmarkMarkdownPath <- (outputDir </>) <$> parseRelFile "hyperfine-runtime-benchmark.md"
   pure
     MkBakeoffOutputs
       { boShakeDir = shakeDir,
@@ -101,7 +109,11 @@ bakeoffOutputs outputDir = do
         boHyperfineAllJsonPath = hyperfineAllJsonPath,
         boHyperfineAllMarkdownPath = hyperfineAllMarkdownPath,
         boHyperfineBenchmarkJsonPath = hyperfineBenchmarkJsonPath,
-        boHyperfineBenchmarkMarkdownPath = hyperfineBenchmarkMarkdownPath
+        boHyperfineBenchmarkMarkdownPath = hyperfineBenchmarkMarkdownPath,
+        boHyperfineRuntimeAllJsonPath = hyperfineRuntimeAllJsonPath,
+        boHyperfineRuntimeAllMarkdownPath = hyperfineRuntimeAllMarkdownPath,
+        boHyperfineRuntimeBenchmarkJsonPath = hyperfineRuntimeBenchmarkJsonPath,
+        boHyperfineRuntimeBenchmarkMarkdownPath = hyperfineRuntimeBenchmarkMarkdownPath
       }
 
 fixtureArtifacts :: BakeoffConfig -> FixtureSpec -> IO FixtureArtifacts

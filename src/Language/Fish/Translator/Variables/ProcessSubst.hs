@@ -117,7 +117,7 @@ procSubOutRedirectCommand producer consumer =
 
 ensureProcSubOutHelper :: TranslateM ()
 ensureProcSubOutHelper =
-  ensureHelperScript HelperProcSubOut (DSL.script [procSubOutHelperStmt])
+  ensureHelperScript HelperProcSubOut "preserve output process substitution status" (DSL.script [procSubOutHelperStmt])
 
 procSubOutHelperStmt :: DSL.Stmt
 procSubOutHelperStmt =

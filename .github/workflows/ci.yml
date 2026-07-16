@@ -11,12 +11,15 @@ on:
 
 jobs:
   cabal:
-    name: ${{ matrix.os }} / ghc ${{ matrix.ghc }}
+    name: ubuntu / ghc ${{ matrix.ghc }} / fish ${{ matrix.fish }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest]
         cabal: ["3.16.1"]
+        fish: ["4.6.0", "ppa-4"]
         ghc:
           - "9.12.2"
           - "9.14.1"
@@ -45,20 +48,39 @@ jobs:
         path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
         key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
 
-    - name: Install fish
+    - name: Install pinned fish 4.6.0
+      if: matrix.fish == '4.6.0'
       run: |
+        curl --fail --location --retry 3 \
+          https://github.com/fish-shell/fish-shell/releases/download/4.6.0/fish-4.6.0-linux-x86_64.tar.xz \
+          --output /tmp/fish.tar.xz
+        tar -xJf /tmp/fish.tar.xz -C /tmp
+        sudo install /tmp/fish /usr/local/bin/fish
+
+    - name: Install moving fish 4 PPA
+      if: matrix.fish == 'ppa-4'
+      run: |
+        sudo add-apt-repository --yes ppa:fish-shell/release-4
         sudo apt-get update
-        sudo apt-get install -y fish
+        sudo apt-get install --yes fish
+
+    - name: Report fish version
+      run: fish --version
 
     - name: Install dependencies
       run: |
         cabal build all --only-dependencies
-        cabal install hlint --ignore-project --installdir="$HOME/.local/bin" --overwrite-policy=always
+        cabal install hlint ormolu --ignore-project --installdir="$HOME/.local/bin" --overwrite-policy=always
 
     - name: Lint
       run: |
         export PATH="$HOME/.local/bin:$PATH"
         hlint .
+
+    - name: Formatting
+      run: |
+        export PATH="$HOME/.local/bin:$PATH"
+        git ls-files '*.hs' -z | xargs -0 ormolu --mode check
 
     - name: Build
       run: |
@@ -68,14 +90,26 @@ jobs:
       env:
         MONK_INTEGRATION: "1"
       run: |
-        cabal test all
+        timeout 20m cabal test all
 
     - name: Linux process substitution evidence
       env:
         MONK_INTEGRATION: "1"
       run: |
-        cabal test monk-test --test-options='-p procsub-output'
+        timeout 5m cabal test monk-test --test-options='-p procsub-output'
+
+    - name: Fixture syntax and parity manifest
+      run: |
+        cabal build exe:monk
+        scripts/generate-parity-manifest.sh \
+          "$(cabal list-bin exe:monk)" \
+          artifacts/parity-manifest.tsv
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: parity-ghc-${{ matrix.ghc }}-fish-${{ matrix.fish }}
+        path: artifacts/parity-manifest.tsv
 
     - name: Documentation
       run: |
-        cabal haddock
+        cabal haddock all

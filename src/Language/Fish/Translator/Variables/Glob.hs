@@ -6,7 +6,11 @@ module Language.Fish.Translator.Variables.Glob
     wordNeedsExtglobShim,
     renderGlobWord,
     renderGlobWordRaw,
+    renderBraceExpansion,
+    braceExpandedGlobList,
+    wordHasBraceExpansion,
     extglobShimListExpr,
+    extglobShimListExprM,
     parseGlobPattern,
     renderExtglobForFish,
     renderExtglobRaw,
@@ -16,8 +20,16 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Language.Fish.Translator.Monad
+  ( TranslateM,
+    WarningCode (CompatibilityFallback),
+    requireRuntime,
+    unsupported,
+  )
 import Language.Fish.Translator.Token (tokenRawText, tokenToLiteralText)
 import Language.Fish.Translator.Types
+import Language.Fish.Translator.Variables.Common (paramNameFrom, specialVarName)
+import Monk.Translation.Types (RuntimeProgram (RequiresCommand))
 import ShellCheck.AST
 
 wordIsGlob :: [Token] -> Bool
@@ -28,12 +40,14 @@ wordIsGlob parts =
       T_Literal {} -> True
       T_Glob {} -> True
       T_Extglob {} -> True
+      T_BraceExpansion {} -> True
       _ -> False
 
     hasGlobMeta = \case
       T_Literal _ s -> hasGlobChars (toText s)
       T_Glob {} -> True
       T_Extglob {} -> True
+      T_BraceExpansion {} -> True
       _ -> False
 
     hasGlobChars = T.any (`elem` ("*?[]{}" :: String))
@@ -55,6 +69,7 @@ renderGlobWord =
     T_Literal _ s -> toText s
     T_Glob _ s -> toText s
     T_Extglob _ op parts -> fromMaybe (renderExtglobRaw op parts) (renderExtglobForFish op parts)
+    T_BraceExpansion _ parts -> renderBraceExpansion parts
     other -> tokenToLiteralText other
 
 renderGlobWordRaw :: [Token] -> Text
@@ -63,6 +78,7 @@ renderGlobWordRaw =
     T_Literal _ s -> toText s
     T_Glob _ s -> toText s
     T_Extglob _ op parts -> renderExtglobRaw op parts
+    T_BraceExpansion _ parts -> renderBraceExpansion parts
     other -> tokenToLiteralText other
 
 extglobShimListExpr :: Text -> FishExpr (TList TStr)
@@ -79,6 +95,12 @@ extglobShimListExpr pat =
         )
         NE.:| []
     )
+
+extglobShimListExprM :: Text -> TranslateM (FishExpr (TList TStr))
+extglobShimListExprM patternText = do
+  unsupported CompatibilityFallback (Just "Bash extglob compatibility fallback emitted")
+  requireRuntime (RequiresCommand "bash") "evaluate unsupported Bash extglob"
+  pure (extglobShimListExpr patternText)
 
 extglobShimScript :: Text -> Text
 extglobShimScript pat =
@@ -133,6 +155,47 @@ renderExtglobRaw :: String -> [Token] -> Text
 renderExtglobRaw op parts =
   toText op <> "(" <> T.intercalate "|" (extglobAlternatives parts) <> ")"
 
+renderBraceExpansion :: [Token] -> Text
+renderBraceExpansion parts =
+  "{" <> T.intercalate "," (map renderBracePart parts) <> "}"
+
+wordHasBraceExpansion :: [Token] -> Bool
+wordHasBraceExpansion = any $ \case
+  T_BraceExpansion {} -> True
+  T_NormalWord _ parts -> wordHasBraceExpansion parts
+  _ -> False
+
+braceExpandedGlobList :: [Token] -> FishExpr (TList TStr)
+braceExpandedGlobList tokens =
+  case map (ExprGlob . parseGlobPattern) (expandBracePatterns tokens) of
+    [] -> ExprListLiteral []
+    headExpr : rest -> foldl' ExprListConcat headExpr rest
+
+expandBracePatterns :: [Token] -> [Text]
+expandBracePatterns =
+  foldl'
+    ( \prefixes token ->
+        [ prefix <> suffix
+        | prefix <- prefixes,
+          suffix <- expandBraceToken token
+        ]
+    )
+    [""]
+
+expandBraceToken :: Token -> [Text]
+expandBraceToken = \case
+  T_BraceExpansion _ alternatives -> concatMap expandBraceToken alternatives
+  T_NormalWord _ parts -> expandBracePatterns parts
+  token -> [renderBracePart token]
+
+renderBracePart :: Token -> Text
+renderBracePart = \case
+  T_NormalWord _ parts -> foldMap renderBracePart parts
+  T_DollarBraced _ _ inner ->
+    maybe (tokenRawText inner) (\name -> "{$" <> specialVarName name <> "}") (paramNameFrom inner)
+  T_DoubleQuoted _ parts -> foldMap renderBracePart parts
+  other -> tokenRawText other
+
 extglobAlternatives :: [Token] -> [Text]
 extglobAlternatives parts =
   let splitAlts = splitExtglobParts parts
@@ -167,6 +230,7 @@ patternTextFromToken = \case
   T_Glob _ s -> toText s
   T_Literal _ s -> toText s
   T_Extglob _ op parts -> renderExtglobRaw op parts
+  T_BraceExpansion _ parts -> renderBraceExpansion parts
   T_SingleQuoted _ s -> toText s
   T_DoubleQuoted _ parts -> T.concat (map tokenToLiteralText parts)
   other ->

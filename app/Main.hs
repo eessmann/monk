@@ -3,33 +3,35 @@
 
 module Main (main) where
 
+import Data.List qualified as L
+import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Set qualified as Set
-import Monk.Diagnostics
-  ( renderParseComment,
-    renderTranslateError,
-    renderTranslationNotes,
-    renderWarning,
+import Monk.AST (renderScript)
+import Monk.Diagnostics (renderDiagnostic, renderRuntimeRequirement, renderTranslationNotes)
+import Monk.Output
+  ( GeneratedFile (..),
+    OutputBundle (bundleUserFiles),
+    OutputTarget (OutputPath, OutputStdout),
+    planCombinedOutputBundle,
+    planSeparateOutputBundle,
+    renderOutputBundle,
   )
 import Monk.Source
   ( SourceGraph (..),
     SourceGraphFailure (..),
     SourceMode (..),
+    Translation (trDiagnostics, trRuntimeRequirements),
     rewriteSources,
     translateSourceGraph,
   )
 import Monk.Translation
-  ( TranslateError,
-    Translation (..),
-    Warning,
+  ( Diagnostic,
+    RuntimeRequirement,
+    TranslationFailure (..),
     defaultConfig,
-    inlineStatements,
-    renderFish,
-    stateWarnings,
     strictConfig,
   )
 import Options.Applicative
-import ShellCheck.Interface (PositionedComment)
 import System.Directory (canonicalizePath, createDirectoryIfMissing)
 import System.FilePath qualified as FP
 import System.IO (hPutStrLn)
@@ -98,45 +100,65 @@ emitSourceGraphWarnings :: Options -> SourceGraph -> IO ()
 emitSourceGraphWarnings opts graph =
   unless (optQuietWarnings opts) $
     forM_ (sgOrder graph) $ \path -> do
-      emitParseWarnings (M.findWithDefault [] path (sgParseComments graph))
       case M.lookup path (sgTranslations graph) of
         Nothing -> pure ()
         Just translation -> do
-          let warns = stateWarnings (trState translation)
-          emitTranslateWarnings warns
-          emitTranslateNotes path warns
+          emitDiagnostics (trDiagnostics translation)
+          emitTranslateNotes path (trDiagnostics translation)
+          when (optSourceMode opts == SourceSeparate) $
+            emitRuntimeRequirements (trRuntimeRequirements translation)
 
 emitSourceGraphFailure :: SourceGraphFailure -> IO ()
 emitSourceGraphFailure = \case
-  SourceGraphParseErrors _ errs -> emitParseErrors errs
-  SourceGraphTranslateFailure _ err -> emitTranslateError err
+  SourceGraphFailure _ failure -> emitTranslationFailure failure
 
 outputInline :: Options -> SourceGraph -> FilePath -> IO ()
-outputInline opts graph rootPath =
-  case M.lookup rootPath (sgTranslations graph) of
-    Nothing -> emitWarn opts "warning: no translation output"
-    Just _ -> do
-      stmts <- inlineStatements (emitWarn opts) (sgTranslations graph) Set.empty rootPath
-      writeOutput opts (renderFish stmts)
+outputInline opts graph rootPath = do
+  let target = maybe OutputStdout OutputPath (optOutput opts)
+  planned <- planCombinedOutputBundle target rootPath graph
+  case planned of
+    Left diagnostic -> do
+      emitDiagnostics [diagnostic]
+      exitFailure
+    Right bundle -> do
+      let generated = NE.head (bundleUserFiles bundle)
+          translatedDiagnostics =
+            concat
+              [ trDiagnostics translation
+              | path <- sgOrder graph,
+                Just translation <- [M.lookup path (sgTranslations graph)]
+              ]
+          inlineDiagnostics = generatedDiagnostics generated L.\\ translatedDiagnostics
+      unless (optQuietWarnings opts) $ do
+        emitDiagnostics inlineDiagnostics
+        emitRuntimeRequirements (generatedRuntimeRequirements generated)
+      writeOutput opts (renderScript (generatedScript generated))
 
 outputSeparate :: Options -> SourceGraph -> FilePath -> IO ()
 outputSeparate opts graph rootPath =
-  let translations =
-        case (optRecursive opts, optOutput opts) of
-          (True, Just rootOutput) -> planSeparateOutputs rootOutput rootPath graph
-          _ -> sgTranslations graph
-   in case M.lookup rootPath translations of
-        Nothing -> emitWarn opts "warning: no translation output"
-        Just rootTr -> do
-          writeOutput opts (renderFish (rewriteSources translations rootTr))
-          when (optRecursive opts) $ do
-            let writeRoot = isNothing (optOutput opts)
-            forM_ (M.toList translations) $ \(sourcePath, tr) -> do
-              let outPath = translationOutputPath tr
-                  rendered = renderFish (rewriteSources translations tr)
-                  shouldWrite = writeRoot || sourcePath /= rootPath
-              when shouldWrite $
-                writeFileTextEnsuringDir outPath rendered
+  case M.lookup rootPath (sgTranslations graph) of
+    Nothing -> emitWarn opts "warning: no translation output"
+    Just rootTranslation
+      | not (optRecursive opts) ->
+          writeOutput opts (renderScript (rewriteSources (sgTranslations graph) rootTranslation))
+      | otherwise -> do
+          let rootOutput = fromMaybe (FP.replaceExtension rootPath "fish") (optOutput opts)
+          case planSeparateOutputBundle rootOutput rootPath graph of
+            Left diagnostic -> do
+              emitDiagnostics [diagnostic]
+              exitFailure
+            Right bundle -> do
+              let rendered = renderOutputBundle bundle
+                  rootTarget = OutputPath rootOutput
+              case L.lookup rootTarget rendered of
+                Nothing -> emitWarn opts "warning: no root translation output"
+                Just rootText -> writeOutput opts rootText
+              forM_ rendered $ \(target, contents) ->
+                case target of
+                  OutputPath path ->
+                    when (isNothing (optOutput opts) || path /= rootOutput) $
+                      writeFileTextEnsuringDir path contents
+                  _ -> pure ()
 
 writeOutput :: Options -> Text -> IO ()
 writeOutput opts output =
@@ -149,55 +171,19 @@ writeFileTextEnsuringDir path contents = do
   createDirectoryIfMissing True (FP.takeDirectory path)
   writeFileText path contents
 
-translationOutputPath :: Translation -> FilePath
-translationOutputPath translation =
-  FP.replaceExtension (trPath translation) "fish"
+emitDiagnostics :: [Diagnostic] -> IO ()
+emitDiagnostics = mapM_ (hPutStrLn stderr . toString . renderDiagnostic)
 
-planSeparateOutputs :: FilePath -> FilePath -> SourceGraph -> M.Map FilePath Translation
-planSeparateOutputs rootOutput rootPath graph =
-  let translations = sgTranslations graph
-      sourceRoot = commonAncestorDir (sgOrder graph)
-      outputRootDir = FP.takeDirectory rootOutput
-   in M.mapWithKey (relocate sourceRoot outputRootDir) translations
-  where
-    relocate sourceRoot outputRootDir sourcePath translation
-      | sourcePath == rootPath = translation {trPath = rootOutput}
-      | otherwise =
-          let relativeSourcePath = FP.makeRelative sourceRoot sourcePath
-              outputPath = FP.combine outputRootDir (FP.replaceExtension relativeSourcePath "fish")
-           in translation {trPath = outputPath}
+emitTranslationFailure :: TranslationFailure -> IO ()
+emitTranslationFailure = emitDiagnostics . toList . failureDiagnostics
 
-commonAncestorDir :: [FilePath] -> FilePath
-commonAncestorDir = \case
-  [] -> "."
-  (path : rest) ->
-    foldl' sharedDirectory (FP.takeDirectory path) (map FP.takeDirectory rest)
-  where
-    sharedDirectory left right =
-      let commonSegments =
-            map fst $
-              takeWhile (uncurry (==)) $
-                zip (FP.splitDirectories (FP.normalise left)) (FP.splitDirectories (FP.normalise right))
-       in case commonSegments of
-            [] -> "."
-            segments -> FP.joinPath segments
+emitTranslateNotes :: FilePath -> [Diagnostic] -> IO ()
+emitTranslateNotes path diagnostics =
+  mapM_ (hPutStrLn stderr . toString) (renderTranslationNotes path diagnostics)
 
-emitParseWarnings :: [PositionedComment] -> IO ()
-emitParseWarnings = mapM_ (hPutStrLn stderr . toString . renderParseComment)
-
-emitParseErrors :: [PositionedComment] -> IO ()
-emitParseErrors = mapM_ (hPutStrLn stderr . toString . renderParseComment)
-
-emitTranslateWarnings :: [Warning] -> IO ()
-emitTranslateWarnings = mapM_ (hPutStrLn stderr . toString . renderWarning)
-
-emitTranslateError :: TranslateError -> IO ()
-emitTranslateError err =
-  hPutStrLn stderr (toString (renderTranslateError err))
-
-emitTranslateNotes :: FilePath -> [Warning] -> IO ()
-emitTranslateNotes path warns =
-  mapM_ (hPutStrLn stderr . toString) (renderTranslationNotes path warns)
+emitRuntimeRequirements :: [RuntimeRequirement] -> IO ()
+emitRuntimeRequirements =
+  mapM_ (hPutStrLn stderr . toString . renderRuntimeRequirement)
 
 emitWarn :: Options -> Text -> IO ()
 emitWarn opts msg =

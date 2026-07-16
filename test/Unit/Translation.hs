@@ -7,16 +7,17 @@ where
 
 import Data.Text qualified as T
 import Monk.Translation
-  ( TranslationResult (..),
+  ( Diagnostic (..),
+    DiagnosticCode (..),
+    TranslationResult (..),
     defaultConfig,
     parseBashScript,
     renderTranslation,
-    stateWarnings,
     strictConfig,
     translateParseResult,
-    translationState,
-    warnMessage,
   )
+import ShellCheck.AST qualified as Bash
+import ShellCheck.Interface (ParseResult (..))
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 import TestSupport
@@ -48,7 +49,7 @@ unitTranslationTests =
         T.isInfixOf "wc '-c' > '/tmp/monk-count'" out H.@? "expected process-substitution body redirection",
       H.testCase "Echo -e lowers to printf %b" $ do
         out <- translateScript "echo -e \"hi\\nthere\""
-        T.isInfixOf "printf '%b\\n'" out H.@? "expected printf %b with newline",
+        T.isInfixOf "printf \"%b\\\\n\"" out H.@? "expected printf %b with newline",
       H.testCase "Echo -n stays echo with -n" $ do
         out <- translateScript "echo -n hi"
         T.isInfixOf "echo '-n' 'hi'" out H.@? "expected echo -n",
@@ -155,11 +156,36 @@ unitTranslationTests =
         T.isInfixOf "printf 'bye' 3>&-" out H.@? "expected fd close redirect"
         T.isInfixOf "cat <> 'rw'" out H.@? "expected read-write redirect",
       H.testCase "Unsupported pipeline status stage is not silent success" $ do
-        out <- translateScript "case x in x) false ;; esac | wc -c"
-        T.isInfixOf "false | wc '-c'" out H.@? "expected unsupported stage to fail closed"
-        H.assertBool
-          ("unexpected silent true pipeline stage: " <> T.unpack out)
-          (not (T.isInfixOf "true | wc" out)),
+        parsed <- parseBashScript "spec.sh" "false | wc -c"
+        let literal ident = Bash.T_Literal (Bash.Id ident)
+            word ident literalId text = Bash.T_NormalWord (Bash.Id ident) [literal literalId text]
+            command ident nameIdent nameLiteralId name args =
+              Bash.T_SimpleCommand
+                (Bash.Id ident)
+                []
+                (word nameIdent nameLiteralId name : args)
+            body = command 100 101 102 "false" []
+            batsStage = Bash.T_BatsTest (Bash.Id 103) "unsupported" body
+            wcStage = command 104 105 106 "wc" [word 107 108 "-c"]
+            root =
+              Bash.T_Annotation
+                (Bash.Id 109)
+                []
+                ( Bash.T_Script
+                    (Bash.Id 110)
+                    (literal 111 "")
+                    [Bash.T_Pipeline (Bash.Id 112) [] [batsStage, wcStage]]
+                )
+        case translateParseResult defaultConfig parsed {prRoot = Just root} of
+          Left failure -> H.assertFailure (show failure)
+          Right translation -> do
+            let out = renderTranslation translation
+            T.isInfixOf "false" out H.@? "expected unsupported stage to fail closed"
+            T.isInfixOf "| wc '-c'" out H.@? "expected the remaining pipeline stage"
+            map diagnosticCode (translationDiagnostics translation) @?= [MkDiagnosticCode "monk.unsupported"]
+            H.assertBool
+              ("unexpected silent true pipeline stage: " <> T.unpack out)
+              (not (T.isInfixOf "true | wc" out)),
       H.testCase "Errexit guard is command-substitution aware" $ do
         let script =
               T.unlines
@@ -380,7 +406,7 @@ unitTranslationTests =
       H.testCase "Read flags translate to fish equivalents" $ do
         outD <- translateScript "read -d : first second"
         T.isInfixOf "__monk_read_capture_delim" outD H.@? "expected delimiter capture helper"
-        T.isInfixOf "__monk_read_assign" outD H.@? "expected Bash-style assignment helper"
+        T.isInfixOf "split0" outD H.@? "expected combined Bash-style field assignment"
         H.assertBool
           ("unexpected delimiter warning comment in exact helper path: " <> T.unpack outD)
           (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" outD))
@@ -399,13 +425,14 @@ unitTranslationTests =
       H.testCase "Read helpers are registered once" $ do
         out <- translateScript "read -d : a b\nread -d : c d"
         T.count "function __monk_read_capture_delim" out @?= 1
-        T.count "function __monk_read_assign" out @?= 1,
+        T.count "function __monk_return_status" out @?= 1
+        T.count "python3" out @?= 1,
       H.testCase "Background jobs use Monk tracking runtime" $ do
         out <- translateScript "false &\nbg=$!\nwait \"$bg\""
         T.isInfixOf "__monk_bg_status_path" out H.@? "expected background status helper"
         T.isInfixOf "set --global __monk_last_job $__monk_bg_seq" out H.@? "expected Monk job token"
         T.isInfixOf "__monk_wait" out H.@? "expected translated wait helper"
-        T.isInfixOf "printf '%s\\n' $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
+        T.isInfixOf "printf \"%s\\\\n\" $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
         H.assertBool "expected $! to lower to Monk job token" (not (T.isInfixOf "$last_pid" out)),
       H.testCase "Background runtime is registered once" $ do
         out <- translateScript "false &\nwait \"$!\"\ntrue &\nwait \"$!\""
@@ -420,8 +447,8 @@ unitTranslationTests =
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (stateWarnings (translationState translation))
-            T.isInfixOf "__monk_read_assign" out H.@? "expected exact array assignment helper"
+                warnMessages = map diagnosticMessage (translationDiagnostics translation)
+            T.isInfixOf "set --global fields $__monk_read_fields" out H.@? "expected exact array assignment"
             T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited capture helper"
             H.assertBool
               ("unexpected warnings in exact array path: " <> show warnMessages)
@@ -434,8 +461,8 @@ unitTranslationTests =
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (stateWarnings (translationState translation))
-            T.isInfixOf "__monk_read_assign" out H.@? "expected exact variable assignment helper"
+                warnMessages = map diagnosticMessage (translationDiagnostics translation)
+            T.isInfixOf "set --global one $__monk_read_fields[1]" out H.@? "expected exact variable assignment"
             H.assertBool
               ("unexpected warnings in exact multi-var path: " <> show warnMessages)
               ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
@@ -447,7 +474,7 @@ unitTranslationTests =
           Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
           Right translation -> do
             let out = renderTranslation translation
-                warnMessages = map warnMessage (stateWarnings (translationState translation))
+                warnMessages = map diagnosticMessage (translationDiagnostics translation)
             T.isInfixOf "__monk_read_capture_delim" out H.@? "expected exact capture helper"
             H.assertBool
               ("unexpected delimiter warning in mixed exact path: " <> show warnMessages)

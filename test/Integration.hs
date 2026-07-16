@@ -5,7 +5,7 @@ module Integration
   )
 where
 
-import Data.Set qualified as Set
+import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import FixtureSupport
@@ -16,17 +16,20 @@ import FixtureSupport
     loadFixtureRecursive,
     loadFixtureStdin,
   )
-import Monk.Diagnostics (renderParseComment, renderTranslateError)
+import Monk.Diagnostics (renderDiagnostic)
+import Monk.Output
+  ( OutputTarget (OutputStdout),
+    planCombinedOutputBundle,
+    renderOutputBundle,
+  )
 import Monk.Source
-  ( SourceGraph (..),
-    SourceGraphFailure (..),
+  ( SourceGraphFailure (..),
     translateSourceGraph,
   )
 import Monk.Translation
-  ( defaultConfig,
-    inlineStatements,
+  ( TranslationFailure (..),
+    defaultConfig,
     parseBashScript,
-    renderFish,
     renderTranslation,
     translateParseResult,
   )
@@ -82,6 +85,11 @@ integrationFixtures =
     MkIntegrationFixture "param-expansion-args" "test/fixtures/integration/param-expansion-args.bash",
     MkIntegrationFixture "param-expansion-redirection" "test/fixtures/integration/param-expansion-redirection.bash",
     MkIntegrationFixture "param-expansion-case" "test/fixtures/integration/param-expansion-case.bash",
+    MkIntegrationFixture "syntax-brace-expansion" "test/fixtures/integration/syntax-brace-expansion.bash",
+    MkIntegrationFixture "syntax-dollar-single-quote" "test/fixtures/integration/syntax-dollar-single-quote.bash",
+    MkIntegrationFixture "syntax-dollar-bracket-arithmetic" "test/fixtures/integration/syntax-dollar-bracket-arithmetic.bash",
+    MkIntegrationFixture "syntax-standalone-negation" "test/fixtures/integration/syntax-standalone-negation.bash",
+    MkIntegrationFixture "compound-status-pipeline" "test/fixtures/integration/compound-status-pipeline.bash",
     MkIntegrationFixture "procsub-input" "test/fixtures/integration/procsub-input.bash",
     MkIntegrationFixture "procsub-output" "test/fixtures/integration/procsub-output.bash",
     MkIntegrationFixture "procsub-output-pipeline" "test/fixtures/integration/procsub-output-pipeline.bash",
@@ -91,6 +99,7 @@ integrationFixtures =
     MkIntegrationFixture "procsub-output-compound" "test/fixtures/integration/procsub-output-compound.bash",
     MkIntegrationFixture "for-underscore" "test/fixtures/integration/for-underscore.bash",
     MkIntegrationFixture "source-recursive" "test/fixtures/integration/source-recursive.bash",
+    MkIntegrationFixture "source-recursive-runtime" "test/fixtures/integration/source-recursive-runtime.bash",
     MkIntegrationFixture "trap-exit" "test/fixtures/integration/trap-exit.bash",
     MkIntegrationFixture "trap-exit-expansion" "test/fixtures/integration/trap-exit-expansion.bash",
     MkIntegrationFixture "arith-short-circuit" "test/fixtures/integration/arith-short-circuit.bash",
@@ -189,12 +198,17 @@ translateScriptTextRecursive path = do
   case graphE of
     Left err -> pure (Left (renderSourceGraphFailure err))
     Right graph -> do
-      stmts <- inlineStatements (\_ -> pure ()) (sgTranslations graph) Set.empty rootPath
-      pure (Right (renderFish stmts))
+      planned <- planCombinedOutputBundle OutputStdout rootPath graph
+      pure $
+        case planned of
+          Left diagnostic -> Left (toString (renderDiagnostic diagnostic))
+          Right bundle ->
+            maybe
+              (Left "combined output bundle did not contain stdout")
+              Right
+              (L.lookup OutputStdout (renderOutputBundle bundle))
 
 renderSourceGraphFailure :: SourceGraphFailure -> String
 renderSourceGraphFailure = \case
-  SourceGraphParseErrors _ errs ->
-    toString (T.unlines (map renderParseComment errs))
-  SourceGraphTranslateFailure _ err ->
-    toString (renderTranslateError err)
+  SourceGraphFailure _ failure ->
+    toString (T.unlines (map renderDiagnostic (toList (failureDiagnostics failure))))

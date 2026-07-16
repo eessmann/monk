@@ -9,15 +9,17 @@ import Control.Exception (bracket)
 import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
+import Monk.AST (renderScript)
 import Monk.Source
   ( SourceGraph,
+    Translation (..),
     resolveSourcePath,
     rewriteSources,
     sgOrder,
     sgTranslations,
     translateSourceGraph,
   )
-import Monk.Translation (Translation (..), defaultConfig, renderFish)
+import Monk.Translation (defaultConfig)
 import Path (Abs, Dir, File, Path, parseRelDir, parseRelFile, toFilePath, (</>))
 import Path.IO qualified as PathIO
 import ShellSupport
@@ -55,7 +57,7 @@ unitSourceTests =
         case M.lookup (toFilePath rootPath) (sgTranslations graph) of
           Nothing -> H.assertFailure "missing root translation"
           Just rootTranslation -> do
-            let rendered = renderFish (rewriteSources (sgTranslations graph) rootTranslation)
+            let rendered = renderScript (rewriteSources (sgTranslations graph) rootTranslation)
             T.isInfixOf "source 'test/fixtures/integration/source-recursive-child.fish'" rendered
               H.@? "expected rewritten .fish source path",
       H.testCase "relocated recursive sources stay runnable from the output bundle" $ do
@@ -74,8 +76,8 @@ unitSourceTests =
           case (M.lookup (toFilePath rootPath) relocated, M.lookup (toFilePath childPath) relocated) of
             (Just rootTranslation, Just childTranslation) -> do
               createDirectoryIfMissing True (toFilePath bundleChildDir)
-              let rootRendered = renderFish (rewriteSources relocated rootTranslation)
-                  childRendered = renderFish (rewriteSources relocated childTranslation)
+              let rootRendered = renderScript (rewriteSources relocated rootTranslation)
+                  childRendered = renderScript (rewriteSources relocated childTranslation)
               T.isInfixOf "source 'children/source-recursive-child.fish'" rootRendered
                 H.@? "expected bundled root to source bundled child relatively"
               TIO.writeFile bundleRootPath rootRendered
@@ -93,7 +95,8 @@ unitSourceTests =
                   )
                   []
                   ""
-              rrStdout fishRes @?= "argv:left|right\nafter:child\n"
+              rrStdout fishRes
+                @?= "argv:left|right\nstatus:7\nargv:left|right\nexpected-failure\nafter:child\n"
             _ -> H.assertFailure "missing relocated translations",
       H.testCase "resolveSourcePath keeps missing files unresolved" $ do
         rootPath <- repoFile "test/fixtures/integration/source-recursive.bash"
