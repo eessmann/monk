@@ -43,7 +43,7 @@
 - Consumes: the approved design spec, the audit's semantic capability matrix, the syntax inventory's parser policy, and the live verification evidence recorded on 2026-07-31.
 - Produces: the repository's ordered translator backlog with exact release gates, post-release priorities, and cross-document maintenance rules.
 
-- [ ] **Step 1: Prove that the existing roadmap has the obsolete shape**
+- [x] **Step 1: Prove that the existing roadmap has the obsolete shape**
 
 Run:
 
@@ -57,7 +57,7 @@ Expected:
 - The first command finds `Verified`, `Blocked`, `Next`, and `Deferred`.
 - The second command exits with status 1 and prints no matches.
 
-- [ ] **Step 2: Refresh the evidence that the roadmap will summarize**
+- [x] **Step 2: Refresh the evidence that the roadmap will summarize**
 
 Run these commands separately:
 
@@ -101,7 +101,7 @@ Expected at this checkpoint:
 
 If any substantive result differs, stop before replacing the roadmap and revise the dated evidence rows to match the new result. Do not preserve a stale count or CI claim.
 
-- [ ] **Step 3: Replace the roadmap with the approved two-horizon document**
+- [x] **Step 3: Replace the roadmap with the approved two-horizon document**
 
 Replace the complete contents of `docs/design/translator-todo.md` with:
 
@@ -329,7 +329,7 @@ target metric, and regression gate.
   the changelog already preserve that history.
 ```
 
-- [ ] **Step 4: Verify the new structure and required gap coverage**
+- [x] **Step 4: Verify the new structure and required gap coverage**
 
 Run:
 
@@ -367,7 +367,7 @@ test -f docs/babelfish-comparison.md
 
 Expected: every command exits 0.
 
-- [ ] **Step 5: Review the documentation-only diff against the design spec**
+- [x] **Step 5: Review the documentation-only diff against the design spec**
 
 Run:
 
@@ -390,7 +390,7 @@ Expected:
 - The status lists `docs/design/translator-todo.md` and this implementation
   plan only; there are no implementation, test, workflow, or package changes.
 
-- [ ] **Step 6: Commit the roadmap revision**
+- [x] **Step 6: Commit the roadmap revision**
 
 Run:
 
@@ -405,3 +405,10 @@ Expected:
 
 - The staged name list contains only the roadmap and this plan.
 - The commit succeeds with subject `Revise translator roadmap`.
+
+## Execution Results
+
+All six steps completed. The original implementation commit was
+`3e894da Revise translator roadmap`; its evidence gate recorded 339 passing
+integration-enabled tests and a 77-line parity manifest after building the
+fresh-worktree CLI target.
