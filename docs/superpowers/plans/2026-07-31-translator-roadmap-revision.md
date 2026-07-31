@@ -1,3 +1,111 @@
+# Translator Roadmap Revision Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Replace the evidence-heavy translator roadmap with an actionable two-horizon backlog for shipping Monk 0.4 and directing post-0.4 engineering.
+
+**Architecture:** Keep `docs/design/translator-todo.md` as the single ordered backlog, with a compact dated evidence snapshot followed by `Ship 0.4` and `After 0.4`. Link detailed fidelity claims to the audit and preserve the existing ownership boundaries among the architecture, syntax inventory, migration guide, comparison, and changelog documents.
+
+**Tech Stack:** Markdown, Git, Cabal, Tasty, Bash/Fish differential fixtures, GitHub Actions evidence.
+
+## Global Constraints
+
+- The revision changes documentation only, not implementation or CI behavior.
+- The active work must be visibly split into `Ship 0.4` and `After 0.4`.
+- No broader semantic expansion belongs in the release horizon unless a release gate reveals a correctness regression.
+- Every release item must include a reproducible acceptance condition.
+- Local evidence must remain distinct from missing Linux or GitHub evidence.
+- No item may claim verification from a workflow that has not run on the current commit.
+- `translator-todo.md` owns priority, order, blockers, and acceptance evidence.
+- `translator-audit.md` owns the semantic capability matrix.
+- `shellcheck-syntax-inventory.md` owns explicit parser-node support decisions.
+- `migration-guide.md` owns user-facing remediation for best-effort and unsupported translations.
+- `architecture.md` owns current module and data-flow boundaries.
+- `babelfish-comparison.md` owns dated comparative measurements.
+
+---
+
+## File Structure
+
+- Modify `docs/design/translator-todo.md`: replace the historical verified/blocker narrative with the current evidence snapshot and the two ordered backlog horizons.
+- Read `docs/superpowers/specs/2026-07-31-translator-roadmap-revision-design.md`: authoritative requirements for this documentation change.
+- Read only for consistency: `docs/design/translator-audit.md`, `docs/design/shellcheck-syntax-inventory.md`, `docs/design/architecture.md`, `docs/migration-guide.md`, `docs/babelfish-comparison.md`, `CHANGELOG.md`, `.github/workflows/ci.yml`, and `monk.cabal`.
+- Do not modify implementation, tests, workflow files, package metadata, or the adjacent design documents in this task.
+
+### Task 1: Rewrite the Translator Roadmap
+
+**Files:**
+- Modify: `docs/design/translator-todo.md`
+- Reference: `docs/superpowers/specs/2026-07-31-translator-roadmap-revision-design.md`
+- Test: shell assertions against `docs/design/translator-todo.md`
+
+**Interfaces:**
+- Consumes: the approved design spec, the audit's semantic capability matrix, the syntax inventory's parser policy, and the live verification evidence recorded on 2026-07-31.
+- Produces: the repository's ordered translator backlog with exact release gates, post-release priorities, and cross-document maintenance rules.
+
+- [ ] **Step 1: Prove that the existing roadmap has the obsolete shape**
+
+Run:
+
+```bash
+rg -n '^## (Verified|Blocked|Next|Deferred)$' docs/design/translator-todo.md
+rg -n '^## (Ship 0\.4|After 0\.4)$' docs/design/translator-todo.md
+```
+
+Expected:
+
+- The first command finds `Verified`, `Blocked`, `Next`, and `Deferred`.
+- The second command exits with status 1 and prints no matches.
+
+- [ ] **Step 2: Refresh the evidence that the roadmap will summarize**
+
+Run these commands separately:
+
+```bash
+git status --short --branch
+```
+
+```bash
+MONK_INTEGRATION=1 "$(cabal list-bin test:monk-test)" --hide-successes
+```
+
+```bash
+test -x "$(cabal list-bin exe:monk)"
+```
+
+```bash
+scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" /tmp/monk-parity-manifest.tsv
+```
+
+```bash
+wc -l /tmp/monk-parity-manifest.tsv
+```
+
+```bash
+gh run list -R eessmann/monk --workflow CI --limit 3 --json headSha,status,conclusion,createdAt,url
+```
+
+```bash
+cabal check
+```
+
+Expected at this checkpoint:
+
+- The direct test executable reports `All 339 tests passed`; six Linux-only output-process-substitution fixtures and the missing-`tac` fixture remain skipped on macOS.
+- The existing CLI path reported by `cabal list-bin` is executable. Rebuilding
+  is unnecessary for this documentation-only task and can produce a sandboxed
+  Cabal build-log error after a successful link.
+- The parity generator exits 0 and `wc -l` reports 77 lines: one header plus 76 fixtures.
+- No GitHub Actions run exists for the unpublished architecture checkpoint; the dated published-main snapshot remains red before project tests.
+- `cabal check` reports the unconditional `-Werror` rejection plus missing-upper-bound warnings.
+
+If any substantive result differs, stop before replacing the roadmap and revise the dated evidence rows to match the new result. Do not preserve a stale count or CI claim.
+
+- [ ] **Step 3: Replace the roadmap with the approved two-horizon document**
+
+Replace the complete contents of `docs/design/translator-todo.md` with:
+
+```markdown
 # Monk Translator Roadmap
 
 Last refreshed: 2026-07-31
@@ -219,3 +327,81 @@ target metric, and regression gate.
   results stay in `babelfish-comparison.md`.
 - Do not expand the status snapshot back into a completed-work archive; Git and
   the changelog already preserve that history.
+```
+
+- [ ] **Step 4: Verify the new structure and required gap coverage**
+
+Run:
+
+```bash
+rg -n '^## (Evidence Policy|Status Snapshot|Ship 0\.4|After 0\.4|Documentation Maintenance)$' docs/design/translator-todo.md
+```
+
+Expected: exactly one match for each of the five headings.
+
+Run:
+
+```bash
+rg -n '^## (Verified|Blocked|Next|Deferred)$' docs/design/translator-todo.md
+```
+
+Expected: exit status 1 with no output.
+
+Run:
+
+```bash
+rg -n '339 tests|76 Bash|HLint|GHC 9\.14\.1|PhaseRuntime|RequiresFishFeature|atomic replacement|mutation or fuzz|set -e|identity-lowering|comments and shebang' docs/design/translator-todo.md
+```
+
+Expected: every required evidence or gap phrase is present.
+
+Run these link-target checks separately:
+
+```bash
+test -f docs/design/translator-audit.md
+test -f docs/design/shellcheck-syntax-inventory.md
+test -f docs/design/architecture.md
+test -f docs/migration-guide.md
+test -f docs/babelfish-comparison.md
+```
+
+Expected: every command exits 0.
+
+- [ ] **Step 5: Review the documentation-only diff against the design spec**
+
+Run:
+
+```bash
+git diff --check
+```
+
+```bash
+git diff -- docs/design/translator-todo.md
+```
+
+```bash
+git status --short
+```
+
+Expected:
+
+- `git diff --check` prints nothing and exits 0.
+- The diff replaces only the roadmap's structure and content described above.
+- The status lists `docs/design/translator-todo.md` and this implementation
+  plan only; there are no implementation, test, workflow, or package changes.
+
+- [ ] **Step 6: Commit the roadmap revision**
+
+Run:
+
+```bash
+git add docs/design/translator-todo.md docs/superpowers/plans/2026-07-31-translator-roadmap-revision.md
+git diff --cached --check
+git diff --cached --name-only
+git commit -m "Revise translator roadmap"
+```
+
+Expected:
+
+- The staged name list contains only the roadmap and this plan.
+- The commit succeeds with subject `Revise translator roadmap`.
