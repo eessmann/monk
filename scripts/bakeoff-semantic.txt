@@ -1,0 +1,15 @@
+# Regression counterexamples and positive controls from the translator redesign.
+../test/fixtures/semantic/arithmetic-integral-intermediate.bash
+../test/fixtures/semantic/array-mixed.bash
+../test/fixtures/semantic/case-fallthrough.bash
+../test/fixtures/semantic/case-unreached-effect.bash
+../test/fixtures/semantic/dynamic-command.bash
+../test/fixtures/semantic/dynamic-local.bash
+../test/fixtures/semantic/eval-bash-syntax.bash
+../test/fixtures/semantic/ifs-set.bash
+../test/fixtures/semantic/positive-control-flow.bash
+../test/fixtures/semantic/positive-function-call.bash
+../test/fixtures/semantic/positive-simple-command.bash
+../test/fixtures/semantic/quoted-argv-adjacent.bash
+../test/fixtures/semantic/uncalled-option-function.bash
+../test/fixtures/semantic/untaken-option.bash

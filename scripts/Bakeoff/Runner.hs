@@ -68,12 +68,12 @@ runBakeoff cfg = do
         Exit.die (toString (renderToolPreflightFailure preflightFailure))
       Right resolved -> pure resolved
   let warnings = toolPreflightWarnings cfg tools
-  unless (null warnings) $
-    TIO.hPutStrLn stderr $
-      T.unlines
-        ( "Bake-off tool preflight notes:"
-            : map ("- " <>) warnings
-        )
+  unless (null warnings)
+    $ TIO.hPutStrLn stderr
+    $ T.unlines
+      ( "Bake-off tool preflight notes:"
+          : map ("- " <>) warnings
+      )
   processEnv <- prepareEnv
   fixtures <- resolveFixtureSelection (bakeoffCwd cfg) (bakeoffGroups cfg) (bakeoffFiles cfg) (bakeoffFileLists cfg) (bakeoffCompatibleFileLists cfg)
   artifacts <- traverse (\fixture -> (fixture,) <$> fixtureArtifacts cfg fixture) fixtures
@@ -163,7 +163,7 @@ runBenchmarkWorker tool planPath suite = do
         case suite of
           BenchmarkSuiteAll -> benchmarkAllFixtures
           BenchmarkSuiteBenchmark -> benchmarkFixtures
-  failures <- catMaybes <$> traverse (runWorkerFixture tool benchmarkBabelfishPath) fixtures
+  failures <- PathIO.withCurrentDir benchmarkCwd $ catMaybes <$> traverse (runWorkerFixture benchmarkTranslationSettings tool benchmarkBabelfishPath) fixtures
   pure $
     if null failures
       then 0
@@ -178,14 +178,15 @@ runRuntimeBenchmarkWorker runtimeShell planPath suite = do
           BenchmarkSuiteAll -> benchmarkAllRuntime
           BenchmarkSuiteBenchmark -> benchmarkRuntimeFixtures
   successes <-
-    traverse
-      ( runRuntimeBenchmarkEntry
-          runtimeShell
-          benchmarkFishPath
-          benchmarkRuntimeTimeoutSeconds
-          processEnv
-      )
-      entries
+    PathIO.withCurrentDir benchmarkCwd $
+      traverse
+        ( runRuntimeBenchmarkEntry
+            runtimeShell
+            benchmarkFishPath
+            benchmarkRuntimeTimeoutSeconds
+            processEnv
+        )
+        entries
   pure $
     if and successes
       then 0

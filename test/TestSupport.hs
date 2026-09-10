@@ -16,14 +16,14 @@ trueCond = condition (command "true" [])
 
 translateScript :: Text -> IO Text
 translateScript script = do
-  result <- parseBashScript "spec.sh" script
-  case translateParseResult defaultConfig result of
-    Left err -> H.assertFailure ("translateParseResult failed: " <> show err) >> pure ""
+  result <- translateBashScript defaultConfig "spec.sh" script
+  case result of
+    Left err -> H.assertFailure ("translateBashScript failed: " <> show err) >> pure ""
     Right translation -> pure (renderTranslation translation)
 
 translateScriptMaybe :: Text -> IO (Maybe Text)
 translateScriptMaybe script = do
-  result <- parseBashScript "spec.sh" script
-  case translateParseResult defaultConfig result of
+  result <- translateBashScript defaultConfig "spec.sh" script
+  case result of
     Left _ -> pure Nothing
     Right translation -> pure (Just (renderTranslation translation))

@@ -4,8 +4,8 @@ version:             0.4.0
 synopsis:            Side-project Bash-to-fish translator.
 description:
     Monk is a Haskell project for translating Bash scripts into fish.
-    It is conservative by design, emits warnings for lossy cases, and still
-    expects manual review. See [README.md](https://github.com/eessmann/monk#monk)
+    It admits an exact core under a versioned execution contract and rejects
+    unsupported semantics before producing executable output. See [README.md](https://github.com/eessmann/monk#monk)
     for more details.
 homepage:            https://github.com/eessmann/monk
 bug-reports:         https://github.com/eessmann/monk/issues
@@ -18,15 +18,43 @@ category:            Translate Bash to Fish shell
 build-type:          Simple
 extra-doc-files:     README.md
                      CHANGELOG.md
+                     docs/*.md
+                     docs/design/*.md
+                     docs/evidence/*.json
+                     docs/superpowers/plans/*.md
+extra-source-files:  runtime-cbits/*.c
+                     runtime-test/*.py
+                     test/native/*.sh
+                     test/fixtures/**/*.bash
+                     test/fixtures/**/*.fish
+                     test/fixtures/**/*.args
+                     test/fixtures/**/*.stdin
+                     test/fixtures/**/*.mode
+                     test/fixtures/**/*.prereqs
+                     test/fixtures/**/*.platforms
+                     test/fixtures/**/*.recursive
+                     test/fixtures/**/*.md
+                     test/fixtures/*.tsv
+                     test/compile-fail/*.hs
+                     benchmark/fixtures/*.bash
+                     scripts/*.sh
+                     scripts/*.py
+                     scripts/*.txt
+                     .github/workflows/ci.yml
 tested-with:         GHC == {9.12.2, 9.14.1}
 
 source-repository head
   type:                git
   location:            https://github.com/eessmann/monk.git
 
+flag development
+  description:         Treat warnings as errors during development and CI.
+  default:             False
+  manual:              True
+
 common common-options
   build-depends:       base >= 4.21 && <5
-                     , relude
+                     , relude ^>= 1.2.2
                      , ShellCheck ^>= 0.11
                      , prettyprinter ^>= 1.7
                      , extra ^>= 1.8
@@ -37,9 +65,7 @@ common common-options
   mixins:              base hiding (Prelude)
                      , relude (Relude as Prelude)
                      , relude
-
   ghc-options:         -Wall
-                       -Werror
                        -Wcompat
                        -Widentities
                        -Wincomplete-uni-patterns
@@ -58,6 +84,9 @@ common common-options
                        -Wredundant-strictness-flags
                        -Wterm-variable-capture
                        -Winconsistent-flags
+
+  if flag(development)
+    ghc-options:       -Werror
 
   default-language:    GHC2024
   default-extensions:  ApplicativeDo
@@ -81,17 +110,44 @@ library
                      , Language.Fish.DSL
                      , Monk.Diagnostics
                      , Monk.Output
-  build-depends:       containers
-                     , directory
-                     , filepath
-  other-modules:       Language.Fish.AST
+  build-depends:       monk:monk-runtime-core
+                     , process ^>= 1.6
+                     , containers >= 0.7 && < 0.9
+                     , aeson ^>= 2.2
+                     , bytestring ^>= 0.12
+                     , text ^>= 2.1
+                     , unix >= 2.8 && < 2.9
+                     , directory ^>= 1.3
+                     , filepath ^>= 1.5
+  other-modules:       Language.Fish.Translator.NativeRuntime
+                     , Language.Fish.Translator.Statistics
+                     , Language.Fish.Translator.Directory
+                     , Monk.Output.Runtime
+                     , Language.Fish.AST
+                     , Language.Bash.Plan
+                     , Language.Bash.Plan.Effects
+                     , Language.Bash.Plan.Normalize
+                     , Language.Bash.Plan.Directory
+                     , Language.Fish.Translator.Binding
+                     , Language.Fish.Translator.Child
+                     , Language.Fish.Translator.Pattern
+                     , Language.Fish.Translator.Plan
+                     , Language.Bash.Arithmetic.Plan
+                     , Language.Bash.Arithmetic.Source
+                     , Language.Fish.Translator.ArithmeticPlan
+                     , Language.Fish.Translator.ArithmeticDiagnostic
+                     , Monk.Translation.Contract
+                     , Monk.Translation.ParseDiagnostics
+                     , Monk.Source.Environment
+                     , Monk.Source.Product
+                     , Monk.Output.Publication
                      , Language.Fish.AST.Common
                      , Language.Fish.AST.Example
                      , Language.Fish.AST.Types
                      , Language.Fish.DSL.Internal
                      , Language.Fish.DSL.Lower
                      , Language.Fish.DSL.Types
-                     , Language.Fish.Inline
+
                      , Language.Fish.Pretty
                      , Language.Fish.Pretty.Command
                      , Language.Fish.Pretty.Expr
@@ -99,78 +155,7 @@ library
                      , Language.Fish.Pretty.Pattern
                      , Language.Fish.Pretty.Redirect
                      , Language.Fish.Pretty.Statement
-                     , Language.Fish.Translator
-                     , Language.Fish.Translator.Builtins
-                     , Language.Fish.Translator.Background
-                     , Language.Fish.Translator.Builtins.Common
-                     , Language.Fish.Translator.Builtins.Declare
-                     , Language.Fish.Translator.Builtins.Scope
-                     , Language.Fish.Translator.Builtins.Shift
-                     , Language.Fish.Translator.Builtins.Trap
-                     , Language.Fish.Translator.Builtins.Unset
-                     , Language.Fish.Translator.Args
-                     , Language.Fish.Translator.Cond
-                     , Language.Fish.Translator.Hoist
-                     , Language.Fish.Translator.Hoist.Monad
-                     , Language.Fish.Translator.Monad
-                     , Language.Fish.Translator.Names
-                     , Language.Fish.Translator.Pipefail
-                     , Language.Fish.Translator.Pipeline
-                     , Language.Fish.Translator.Rename
-                     , Language.Fish.Translator.Simplify
-                     , Language.Fish.Translator.Statement
-                     , Language.Fish.Translator.Token
-                     , Language.Fish.Translator.Types
-                     , Language.Fish.Translator.Variables
-                     , Language.Fish.Translator.Variables.Assignments
-                     , Language.Fish.Translator.Variables.Arithmetic
-                     , Language.Fish.Translator.Variables.Arithmetic.Assignments
-                     , Language.Fish.Translator.Variables.Arithmetic.Core
-                     , Language.Fish.Translator.Variables.Arithmetic.Expr
-                     , Language.Fish.Translator.Variables.Arithmetic.Helpers
-                     , Language.Fish.Translator.Variables.Arithmetic.ShortCircuit
-                     , Language.Fish.Translator.Variables.Common
-                     , Language.Fish.Translator.Variables.Expressions
-                     , Language.Fish.Translator.Variables.Expressions.Arrays
-                     , Language.Fish.Translator.Variables.Expressions.Core
-                     , Language.Fish.Translator.Variables.Expressions.Lists
-                     , Language.Fish.Translator.Variables.Expressions.Split
-                     , Language.Fish.Translator.Variables.Expressions.Subst
-                     , Language.Fish.Translator.Variables.Expressions.Words
-                     , Language.Fish.Translator.Variables.Glob
-                     , Language.Fish.Translator.Variables.Index
-                     , Language.Fish.Translator.Variables.ParamExpansion
-                     , Language.Fish.Translator.Variables.ParamExpansion.Parse
-                     , Language.Fish.Translator.Variables.ParamExpansion.Render
-                     , Language.Fish.Translator.Variables.ParamExpansion.Types
-                     , Language.Fish.Translator.Variables.ParamParse
-                     , Language.Fish.Translator.Variables.ProcessSubst
-                     , Language.Fish.Translator.Variables.Substitution
-                     , Language.Fish.Translator.Warning
-                     , Language.Fish.Translator.Commands
-                     , Language.Fish.Translator.Commands.Args
-                     , Language.Fish.Translator.Commands.CommandTokens
-                     , Language.Fish.Translator.Commands.CommandTokens.Builtins
-                     , Language.Fish.Translator.Commands.CommandTokens.Core
-                     , Language.Fish.Translator.Commands.CommandTokens.Dispatch
-                     , Language.Fish.Translator.Commands.CommandTokens.Status
-                     , Language.Fish.Translator.Commands.Echo
-                     , Language.Fish.Translator.Commands.Read
-                     , Language.Fish.Translator.Commands.Read.Exact
-                     , Language.Fish.Translator.Commands.Read.Parse
-                     , Language.Fish.Translator.Commands.Read.Runtime
-                     , Language.Fish.Translator.Commands.Read.Types
-                     , Language.Fish.Translator.Commands.SetOptions
-                     , Language.Fish.Translator.Commands.SimpleCommand
-                     , Language.Fish.Translator.Commands.Status
-                     , Language.Fish.Translator.Commands.Tests
-                     , Language.Fish.Translator.Commands.Time
-                     , Language.Fish.Translator.Construction
-                     , Language.Fish.Translator.Control
-                     , Language.Fish.Translator.ForArithmetic
-                     , Language.Fish.Translator.IO
-                     , Language.Fish.Translator.Redirections
-                     , Language.Fish.Translator.Redirections.Core
+
                      , Language.Bash.Parser
 
 library monk-harness-support
@@ -180,11 +165,10 @@ library monk-harness-support
   exposed-modules:     Monk.Internal.Fixture
                      , Monk.Internal.Shell
   build-depends:       aeson ^>= 2.2
-                     , containers
-                     , path
-                     , path-io
-                     , process
-
+                     , containers >= 0.7 && < 0.9
+                     , path ^>= 0.9
+                     , path-io ^>= 1.8
+                     , process ^>= 1.6
 library monk-bakeoff-lib
   import:              common-options
   visibility:          private
@@ -207,24 +191,24 @@ library monk-bakeoff-lib
   build-depends:       monk
                      , monk:monk-harness-support
                      , aeson ^>= 2.2
-                     , bytestring
-                     , containers
-                     , filepath
-                     , path
-                     , path-io
-                     , process
+                     , bytestring ^>= 0.12
+                     , containers >= 0.7 && < 0.9
+                     , filepath ^>= 1.5
+                     , path ^>= 0.9
+                     , path-io ^>= 1.8
+                     , process ^>= 1.6
                      , shake ^>= 0.19
-                     , time
-
+                     , time >= 1.14 && < 1.16
 executable monk
   import:              common-options
   hs-source-dirs:      app
   main-is:             Main.hs
   build-depends:       monk
                      , optparse-applicative ^>= 0.19
-                     , containers
-                     , directory
-                     , filepath
+                     , containers >= 0.7 && < 0.9
+                     , directory ^>= 1.3
+                     , filepath ^>= 1.5
+                     , text ^>= 2.1
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
@@ -233,11 +217,12 @@ executable monk-bakeoff
   import:              common-options
   hs-source-dirs:      scripts/app
   main-is:             Main.hs
-  build-depends:       monk:monk-bakeoff-lib
+  build-depends:       monk
+                     , monk:monk-bakeoff-lib
                      , optparse-applicative ^>= 0.19
-                     , path
-                     , path-io
-                     , time
+                     , path ^>= 0.9
+                     , path-io ^>= 1.8
+                     , time >= 1.14 && < 1.16
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
@@ -247,10 +232,13 @@ test-suite monk-test
   type:                exitcode-stdio-1.0
   hs-source-dirs:      test
   main-is:             Spec.hs
+  build-tool-depends:   monk:monk-runtime
   other-modules:       Gen
                      , Unit.API04
+                     , FixtureAdmission
                      , FixtureSupport
                      , TestSupport
+                     , SourceTestSupport
                      , ShellSupport
                      , RealWorld
                      , Golden
@@ -265,29 +253,63 @@ test-suite monk-test
                      , Unit.Pipefail
                      , Unit.Pretty
                      , Unit.Refactor
+                     , Unit.SemanticAdmission
+                     , Unit.PlannedWordContexts
+                     , Unit.PlannedCommonCoverage
+                     , Unit.PlannedDirectory
+                     , Unit.PlannedPrimitives
+                     , Unit.PlannedRedirects
+                     , Unit.PlannedArithmetic
+                     , Unit.PlannedEnvironment
+                     , Unit.PlannedFlowFacts
+                     , Unit.PlannedIsolation
+                     , Unit.PlannedSourceable
+                     , Unit.Contract
                      , Unit.Source
+                     , Unit.SourceResolution
                      , Unit.Translation
                      , Property.Pretty
+                     , Property.AdmittedCompositions
                      , Property.Translation
                      , Property.OutputEquivalence
   build-depends:       monk
+                     , aeson ^>= 2.2
                      , monk:monk-harness-support
                      , monk:monk-bakeoff-lib
-                     , containers
-                     , directory
-                     , filepath
-                     , path
-                     , path-io
-                     , process
+                     , bytestring ^>= 0.12
+                     , containers >= 0.7 && < 0.9
+                     , directory ^>= 1.3
+                     , filepath ^>= 1.5
+                     , path ^>= 0.9
+                     , path-io ^>= 1.8
+                     , process ^>= 1.6
                      , tasty ^>= 1.5
+                     , temporary ^>= 1.3
                      , tasty-hunit ^>= 0.10
                      , tasty-quickcheck ^>= 0.11
-                     , time
+                     , time >= 1.14 && < 1.16
                      , QuickCheck >= 2.14 && < 2.17
 
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
+
+test-suite publication-test
+  import:              common-options
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test src
+  main-is:             PublicationSpec.hs
+  other-modules:       Monk.Output.Publication
+  build-tool-depends:   monk:monk-runtime
+  build-depends:       bytestring ^>= 0.12
+                     , monk:monk-runtime-core
+                     , directory ^>= 1.3
+                     , filepath ^>= 1.5
+                     , text ^>= 2.1
+                     , unix >= 2.8 && < 2.9
+                     , tasty ^>= 1.5
+                     , tasty-hunit ^>= 0.10
+  ghc-options:         -threaded -rtsopts
 
 benchmark monk-benchmark
   import:              common-options
@@ -295,9 +317,60 @@ benchmark monk-benchmark
   hs-source-dirs:      benchmark
   main-is:             Main.hs
   build-depends:       monk
-                     , criterion
-                     , deepseq
-                     , text
+                     , criterion ^>= 1.6
+                     , deepseq ^>= 1.5
+                     , text ^>= 2.1
   ghc-options:         -threaded
                        -rtsopts
                        -with-rtsopts=-N
+
+
+library monk-runtime-core
+  visibility:          private
+  hs-source-dirs:      runtime-src
+  c-sources:          runtime-cbits/descriptors.c
+  exposed-modules:     Monk.Runtime.Descriptors
+                     , Monk.Runtime.Digest
+                     , Monk.Runtime.Protocol
+                     , Monk.Runtime.Integer
+                     , Monk.Runtime.Fields
+                     , Monk.Runtime.Pattern
+                     , Monk.Runtime.Compatibility
+                     , Monk.Runtime.Directory
+                     , Monk.Runtime.Child
+  default-language:   GHC2024
+  build-depends:       base >=4.21 && <5
+                     , bytestring ^>=0.12
+                     , unix >=2.8 && <2.9
+                     , process ^>=1.6
+                     , containers >=0.7 && <0.9
+                     , array >=0.5 && <0.6
+                     , directory ^>=1.3
+  ghc-options:         -Wall
+  if flag(development)
+    ghc-options:       -Werror
+
+executable monk-runtime
+  hs-source-dirs:      runtime-app
+  main-is:             Main.hs
+  default-language:   GHC2024
+  build-depends:       base >=4.21 && <5
+                     , monk:monk-runtime-core
+                     , bytestring ^>=0.12
+                     , unix >=2.8 && <2.9
+  ghc-options:         -Wall -rtsopts=ignoreAll
+  if flag(development)
+    ghc-options:       -Werror
+
+
+test-suite runtime-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      runtime-test
+  main-is:             Main.hs
+  default-language:   GHC2024
+  build-depends:       base >=4.21 && <5
+                     , monk:monk-runtime-core
+                     , bytestring ^>=0.12
+  ghc-options:         -Wall
+  if flag(development)
+    ghc-options:       -Werror

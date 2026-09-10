@@ -10,8 +10,9 @@ import Monk.Translation
 import ShellSupport
   ( RunResult (..),
     Shell (..),
+    ShellRunMode (..),
     prepareEnv,
-    runShellWith,
+    runShellWithMode,
     shouldRunIntegration,
   )
 import Test.QuickCheck.Monadic qualified as QCM
@@ -22,32 +23,57 @@ propertyOutputEquivalenceTests :: TestTree
 propertyOutputEquivalenceTests =
   testGroup
     "Output equivalence properties"
-    [ QC.testProperty "Translated output matches bash output (simple scripts)" $
-        QC.withMaxSuccess 30 $
-          QC.forAll genScriptCase $ \scriptCase ->
-            QCM.monadicIO $ do
-              enabled <- QCM.run shouldRunIntegration
-              case enabled of
-                Left _ -> QCM.assert True
-                Right () -> do
-                  let script = scScript scriptCase
-                      caseLabel = scLabel scriptCase
-                      args = scArgs scriptCase
-                      stdinInput = scStdin scriptCase
-                  QCM.monitor (QC.counterexample ("case: " <> T.unpack caseLabel <> "\nscript:\n" <> T.unpack script))
-                  translated <- QCM.run (translateScriptText "prop.sh" script)
-                  case translated of
-                    Left err -> do
-                      QCM.monitor (QC.counterexample ("translation error: " <> err))
-                      QCM.assert False
-                    Right fishSrc -> do
-                      env <- QCM.run prepareEnv
-                      bashRes <- QCM.run (runShellWith ShellBash env script args stdinInput)
-                      fishRes <- QCM.run (runShellWith ShellFish env fishSrc args stdinInput)
-                      QCM.assert (rrExit bashRes == rrExit fishRes)
-                      QCM.assert (rrStdout bashRes == rrStdout fishRes)
-                      QCM.assert (rrStderr bashRes == rrStderr fishRes)
+    [ exactCases "scalar assignment and quoted output" genEchoVar,
+      exactCases "integer addition" genArithmetic,
+      exactCases "draining transform pipeline" genPipelineUpper,
+      exactCases "positional argument round trip" genArgvRoundTrip,
+      exactCases "lazy case glob selection" genCaseGlob,
+      excludedCases "indexed arrays require storage plans" genArrayIndex,
+      excludedCases "read requires a byte and binding primitive" genReadSplit,
+      excludedCases "temporary environment assignments require binding lifetime" genTempEnv,
+      excludedCases "here strings require owned input redirection" genHereString
     ]
+
+exactCases :: String -> QC.Gen ScriptCase -> TestTree
+exactCases testName generator = QC.testProperty testName $ QC.withMaxSuccess 30 $ QC.forAllShrink generator shrinkCase $ \scriptCase -> QCM.monadicIO $ do
+  let source = scScript scriptCase
+  QCM.monitor (QC.counterexample ("case: " <> toString (scLabel scriptCase) <> "\nscript:\n" <> toString source))
+  result <- QCM.run (translateBashScript strictConfig "generated-equivalence.bash" source)
+  case result of
+    Left failure -> do
+      QCM.monitor (QC.counterexample ("ADMISSION_REGRESSION: " <> show failure))
+      QCM.assert False
+    Right translated -> do
+      ready <- QCM.run shouldRunIntegration
+      case ready of
+        Left reason -> QCM.monitor (QC.label ("SKIPPED runtime: " <> reason))
+        Right () -> do
+          environment <- QCM.run prepareEnv
+          bash <- QCM.run (runShellWithMode ShellRunExec ShellBash environment source (scArgs scriptCase) (scStdin scriptCase))
+          fish <- QCM.run (runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) (scArgs scriptCase) (scStdin scriptCase))
+          let observation value = (rrExit value, rrStdout value, rrStderr value)
+          QCM.monitor
+            ( QC.counterexample
+                ( (if null (translationDiagnostics translated) then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH")
+                    <> "\nBash: "
+                    <> show (observation bash)
+                    <> "\nFish: "
+                    <> show (observation fish)
+                )
+            )
+          QCM.assert (observation bash == observation fish)
+
+excludedCases :: String -> QC.Gen ScriptCase -> TestTree
+excludedCases testName generator = QC.testProperty testName $ QC.withMaxSuccess 30 $ QC.forAll generator $ \scriptCase -> QC.ioProperty $ do
+  result <- translateBashScript strictConfig "generated-exclusion.bash" (scScript scriptCase)
+  pure $ case result of
+    Left failure -> QC.counterexample (show failure) (any semanticError (failureDiagnostics failure))
+    Right translated -> QC.counterexample ("excluded form produced executable output:\n" <> toString (renderTranslation translated)) False
+  where
+    semanticError diagnostic = diagnosticSeverity diagnostic == DiagnosticError && diagnosticPhase diagnostic == PhaseTranslate && isJust (diagnosticRange diagnostic)
+
+shrinkCase :: ScriptCase -> [ScriptCase]
+shrinkCase value = [value {scArgs = args} | args <- QC.shrinkList (const []) (scArgs value)]
 
 data ScriptCase = MkScriptCase
   { scLabel :: Text,
@@ -56,20 +82,6 @@ data ScriptCase = MkScriptCase
     scStdin :: Text
   }
   deriving stock (Show, Eq)
-
-genScriptCase :: QC.Gen ScriptCase
-genScriptCase =
-  QC.oneof
-    [ genEchoVar,
-      genArithmetic,
-      genArrayIndex,
-      genPipelineUpper,
-      genArgvRoundTrip,
-      genReadSplit,
-      genTempEnv,
-      genCaseGlob,
-      genHereString
-    ]
 
 genEchoVar :: QC.Gen ScriptCase
 genEchoVar = do
@@ -113,7 +125,8 @@ genPipelineUpper = do
 
 genArgvRoundTrip :: QC.Gen ScriptCase
 genArgvRoundTrip = do
-  args <- QC.listOf genWord
+  count <- QC.chooseInt (0, 6)
+  args <- QC.vectorOf count (QC.oneof [genWord, QC.elements ["", "two words", "line\nbreak", "*", "-n"]])
   let script =
         "printf 'argc:%s\\n' \"$#\"\n"
           <> "for arg in \"$@\"; do\n"
@@ -173,17 +186,10 @@ mkCase :: Text -> Text -> ScriptCase
 mkCase caseName script = MkScriptCase caseName script [] ""
 
 genWord :: QC.Gen Text
-genWord = T.pack <$> QC.listOf1 (QC.elements (['a' .. 'z'] <> ['A' .. 'Z'] <> ['0' .. '9'] <> ['_']))
+genWord = T.pack <$> QC.resize 12 (QC.listOf1 (QC.elements (['a' .. 'z'] <> ['A' .. 'Z'] <> ['0' .. '9'] <> ['_'])))
 
 genLowerWord :: QC.Gen Text
-genLowerWord = T.pack <$> QC.listOf1 (QC.elements ['a' .. 'z'])
+genLowerWord = T.pack <$> QC.resize 12 (QC.listOf1 (QC.elements ['a' .. 'z']))
 
 genSmallInt :: QC.Gen Int
 genSmallInt = QC.chooseInt (0, 20)
-
-translateScriptText :: FilePath -> Text -> IO (Either String Text)
-translateScriptText path script = do
-  parseResult <- parseBashScript path script
-  case translateParseResult defaultConfig parseResult of
-    Left err -> pure (Left ("translateParseResult failed: " <> show err))
-    Right translation -> pure (Right (renderTranslation translation))

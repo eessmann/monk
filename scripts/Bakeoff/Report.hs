@@ -11,6 +11,7 @@ import Bakeoff.Process (readJsonFile)
 import Bakeoff.Types
 import Data.Aeson (FromJSON)
 import Data.Text qualified as T
+import Monk.Translation (TranslationStatistics (..))
 import Numeric qualified
 import Path (Abs, Dir, File, Path, Rel, toFilePath)
 import Path.IO qualified as PathIO
@@ -85,8 +86,11 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
            "- Babelfish runtime: " <> renderStatusCounts babelfishRuntimeCounts,
            "- Monk translated bytes: " <> show monkOutputBytes,
            "- Monk expansion ratio: " <> maybe "n/a" show monkExpansionRatio,
-           "- Monk helper bytes: " <> show monkHelperBytes,
-           "- Monk helper invocations: " <> show monkHelperInvocations,
+           "- Monk helper bytes: unavailable (not estimated from rendered text)",
+           "- Monk static helper definitions: " <> show monkHelperDefinitions,
+           "- Monk static helper call sites: " <> show monkHelperInvocations,
+           "- Monk static native operation call sites: " <> show monkNativeCallSites,
+           "- Actual process launches: unmeasured",
            "- Monk external requirements: " <> renderRequirements monkRequirements,
            "- Fixtures with any runtime diff: " <> show mismatchingFixtures
          ]
@@ -106,7 +110,9 @@ renderSummaryMarkdown meta fixtures benchmarkSummaries =
     monkExpansionRatio
       | monkInputBytes <= 0 = Nothing
       | otherwise = Just (fromIntegral monkOutputBytes / fromIntegral monkInputBytes :: Double)
-    monkHelperBytes = sum (mapMaybe translationHelperBytes monkReports)
+    materializationStats = mapMaybe translationStatistics monkReports
+    monkHelperDefinitions = sum (map statisticsHelperDefinitions materializationStats)
+    monkNativeCallSites = sum (map statisticsNativeCallSites materializationStats)
     monkHelperInvocations = sum (map translationHelperInvocations monkReports)
     monkRequirements = ordNub (concatMap translationExternalRequirements monkReports)
     mismatches = filter fixtureHasMismatch fixtures

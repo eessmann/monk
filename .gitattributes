@@ -1,0 +1,3 @@
+# These frozen fixtures contain literal space/tab/newline IFS values.
+benchmark/fixtures/large-exact.bash whitespace=-blank-at-eol
+benchmark/fixtures/medium-exact.bash whitespace=-blank-at-eol

@@ -205,7 +205,8 @@ gitOutput cwd args = do
 configReport :: BakeoffConfig -> ConfigReport
 configReport cfg =
   MkConfigReport
-    { configTranslationTimeoutSeconds = bakeoffTranslationTimeoutSeconds cfg,
+    { configTranslationSettings = bakeoffTranslationSettings cfg,
+      configTranslationTimeoutSeconds = bakeoffTranslationTimeoutSeconds cfg,
       configRuntimeTimeoutSeconds = bakeoffRuntimeTimeoutSeconds cfg,
       configBenchmarksEnabled = bakeoffBenchmarksEnabled cfg,
       configHyperfineRuns = bakeoffHyperfineRuns cfg,

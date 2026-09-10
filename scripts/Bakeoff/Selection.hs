@@ -9,6 +9,7 @@ module Bakeoff.Selection
 where
 
 import Bakeoff.Fixture (FixtureMetadata (..), loadFixtureMetadata)
+import Bakeoff.Shell (ShellRunMode (ShellRunExec))
 import Bakeoff.Types
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
@@ -84,7 +85,10 @@ insertSelection acc (path, (fixtureGroup, sources)) =
 
 finalizeSelection :: Path Abs Dir -> (Path Abs File, (FixtureGroup, [SelectionSource])) -> IO FixtureSpec
 finalizeSelection cwd (path, (fixtureGroup, sources)) = do
-  metadata <- loadFixtureMetadata path
+  loadedMetadata <- loadFixtureMetadata path
+  -- The bake-off translates with the standalone contract. Source sidecars
+  -- belong to the separate caller-contract suite and cannot change this mode.
+  let metadata = loadedMetadata {fmMode = ShellRunExec}
   relativePath <- stripProperPrefix cwd path
   artifactDir <- fixtureArtifactDir relativePath
   skipReason <- determineSkip metadata

@@ -21,11 +21,14 @@ prettyJobPipelineWith prettyStmt prettyExpr (MkFishJobPipeline time vars stmt co
       headDoc = group (timeDoc <> varsDoc <> prettyStmt stmt)
       restDocs =
         map
-          ( \(PipeTo v s) ->
-              space
-                <> "|"
-                <+> (if null v then mempty else hsep (map (prettyVarAssign prettyExpr) v) <> space)
-                <> prettyStmt s
+          ( \continuation ->
+              let v = jpcVariables continuation
+                  s = jpcStatement continuation
+                  operator = case continuation of PipeTo {} -> "|"; PipeErrorTo {} -> "2>|"
+               in space
+                    <> operator
+                    <+> (if null v then mempty else hsep (map (prettyVarAssign prettyExpr) v) <> space)
+                    <> prettyStmt s
           )
           conts
       pipesDoc = mconcat restDocs
@@ -50,8 +53,8 @@ prettyJobConjunctionWith prettyStmt prettyExpr (MkFishJobConjunction mdec job co
    in headDoc <> mconcat rest
   where
     prettyJCont = \case
-      JCAnd jp -> space <> hardline <> prettyConjunction ConjAnd <+> prettyJobPipelineWith prettyStmt prettyExpr jp
-      JCOr jp -> space <> hardline <> prettyConjunction ConjOr <+> prettyJobPipelineWith prettyStmt prettyExpr jp
+      JCAnd jp -> hardline <> prettyConjunction ConjAnd <+> prettyJobPipelineWith prettyStmt prettyExpr jp
+      JCOr jp -> hardline <> prettyConjunction ConjOr <+> prettyJobPipelineWith prettyStmt prettyExpr jp
 
 prettyJobListWith :: (FishStatement -> Doc ann) -> (forall t. FishExpr t -> Doc ann) -> FishJobList -> Doc ann
 prettyJobListWith prettyStmt prettyExpr (MkFishJobList jobs) =

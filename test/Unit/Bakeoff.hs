@@ -25,9 +25,11 @@ import Bakeoff.Tools
   )
 import Bakeoff.Types
 import Control.Exception (bracket)
+import Data.Aeson (eitherDecode, encode)
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime (..), fromGregorian, secondsToDiffTime)
+import Monk.Translation (DirectoryContract (..), RuntimeSelection (..), TranslateConfig (..))
 import Path
   ( Abs,
     Dir,
@@ -58,7 +60,23 @@ unitBakeoffTests :: TestTree
 unitBakeoffTests =
   testGroup
     "Bakeoff"
-    [ H.testCase "fixtureArtifactDir mirrors the fixture path under fixtures/" $ do
+    [ H.testCase "benchmark plan serializes explicit runtime and stable directory contract" $ do
+        path <- PathIO.resolveFile' "/tmp/pinned-runtime"
+        let tools = MkResolvedTools path path path Nothing (MkToolVersion "unknown") (MkToolVersion "unknown") Nothing
+            settings = MkBakeoffTranslationSettings (RuntimePath "/tmp/pinned-runtime") StableDirectoryContract
+            cfg = (sampleBakeoffConfig (unsafeAbsDir "/tmp/") True) {bakeoffTranslationSettings = settings}
+            plan = makeBenchmarkPlan cfg [] tools
+        benchmarkCwd plan @?= bakeoffCwd cfg
+        translationRuntime (bakeoffTranslateConfig settings) @?= RuntimePath "/tmp/pinned-runtime"
+        directoryContract (bakeoffTranslateConfig settings) @?= StableDirectoryContract
+        benchmarkTranslationSettings plan @?= settings
+        (eitherDecode (encode plan) :: Either String BenchmarkPlan) @?= Right plan,
+      H.testCase "benchmark settings preserve on-path and generation-owned runtimes" $
+        forM_ [RuntimeOnPath, RuntimeGeneration "runtime/monk-runtime"] $ \runtime -> do
+          let settings = MkBakeoffTranslationSettings runtime NoDirectoryContract
+          (eitherDecode (encode settings) :: Either String BakeoffTranslationSettings) @?= Right settings
+          translationRuntime (bakeoffTranslateConfig settings) @?= runtime,
+      H.testCase "fixtureArtifactDir mirrors the fixture path under fixtures/" $ do
         relPath <- parseRelFile "test/fixtures/integration/source-recursive.bash"
         artifactDir <- fixtureArtifactDir relPath
         toFilePath artifactDir @?= "fixtures/test/fixtures/integration/source-recursive/",
@@ -70,6 +88,7 @@ unitBakeoffTests =
           [fixture] -> do
             specGroup fixture @?= FixtureGroupIntegration
             specSelectionSources fixture @?= [SelectionFile fixturePath]
+            fmMode (specMetadata fixture) @?= ShellRunExec
           other -> H.assertFailure ("expected one selected fixture, got " <> show (length other)),
       H.testCase "resolveFixtureSelection resolves selector entries relative to the list file" $ do
         withTempDir "monk-bakeoff-selection" $ \tmpDir -> do
@@ -238,7 +257,8 @@ unitBakeoffTests =
                       },
                   metaConfig =
                     MkConfigReport
-                      { configTranslationTimeoutSeconds = 30,
+                      { configTranslationSettings = defaultBakeoffTranslationSettings,
+                        configTranslationTimeoutSeconds = 30,
                         configRuntimeTimeoutSeconds = 30,
                         configBenchmarksEnabled = False,
                         configHyperfineRuns = 10,
@@ -263,6 +283,7 @@ unitBakeoffTests =
                   translationInputBytes = Just 10,
                   translationOutputBytes = Just 12,
                   translationExpansionRatio = Just 1.2,
+                  translationStatistics = Nothing,
                   translationHelperBytes = Just 0,
                   translationHelperInvocations = 0,
                   translationExternalRequirements = [],
@@ -282,6 +303,7 @@ unitBakeoffTests =
                   translationInputBytes = Just 10,
                   translationOutputBytes = Nothing,
                   translationExpansionRatio = Nothing,
+                  translationStatistics = Nothing,
                   translationHelperBytes = Nothing,
                   translationHelperInvocations = 0,
                   translationExternalRequirements = [],
@@ -387,7 +409,8 @@ unreachable = error "unreachable"
 sampleBakeoffConfig :: Path Abs Dir -> Bool -> BakeoffConfig
 sampleBakeoffConfig cwd benchmarksEnabled =
   MkBakeoffConfig
-    { bakeoffCwd = cwd,
+    { bakeoffTranslationSettings = defaultBakeoffTranslationSettings,
+      bakeoffCwd = cwd,
       bakeoffOutputDir = unsafeAbsDir "/tmp/monk-bakeoff-tests/",
       bakeoffForce = False,
       bakeoffGroups = [],
@@ -419,6 +442,7 @@ sampleTranslationReport status =
       translationInputBytes = Nothing,
       translationOutputBytes = Nothing,
       translationExpansionRatio = Nothing,
+      translationStatistics = Nothing,
       translationHelperBytes = Nothing,
       translationHelperInvocations = 0,
       translationExternalRequirements = [],

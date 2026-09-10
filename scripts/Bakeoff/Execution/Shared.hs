@@ -29,6 +29,7 @@ skippedTranslationReport tool reason =
       translationInputBytes = Nothing,
       translationOutputBytes = Nothing,
       translationExpansionRatio = Nothing,
+      translationStatistics = Nothing,
       translationHelperBytes = Nothing,
       translationHelperInvocations = 0,
       translationExternalRequirements = [],

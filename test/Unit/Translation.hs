@@ -5,517 +5,172 @@ module Unit.Translation
   )
 where
 
+import Data.ByteString qualified as BS
+import Data.List.NonEmpty qualified as NonEmpty
 import Data.Text qualified as T
 import Monk.Translation
   ( Diagnostic (..),
     DiagnosticCode (..),
-    TranslationResult (..),
-    defaultConfig,
+    DiagnosticPhase (..),
+    TranslationFailure (..),
+    TranslationStatistics (..),
     parseBashScript,
     renderTranslation,
     strictConfig,
+    translateBashScript,
     translateParseResult,
+    translationStatistics,
   )
 import ShellCheck.AST qualified as Bash
 import ShellCheck.Interface (ParseResult (..))
+import ShellSupport
+  ( RunResult (..),
+    Shell (..),
+    prepareEnv,
+    runShell,
+    shouldRunIntegration,
+  )
 import Test.Tasty (TestTree, testGroup)
-import Test.Tasty.HUnit as H
-import TestSupport
+import Test.Tasty.HUnit qualified as H
 
 unitTranslationTests :: TestTree
 unitTranslationTests =
   testGroup
-    "Translation"
-    [ H.testCase "Process substitution output redirect lowers to status-preserving temp-file block" $ do
-        out <- translateScript "printf hi > >(wc -c > out)"
-        T.isInfixOf "set --local __monk_psub_file $__monk_psub_dir'/stdout'" out H.@? "expected temp file setup for output process substitution"
-        T.isInfixOf "printf 'hi' > $__monk_psub_file" out H.@? "expected producer stdout redirected to temp file"
-        T.isInfixOf "cat $__monk_psub_file | wc '-c' > 'out'" out H.@? "expected consumer fed from temp file"
-        T.isInfixOf "set --local __monk_psub_status" out H.@? "expected producer status capture"
-        T.isInfixOf "fish '--no-config' '-c' 'exit $argv[1]' $__monk_psub_status" out H.@? "expected exact status restoration"
-        H.assertBool "unexpected plain pipeline for status-sensitive output process substitution" (not (T.isInfixOf "printf 'hi' | wc" out))
-        H.assertBool "unexpected helper for exact output process substitution" (not (T.isInfixOf "__monk_procsub_out" out)),
-      H.testCase "Multiple process substitution output redirects lower without command-substitution helper" $ do
-        out <- translateScript "printf hi > >(cat > one)\nprintf bye > >(cat > two)"
-        T.count "__monk_procsub_out" out @?= 0
-        T.count "set --local __monk_psub_file" out @?= 2
-        T.isInfixOf "printf 'hi' > $__monk_psub_file" out H.@? "expected first temp-file producer"
-        T.isInfixOf "printf 'bye' > $__monk_psub_file" out H.@? "expected second temp-file producer",
-      H.testCase "Command substitution preserves command redirections" $ do
-        out <- translateScript "echo $(printf hi > /tmp/monk-count)"
-        T.isInfixOf "printf 'hi' > '/tmp/monk-count'" out H.@? "expected command-substitution redirection",
-      H.testCase "Process substitution output preserves consumer redirections" $ do
-        out <- translateScript "printf hi > >(wc -c > /tmp/monk-count)"
-        T.isInfixOf "wc '-c' > '/tmp/monk-count'" out H.@? "expected process-substitution body redirection",
-      H.testCase "Echo -e lowers to printf %b" $ do
-        out <- translateScript "echo -e \"hi\\nthere\""
-        T.isInfixOf "printf \"%b\\\\n\"" out H.@? "expected printf %b with newline",
-      H.testCase "Echo -n stays echo with -n" $ do
-        out <- translateScript "echo -n hi"
-        T.isInfixOf "echo '-n' 'hi'" out H.@? "expected echo -n",
-      H.testCase "Echo -E stays echo without escapes" $ do
-        out <- translateScript "echo -E \"hi\\nthere\""
-        T.isInfixOf "echo" out H.@? "expected echo preserved",
-      H.testCase "Echo without options stays echo" $ do
-        out <- translateScript "echo hello"
-        out @?= "echo 'hello'",
-      H.testCase "Echo -- preserves literal arguments" $ do
-        out <- translateScript "echo -- -n"
-        out @?= "echo '--' '-n'",
-      H.testCase "Process substitution input uses psub" $ do
-        out <- translateScript "cat <(echo 123)"
-        T.isInfixOf "psub" out H.@? "expected psub for input process substitution",
-      H.testCase "Unsupported extglob uses bash shim" $ do
-        out <- translateScript "echo !(foo|bar)"
-        T.isInfixOf "bash" out H.@? "expected bash shim"
-        T.isInfixOf "extglob" out H.@? "expected extglob enabled"
-        T.isInfixOf "!(foo|bar)" out H.@? "expected extglob pattern passed through",
-      H.testCase "Shift uses argv slice" $ do
-        out <- translateScript "shift"
-        out @?= "set argv $argv[2..-1]",
-      H.testCase "Declare export maps to set --global --export" $ do
-        out <- translateScript "declare -x FOO=bar"
-        out @?= "set --global --export FOO 'bar'",
-      H.testCase "Default expansion uses set -q for unset" $ do
-        out <- translateScript "echo ${JAVA_HOME-}"
-        T.isInfixOf "set '-q' 'JAVA_HOME'" out H.@? "expected set -q for default expansion",
-      H.testCase "Alternate expansion uses test -n" $ do
-        out <- translateScript "echo ${NIX_PATH:+:$NIX_PATH}"
-        T.isInfixOf "set '-q' 'NIX_PATH'" out H.@? "expected set -q for alternate expansion"
-        T.isInfixOf "test '-n'" out H.@? "expected test -n for non-empty check",
-      H.testCase "Assigning expansion hoists side effects" $ do
-        out <- translateScript "echo ${HOME:=/tmp}"
-        T.isInfixOf "set --global HOME '/tmp'" out H.@? "expected assignment in prelude"
-        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split for unquoted expansion"
-        T.isInfixOf "$HOME" out H.@? "expected variable use after assignment",
-      H.testCase "Error expansion hoists exit" $ do
-        out <- translateScript "echo ${MISSING:?nope}"
-        T.isInfixOf "printf" out H.@? "expected error printf"
-        T.isInfixOf "exit 1" out H.@? "expected exit in outer scope",
-      H.testCase "Redirection expansion hoists side effects" $ do
-        out <- translateScript "echo hi > ${OUT:=/tmp/out}"
-        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
-        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected redirection to use OUT",
-      H.testCase "Status redirection expansion hoists side effects" $ do
-        out <- translateScript "if true > ${OUT:=/tmp/out}; then echo ok; fi"
-        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected assignment before redirection"
-        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected condition redirection to use OUT"
-        T.isInfixOf "echo 'ok'" out H.@? "expected then body",
-      H.testCase "Heredoc expansion hoists side effects" $ do
-        let script = "cat <<EOF\n${VAL:=ok}\nEOF\n"
-        out <- translateScript script
-        T.isInfixOf "set --global VAL 'ok'" out H.@? "expected assignment before heredoc"
-        T.isInfixOf "string join ' ' -- $VAL ; or printf ''" out H.@? "expected heredoc to use VAL",
-      H.testCase "Length expansion for argv uses count" $ do
-        out <- translateScript "echo ${#@}"
-        T.isInfixOf "count $argv" out H.@? "expected count for argv length",
-      H.testCase "Length expansion for arrays uses count" $ do
-        out <- translateScript "echo ${#arr[@]}"
-        T.isInfixOf "count $arr" out H.@? "expected count for array length",
-      H.testCase "Unset functions and variables translate to functions -e / set -e" $ do
-        out <- translateScript "unset -f foo -v bar"
-        out @?= "functions '-e' 'foo'\nset '-e' 'bar'",
-      H.testCase "Unset variable without flags maps to set -e" $ do
-        out <- translateScript "unset ASPELL_CONF"
-        out @?= "set '-e' 'ASPELL_CONF'",
-      H.testCase "Hash in word is preserved" $ do
-        out <- translateScript "a=nixpkgs\nnix run $a#hello"
-        T.isInfixOf "set --global a 'nixpkgs'" out H.@? "expected assignment translation"
-        T.isInfixOf "string join ' ' -- $a ; or printf ''" out H.@? "expected variable join in word"
-        T.isInfixOf "#hello" out H.@? "expected hash in word preserved",
-      H.testCase "Pushd and popd pass through" $ do
-        outPushd <- translateScript "pushd /tmp"
-        outPopd <- translateScript "popd"
-        outPushd @?= "pushd '/tmp'"
-        outPopd @?= "popd",
-      H.testCase "Nested command substitution translates inner" $ do
-        out <- translateScript "echo $(echo $(echo hi))"
-        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split in command substitution"
-        T.isInfixOf "(echo" out H.@? "expected command substitution structure"
-        T.isInfixOf "echo 'hi'" out H.@? "expected innermost echo",
-      H.testCase "Command substitution preserves status conjunctions" $ do
-        out <- translateScript "echo $(false || true && false)"
-        H.assertBool
-          ("expected command-substitution conjunctions, got: " <> T.unpack out)
-          (T.isInfixOf "or " out && T.isInfixOf "and " out),
-      H.testCase "Command substitution status fallback is not silent success" $ do
-        out <- translateScript "echo \"$(case x in x) false ;; esac || echo fallback)\""
-        T.isInfixOf "(false" out H.@? "expected explicit false fallback in command substitution"
-        T.isInfixOf "or echo 'fallback'" out H.@? "expected fallback branch to remain reachable"
-        H.assertBool
-          ("unexpected silent true fallback in command substitution: " <> T.unpack out)
-          (not (T.isInfixOf "(true" out)),
-      H.testCase "Command substitution status redirection hoists target expansion" $ do
-        out <- translateScript "echo \"$(true > ${OUT:=/tmp/out} && printf ok)\""
-        T.isInfixOf "set --global OUT '/tmp/out'" out H.@? "expected substitution redirection prelude"
-        T.isInfixOf "> (string join ' ' -- $OUT ; or printf '')" out H.@? "expected substitution redirection target"
-        T.isInfixOf "and printf 'ok'" out H.@? "expected status conjunction",
-      H.testCase "Command substitution redirections share operator parsing" $ do
-        out <- translateScript "echo \"$(printf hi &> out; printf bye 3>&-; cat <> rw)\""
-        T.isInfixOf "printf 'hi' > 'out' 2>&1" out H.@? "expected both-output redirect"
-        T.isInfixOf "printf 'bye' 3>&-" out H.@? "expected fd close redirect"
-        T.isInfixOf "cat <> 'rw'" out H.@? "expected read-write redirect",
-      H.testCase "Unsupported pipeline status stage is not silent success" $ do
-        parsed <- parseBashScript "spec.sh" "false | wc -c"
-        let literal ident = Bash.T_Literal (Bash.Id ident)
-            word ident literalId text = Bash.T_NormalWord (Bash.Id ident) [literal literalId text]
-            command ident nameIdent nameLiteralId name args =
-              Bash.T_SimpleCommand
-                (Bash.Id ident)
-                []
-                (word nameIdent nameLiteralId name : args)
-            body = command 100 101 102 "false" []
-            batsStage = Bash.T_BatsTest (Bash.Id 103) "unsupported" body
-            wcStage = command 104 105 106 "wc" [word 107 108 "-c"]
-            root =
-              Bash.T_Annotation
-                (Bash.Id 109)
-                []
-                ( Bash.T_Script
-                    (Bash.Id 110)
-                    (literal 111 "")
-                    [Bash.T_Pipeline (Bash.Id 112) [] [batsStage, wcStage]]
-                )
-        case translateParseResult defaultConfig parsed {prRoot = Just root} of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            let out = renderTranslation translation
-            T.isInfixOf "false" out H.@? "expected unsupported stage to fail closed"
-            T.isInfixOf "| wc '-c'" out H.@? "expected the remaining pipeline stage"
-            map diagnosticCode (translationDiagnostics translation) @?= [MkDiagnosticCode "monk.unsupported"]
-            H.assertBool
-              ("unexpected silent true pipeline stage: " <> T.unpack out)
-              (not (T.isInfixOf "true | wc" out)),
-      H.testCase "Errexit guard is command-substitution aware" $ do
-        let script =
-              T.unlines
-                [ "set -e",
-                  "digitCount() {",
-                  "  local num=$1 count=0",
-                  "  while ((num != 0)); do",
-                  "    ((++count))",
-                  "    ((num = num / 10))",
-                  "  done",
-                  "  echo \"$count\"",
-                  "}",
-                  "echo $(digitCount 12)"
-                ]
-        out <- translateScript script
-        T.isInfixOf "status 'is-command-substitution'" out H.@? "expected runtime command-substitution guard"
-        H.assertBool "unexpected function-wide return workaround" (not (T.isInfixOf "or return $status" out)),
-      H.testCase "Strict mode fails on unsupported coproc" $ do
-        result <- parseBashScript "spec.sh" "coproc echo hi"
-        case translateParseResult strictConfig result of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "expected translation failure in strict mode",
-      H.testCase "Strict mode fails on subshell" $ do
-        result <- parseBashScript "spec.sh" "(echo hi)"
-        case translateParseResult strictConfig result of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "expected translation failure in strict mode",
-      H.testCase "Strict mode fails on status-context subshell" $ do
-        result <- parseBashScript "spec.sh" "if (echo hi); then echo ok; fi"
-        case translateParseResult strictConfig result of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "expected translation failure in strict mode",
-      H.testCase "Strict mode fails on command-substitution subshell" $ do
-        result <- parseBashScript "spec.sh" "echo $( (echo hi) )"
-        case translateParseResult strictConfig result of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "expected translation failure in strict mode",
-      H.testCase "Command-substitution subshell keeps its body in non-strict mode" $ do
-        out <- translateScript "echo $( (echo hi) )"
-        T.isInfixOf "echo 'hi'" out H.@? "expected translated subshell body in command substitution"
-        H.assertBool
-          ("unexpected subshell collapse in command substitution: " <> T.unpack out)
-          (not (T.isInfixOf "(true)" out)),
-      H.testCase "Array index assignment is 1-based" $ do
-        out <- translateScript "arr[0]=foo"
-        out @?= "set --global arr[1] 'foo'",
-      H.testCase "Array index expansion is 1-based" $ do
-        out <- translateScript "echo ${arr[0]}"
-        T.isInfixOf "$arr[1]" out H.@? "expected 1-based index"
-        T.isInfixOf "string 'split' '--' $IFS" out H.@? "expected IFS split for unquoted expansion",
-      H.testCase "Substring expansion uses string sub" $ do
-        out <- translateScript "echo ${var:1:2}"
-        T.isInfixOf "string 'sub' '--start' 2 '--length' 2 '--' $var" out H.@? "expected string sub with 1-based start",
-      H.testCase "Pattern removal uses string replace" $ do
-        out <- translateScript "echo ${var#foo}"
-        T.isInfixOf "string 'replace' '-r' '--' '^foo' '' $var" out H.@? "expected anchored replace for prefix removal",
-      H.testCase "Pattern replacement // uses -a" $ do
-        out <- translateScript "echo ${var//foo/bar}"
-        T.isInfixOf "string 'replace' '-r' '-a' '--' 'foo' 'bar' $var" out H.@? "expected global replacement with -a",
-      H.testCase "Case modification uses string upper/lower" $ do
-        outUpper <- translateScript "echo ${var^^}"
-        outLower <- translateScript "echo ${var,,}"
-        T.isInfixOf "string upper" outUpper H.@? "expected upper-case conversion"
-        T.isInfixOf "string lower" outLower H.@? "expected lower-case conversion",
-      H.testCase "Length expansion uses string length" $ do
-        out <- translateScript "echo ${#var}"
-        T.isInfixOf "string length" out H.@? "expected string length for ${#var}",
-      H.testCase "Arithmetic command sets status from math" $ do
-        out <- translateScript "((1 + 2))"
-        T.isInfixOf "math" out H.@? "expected math command for arithmetic statement"
-        T.isInfixOf "test" out H.@? "expected test for arithmetic status"
-        T.isInfixOf "-ne" out H.@? "expected numeric comparison",
-      H.testCase "Arithmetic postfix increment hoists temp" $ do
-        out <- translateScript "echo $((i++))"
-        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp var for postfix increment"
-        T.isInfixOf "set --global i" out H.@? "expected increment side effect",
-      H.testCase "Arithmetic prefix increment updates variable" $ do
-        out <- translateScript "echo $((++i))"
-        T.isInfixOf "set --global i" out H.@? "expected increment side effect",
-      H.testCase "Arithmetic assignment in expression hoists set" $ do
-        out <- translateScript "echo $((x = y + 1))"
-        T.isInfixOf "set --global x" out H.@? "expected assignment before math expression",
-      H.testCase "Arithmetic short-circuit lowers to conditional evaluation" $ do
-        out <- translateScript "echo $((a++ && b++))"
-        T.isInfixOf "if test" out H.@? "expected conditional evaluation for &&"
-        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp vars for short-circuit",
-      H.testCase "Arithmetic ternary lowers to conditional evaluation" $ do
-        out <- translateScript "echo $((a ? b++ : c++))"
-        T.isInfixOf "if test" out H.@? "expected conditional evaluation for ternary"
-        T.isInfixOf "__monk_arith_tmp_" out H.@? "expected temp vars for ternary",
-      H.testCase "Arithmetic for loop lowers to begin/while and increment" $ do
-        out <- translateScript "for ((i=0; i<2; i++)); do echo $i; done"
-        T.isInfixOf "set --global i" out H.@? "expected init set"
-        T.isInfixOf "while test" out H.@? "expected while test condition"
-        T.isInfixOf "math $i" out H.@? "expected increment math",
-      H.testCase "For loop avoids fish readonly underscore variable" $ do
-        out <- translateScript "for _ in 1; do true; done"
-        H.assertBool "unexpected readonly underscore loop variable" (not (T.isInfixOf "for _ in" out))
-        T.isInfixOf "for __monk_underscore in" out H.@? "expected safe underscore loop variable",
-      H.testCase "For loop rewrites underscore body references with scoped binding" $ do
-        out <- translateScript "for _ in a; do echo \"$_\"; done"
-        T.isInfixOf "for __monk_underscore in 'a'" out H.@? "expected safe loop variable"
-        T.isInfixOf "$__monk_underscore" out H.@? "expected body reference to renamed loop variable",
-      H.testCase "Until loop negates condition" $ do
-        out <- translateScript "until true; do echo 1; done"
-        T.isInfixOf "while not" out H.@? "expected while not for until loop",
-      H.testCase "Until loop negates compound condition" $ do
-        out <- translateScript "until false && true; do echo ok; done"
-        T.isInfixOf "while not begin" out H.@? "expected negation of full condition list"
-        T.isInfixOf "and" out H.@? "expected compound condition inside negated block",
-      H.testCase "Time prefix is preserved in pipelines" $ do
-        out <- translateScript "time sleep 1"
-        T.isInfixOf "time sleep" out H.@? "expected time prefix in output",
-      H.testCase "Pipeline to source stays piped" $ do
-        out <- translateScript "echo 123 | source"
-        T.isInfixOf "| source" out H.@? "expected pipeline to source",
-      H.testCase "Double bracket pattern match uses string match -q" $ do
-        out <- translateScript "if [[ $x == foo* ]]; then echo ok; fi"
-        H.assertBool
-          ("expected glob match for [[ == ]], got: " <> T.unpack out)
-          (T.isInfixOf "string 'match' '-q' '--'" out),
-      H.testCase "Double bracket regex uses string match -qr" $ do
-        out <- translateScript "if [[ $x =~ ^foo ]]; then echo ok; fi"
-        H.assertBool
-          ("expected regex match for [[ =~ ]], got: " <> T.unpack out)
-          (T.isInfixOf "string 'match' '-qr' '--'" out),
-      H.testCase "Double bracket negation uses not" $ do
-        out <- translateScript "if [[ ! $x == foo ]]; then echo ok; fi"
-        H.assertBool
-          ("expected not for [[ ! ]], got: " <> T.unpack out)
-          (T.isInfixOf "not string 'match' '-q' '--'" out),
-      H.testCase "Double bracket with && and || uses conjunctions" $ do
-        out <- translateScript "if [[ $x == foo && $y != bar || $z == baz ]]; then echo ok; fi"
-        H.assertBool
-          ("expected and/or conjunctions, got: " <> T.unpack out)
-          (T.isInfixOf "and " out && T.isInfixOf "or " out),
-      H.testCase "Double bracket parentheses preserve nested conjunctions" $ do
-        out <- translateScript "if [[ ( $x == foo || $y == bar ) && ! $z == baz ]]; then echo ok; fi"
-        H.assertBool
-          ("expected nested conjunctions, got: " <> T.unpack out)
-          (T.isInfixOf "and " out && T.isInfixOf "or " out && T.isInfixOf "not " out),
-      H.testCase "Simplifier elides trivial begin wrapper in else branch" $ do
-        out <- translateScript "if [[ $x == foo ]]; then echo ok; else true; fi"
-        H.assertBool
-          ("unexpected trivial begin wrapper in else branch: " <> T.unpack out)
-          (not (T.isInfixOf "else\n  begin\n    true\n  end" out)),
-      H.testCase "Simplifier keeps multi-statement pipeline stages wrapped" $ do
-        out <- translateScript "echo hi | FOO=bar BAR=baz cat"
-        T.isInfixOf "| begin" out H.@? "expected wrapped pipeline stage"
-        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected first prelude assignment inside pipeline stage"
-        T.isInfixOf "set --local --export BAR 'baz'" out H.@? "expected second prelude assignment inside pipeline stage",
-      H.testCase "Simplifier keeps conjunction stages wrapped when preludes remain" $ do
-        out <- translateScript "FOO=bar BAR=baz true && echo ok"
-        T.isInfixOf "begin" out H.@? "expected wrapped conjunction stage"
-        T.isInfixOf "and echo 'ok'" out H.@? "expected conjunction preserved",
-      H.testCase "Simplifier does not elide background wrappers around instrumented jobs" $ do
-        out <- translateScript "FOO=bar BAR=baz true &"
-        T.isInfixOf "end &" out H.@? "expected background block wrapper to remain"
-        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected exported prelude inside background job"
-        T.isInfixOf "set --local --export BAR 'baz'" out H.@? "expected second exported prelude inside background job",
-      H.testCase "Simplifier preserves redirected brace groups" $ do
-        out <- translateScript "{ echo hi; } > out"
-        T.isInfixOf "begin" out H.@? "expected redirected block wrapper to remain"
-        T.isInfixOf "> 'out'" out H.@? "expected redirected block suffix to remain",
-      H.testCase "Simplifier flattens nested scope-neutral prelude begins" $ do
-        out <- translateScript "{ { X=1; }; echo hi; }"
-        T.count "begin" out @?= 1
-        T.isInfixOf "set --global X '1'" out H.@? "expected scope-neutral set to flatten"
-        T.isInfixOf "echo 'hi'" out H.@? "expected command to remain",
-      H.testCase "Simplifier flattens nested trivial begin wrappers" $ do
-        out <- translateScript "{ { true; }; }"
-        H.assertBool
-          ("unexpected begin wrapper after simplification: " <> T.unpack out)
-          (not (T.isInfixOf "begin" out))
-        T.isInfixOf "true" out H.@? "expected safe command to remain",
-      H.testCase "Simplifier elides pipeline-local wrapper only for single safe stage" $ do
-        out <- translateScript "echo hi | { { cat; }; }"
-        T.isInfixOf "| cat" out H.@? "expected simplified single-command pipeline stage"
-        H.assertBool
-          ("unexpected begin wrapper in simplified pipeline stage: " <> T.unpack out)
-          (not (T.isInfixOf "| begin" out)),
-      H.testCase "Simplifier preserves scope-changing prelude begin wrappers" $ do
-        out <- translateScript "{ { FOO=bar true; }; echo hi; }"
-        T.count "begin" out @?= 2
-        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected local export to keep inner scope"
-        T.isInfixOf "echo 'hi'" out H.@? "expected command to remain",
-      H.testCase "Env prefix uses local export block" $ do
-        out <- translateScript "FOO=bar echo hi"
-        T.isInfixOf "set --local --export FOO 'bar'" out H.@? "expected local export set"
-        T.isInfixOf "echo 'hi'" out H.@? "expected command in block",
-      H.testCase "Export command uses set --global --export" $ do
-        out <- translateScript "export FOO=bar"
-        T.isInfixOf "set --global --export FOO 'bar'" out H.@? "expected global export set",
-      H.testCase "Local command uses set --local" $ do
-        out <- translateScript "local FOO=bar"
-        T.isInfixOf "set --local FOO 'bar'" out H.@? "expected local set",
-      H.testCase "Select loop uses read prompt and items list" $ do
-        out <- translateScript "select x in a b; do echo $x; break; done"
-        T.isInfixOf "set --local __monk_select_items" out H.@? "expected select items list"
-        T.isInfixOf "while true" out H.@? "expected select while loop"
-        T.isInfixOf "read --prompt '> '" out H.@? "expected select prompt read",
-      H.testCase "Case patterns preserve globs" $ do
-        out <- translateScript "case $x in foo* ) echo ok ;; esac"
-        T.isInfixOf "case 'foo*'" out H.@? "expected quoted glob pattern",
-      H.testCase "Case patterns with expansion keep glob meta" $ do
-        out <- translateScript "case $x in ${Y}* ) echo ok ;; esac"
-        T.isInfixOf "printf '%s%s'" out H.@? "expected printf pattern builder"
-        T.isInfixOf "string join ' ' -- $Y ; or printf ''" out H.@? "expected expansion string join in pattern"
-        H.assertBool "expected case pattern to be computed" (T.isInfixOf "case (" out),
-      H.testCase "Case pattern expansion hoists side effects" $ do
-        out <- translateScript "case $x in ${Y:=1}) echo ok ;; esac"
-        T.isInfixOf "set --global Y '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "string join ' ' -- $Y ; or printf ''" out H.@? "expected pattern to use Y",
-      H.testCase "Case switch expansion hoists side effects" $ do
-        out <- translateScript "case ${X:=1} in 1) echo ok ;; esac"
-        T.isInfixOf "set --global X '1'" out H.@? "expected assignment before switch"
-        T.isInfixOf "switch (string join ' ' -- $X ; or printf '')" out H.@? "expected switch to use X",
-      H.testCase "Read flags translate to fish equivalents" $ do
-        outD <- translateScript "read -d : first second"
-        T.isInfixOf "__monk_read_capture_delim" outD H.@? "expected delimiter capture helper"
-        T.isInfixOf "split0" outD H.@? "expected combined Bash-style field assignment"
-        H.assertBool
-          ("unexpected delimiter warning comment in exact helper path: " <> T.unpack outD)
-          (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" outD))
-        outS <- translateScript "read -s secret"
-        T.isInfixOf "read --silent secret" outS H.@? "expected silent flag"
-        outN <- translateScript "read -n 3 foo"
-        T.isInfixOf "read --nchars 3 foo" outN H.@? "expected nchars flag"
-        outT <- translateScript "read -t 5 bar"
-        T.isInfixOf "read --timeout 5 bar" outT H.@? "expected timeout flag"
-        outU <- translateScript "read -u 9 baz"
-        T.isInfixOf "__monk_read_capture_delim" outU H.@? "expected exact helper for numeric fd read"
-        T.isInfixOf "<&9" outU H.@? "expected numeric fd redirection in helper path"
-        outA <- translateScript "read -a arr"
-        T.isInfixOf "__monk_read_capture_delim" outA H.@? "expected exact helper for array read"
-        T.isInfixOf "set --global arr $__monk_read_fields" outA H.@? "expected exact array assignment",
-      H.testCase "Read helpers are registered once" $ do
-        out <- translateScript "read -d : a b\nread -d : c d"
-        T.count "function __monk_read_capture_delim" out @?= 1
-        T.count "function __monk_return_status" out @?= 1
-        T.count "python3" out @?= 1,
-      H.testCase "Background jobs use Monk tracking runtime" $ do
-        out <- translateScript "false &\nbg=$!\nwait \"$bg\""
-        T.isInfixOf "__monk_bg_status_path" out H.@? "expected background status helper"
-        T.isInfixOf "set --global __monk_last_job $__monk_bg_seq" out H.@? "expected Monk job token"
-        T.isInfixOf "__monk_wait" out H.@? "expected translated wait helper"
-        T.isInfixOf "printf \"%s\\\\n\" $__monk_bg_status > $__monk_bg_status_file" out H.@? "expected status file write"
-        H.assertBool "expected $! to lower to Monk job token" (not (T.isInfixOf "$last_pid" out)),
-      H.testCase "Background runtime is registered once" $ do
-        out <- translateScript "false &\nwait \"$!\"\ntrue &\nwait \"$!\""
-        T.count "function __monk_bg_status_path" out @?= 1
-        T.count "function __monk_wait" out @?= 1,
-      H.testCase "Pipefail helper is registered once" $ do
-        out <- translateScript "set -o pipefail\nfalse | true\ntrue | false"
-        T.count "function __monk_pipefail" out @?= 1,
-      H.testCase "Exact read delimiter array helper emits no semantic warnings" $ do
-        result <- parseBashScript "spec.sh" "read -d '' -ra fields"
-        case translateParseResult defaultConfig result of
-          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
-          Right translation -> do
-            let out = renderTranslation translation
-                warnMessages = map diagnosticMessage (translationDiagnostics translation)
-            T.isInfixOf "set --global fields $__monk_read_fields" out H.@? "expected exact array assignment"
-            T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited capture helper"
-            H.assertBool
-              ("unexpected warnings in exact array path: " <> show warnMessages)
-              ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
-                  && "read IFS splitting semantics may differ between bash and fish" `notElem` warnMessages
-              ),
-      H.testCase "Multi-variable delimiter reads use exact helper without warnings" $ do
-        result <- parseBashScript "spec.sh" "read -d : one two three"
-        case translateParseResult defaultConfig result of
-          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
-          Right translation -> do
-            let out = renderTranslation translation
-                warnMessages = map diagnosticMessage (translationDiagnostics translation)
-            T.isInfixOf "set --global one $__monk_read_fields[1]" out H.@? "expected exact variable assignment"
-            H.assertBool
-              ("unexpected warnings in exact multi-var path: " <> show warnMessages)
-              ( "read delimiter semantics may differ between bash and fish" `notElem` warnMessages
-                  && "read IFS splitting semantics may differ between bash and fish" `notElem` warnMessages
-              ),
-      H.testCase "Mixed delimiter flag clusters use exact helper" $ do
-        result <- parseBashScript "spec.sh" "read -rsd: -n 3 field"
-        case translateParseResult defaultConfig result of
-          Left err -> H.assertFailure ("translateParseResult failed: " <> show err)
-          Right translation -> do
-            let out = renderTranslation translation
-                warnMessages = map diagnosticMessage (translationDiagnostics translation)
-            T.isInfixOf "__monk_read_capture_delim" out H.@? "expected exact capture helper"
-            H.assertBool
-              ("unexpected delimiter warning in mixed exact path: " <> show warnMessages)
-              ("read delimiter semantics may differ between bash and fish" `notElem` warnMessages),
-      H.testCase "No-var null delimiter assigns REPLY exactly" $ do
-        out <- translateScript "read -d ''"
-        T.isInfixOf "__monk_read_capture_delim 'null'" out H.@? "expected null-delimited helper path"
-        T.isInfixOf "set --global REPLY" out H.@? "expected REPLY assignment"
-        H.assertBool
-          "unexpected delimiter warning note"
-          (not (T.isInfixOf "read delimiter semantics may differ between bash and fish" out)),
-      H.testCase "Delimiter values normalize to the first character" $ do
-        out <- translateScript "read -d '::' field"
-        T.isInfixOf "__monk_read_capture_delim 'char' ':'" out H.@? "expected normalized delimiter helper call"
-        H.assertBool "unexpected multi-character delimiter in helper call" (not (T.isInfixOf "'::'" out)),
-      H.testCase "Source passes args" $ do
-        out <- translateScript "source /tmp/script.sh a b"
-        T.isInfixOf "source '/tmp/script.sh' 'a' 'b'" out H.@? "expected args passed to source",
-      H.testCase "Trap translates to fish trap syntax" $ do
-        out <- translateScript "trap 'echo bye' EXIT"
-        T.isInfixOf "set --global __monk_trap_body_exit 'echo bye'" out H.@? "expected trap body capture"
-        T.isInfixOf "function __monk_trap_exit --on-process-exit %self" out H.@? "expected on-process-exit helper"
-        T.isInfixOf "eval $__monk_trap_body_exit" out H.@? "expected trap body via captured variable"
-        H.assertBool "unexpected direct eval of trap body" (not (T.isInfixOf "eval 'echo bye'" out)),
-      H.testCase "Trap uses distinct per-signal body variables" $ do
-        out <- translateScript "trap 'echo first' EXIT INT\ntrap 'echo second' EXIT"
-        T.isInfixOf "set --global __monk_trap_body_exit 'echo first'" out H.@? "expected EXIT body capture"
-        T.isInfixOf "set --global __monk_trap_body_int 'echo first'" out H.@? "expected INT body capture"
-        T.isInfixOf "set --global __monk_trap_body_exit 'echo second'" out H.@? "expected EXIT body overwrite"
-        H.assertBool "unexpected INT body overwrite" (not (T.isInfixOf "set --global __monk_trap_body_int 'echo second'" out)),
-      H.testCase "Trap clear removes Monk-generated handlers" $ do
-        out <- translateScript "trap - EXIT INT"
-        out
-          @?= T.intercalate
-            "\n"
-            [ "functions '-e' '__monk_trap_exit'",
-              "set '-e' '__monk_trap_body_exit'",
-              "functions '-e' '__monk_trap_sig_INT'",
-              "set '-e' '__monk_trap_body_int'"
-            ],
-      H.testCase "Trap normalizes SIG-prefixed signals" $ do
-        out <- translateScript "trap 'echo hi' SIGINT"
-        T.isInfixOf "function __monk_trap_sig_INT --on-signal INT" out H.@? "expected SIGINT to normalize to INT"
+    "Translation admission behavior"
+    [ testGroup "exact behavior" (map exactCaseTest exactCases),
+      statisticsTests,
+      H.testCase "a hand-built unsupported pipeline stage cannot become silent success" rawAstRejects
     ]
+
+statisticsTests :: TestTree
+statisticsTests =
+  testGroup
+    "materialization statistics"
+    [ H.testCase "user literal python is not a native call site" $ do
+        result <- admitted "printf '%s\\n' 'python3 __monk_native'"
+        let stats = translationStatistics result
+        H.assertEqual "literal words are data" 0 (statisticsNativeCallSites stats)
+        H.assertEqual "rendered UTF-8 bytes" (BS.length (encodeUtf8 (renderTranslation result))) (statisticsRenderedFishBytes stats),
+      H.testCase "repeated arithmetic shares definitions but retains helper call sites" $ do
+        let branch = "if test -n \"$1\"; then x=17; else x=31; fi; "
+            operation = "printf '%s\\n' \"$((x + 23))\"; "
+        single <- translationStatistics <$> admitted (branch <> operation)
+        repeated <- translationStatistics <$> admitted (branch <> operation <> operation)
+        H.assertEqual "helper definitions interned" (statisticsHelperDefinitions single) (statisticsHelperDefinitions repeated)
+        H.assertBool "call sites preserved" (statisticsHelperCallSites repeated > statisticsHelperCallSites single)
+        H.assertBool "native operation dispatcher reached" (statisticsNativeCallSites repeated > 0),
+      H.testCase "embedded child counts come from its pre-rendering structure" $ do
+        plain <- translationStatistics <$> admitted "(printf x)"
+        native <- translationStatistics <$> admitted "(echo -e 'x\\ny')"
+        H.assertBool "child native operation is counted" (statisticsNativeCallSites native > statisticsNativeCallSites plain),
+      H.testCase "copied functions retain nested child native sites" $ do
+        direct <- translationStatistics <$> admitted "f() { (echo -e 'x\\ny'); }; f"
+        copied <- translationStatistics <$> admitted "f() { (echo -e 'x\\ny'); }; f; (f)"
+        H.assertBool "copied nested child definition contributes sites" (statisticsNativeCallSites copied > statisticsNativeCallSites direct)
+    ]
+  where
+    admitted source = translateBashScript strictConfig "statistics.bash" source >>= either (\failure -> H.assertFailure (show failure) >> fail "translation rejected") pure
+
+data ExactCase = MkExactCase
+  { exactName :: String,
+    exactSource :: Text,
+    exactStdout :: Text
+  }
+
+exactCases :: [ExactCase]
+exactCases =
+  [ MkExactCase
+      "echo option behavior survives structural lowering"
+      "echo -e 'hi\\nthere'; echo -n end"
+      "hi\nthere\nend",
+    MkExactCase
+      "unset exposes the default parameter value"
+      "value=before; unset value; printf '<%s>\\n' \"${value-default}\""
+      "<default>\n",
+    MkExactCase
+      "set argv preserves argument boundaries"
+      "set -- one \"two three\"; printf '<%s:%s:%s>\\n' \"$#\" \"$1\" \"$2\""
+      "<2:one:two three>\n",
+    MkExactCase
+      "until negates the complete condition"
+      "n=0; until test \"$n\" = 1; do printf 'loop\\n'; n=1; done; printf 'done\\n'"
+      "loop\ndone\n",
+    MkExactCase
+      "double bracket equality selects the matching branch"
+      "x=foo; if [[ \"$x\" == foo ]]; then printf 'yes\\n'; else printf 'no\\n'; fi"
+      "yes\n",
+    MkExactCase
+      "case glob matching keeps Bash branch selection"
+      "x=foobar; case \"$x\" in foo*) printf 'glob\\n' ;; *) printf 'miss\\n' ;; esac"
+      "glob\n",
+    MkExactCase
+      "function locals do not overwrite the caller binding"
+      "v=outer; f() { local v=inner; printf '<%s>\\n' \"$v\"; }; f; printf '<%s>\\n' \"$v\""
+      "<inner>\n<outer>\n",
+    MkExactCase
+      "exported assignments are visible to child processes"
+      "export FOO=bar; sh -c 'printf \"<%s>\\n\" \"$FOO\"'"
+      "<bar>\n"
+  ]
+
+exactCaseTest :: ExactCase -> TestTree
+exactCaseTest MkExactCase {exactName, exactSource, exactStdout} = H.testCaseSteps exactName $ \step -> do
+  readiness <- shouldRunIntegration
+  case readiness of
+    Left reason -> step ("skipped: " <> reason)
+    Right () -> do
+      result <- translateBashScript strictConfig "legacy-exact.bash" exactSource
+      case result of
+        Left failure -> H.assertFailure ("strict translation rejected an exact case: " <> show failure)
+        Right translation -> do
+          environment <- prepareEnv
+          bash <- runShell ShellBash environment exactSource
+          fish <- runShell ShellFish environment (renderTranslation translation)
+          H.assertEqual "independent Bash stdout" exactStdout (rrStdout bash)
+          assertEquivalent bash fish
+
+assertEquivalent :: RunResult -> RunResult -> H.Assertion
+assertEquivalent bash fish = do
+  H.assertEqual "exit status" (rrExit bash) (rrExit fish)
+  H.assertEqual "stdout" (rrStdout bash) (rrStdout fish)
+  H.assertEqual "stderr" (rrStderr bash) (rrStderr fish)
+
+rawAstRejects :: H.Assertion
+rawAstRejects = do
+  parsed <- translateInput "false | wc -c"
+  let literal ident = Bash.T_Literal (Bash.Id ident)
+      word ident literalId value = Bash.T_NormalWord (Bash.Id ident) [literal literalId value]
+      command ident nameIdent nameLiteralId name arguments =
+        Bash.T_SimpleCommand
+          (Bash.Id ident)
+          []
+          (word nameIdent nameLiteralId name : arguments)
+      body = command 100 101 102 "false" []
+      unsupportedStage = Bash.T_BatsTest (Bash.Id 103) "unsupported" body
+      wcStage = command 104 105 106 "wc" [word 107 108 "-c"]
+      root =
+        Bash.T_Annotation
+          (Bash.Id 109)
+          []
+          ( Bash.T_Script
+              (Bash.Id 110)
+              (literal 111 "")
+              [Bash.T_Pipeline (Bash.Id 112) [] [unsupportedStage, wcStage]]
+          )
+  case translateParseResult strictConfig parsed {prRoot = Just root} of
+    Left failure -> do
+      let firstDiagnostic = NonEmpty.head (failureDiagnostics failure)
+      diagnosticCode firstDiagnostic H.@?= MkDiagnosticCode "monk.semantic.unsupported-syntax"
+      diagnosticPhase firstDiagnostic H.@?= PhaseTranslate
+    Right translation ->
+      H.assertFailure
+        ( "unsupported hand-built AST produced executable output:\n"
+            <> T.unpack (renderTranslation translation)
+        )
+
+translateInput :: Text -> IO ParseResult
+translateInput source = do
+  result <- parseBashScript "legacy-raw-ast.bash" source
+  case prRoot result of
+    Nothing -> H.assertFailure "positive parser control failed" >> fail "unreachable"
+    Just _ -> pure result

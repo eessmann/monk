@@ -15,6 +15,7 @@ import Monk.Diagnostics
     summarizeDiagnostics,
     translationNoteCount,
   )
+import Monk.Translation (translateBashScript)
 import Monk.Translation.Types
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -26,6 +27,11 @@ unitDiagnosticsTests =
     [ H.testCase "translation config defaults are exported from the public types module" $ do
         strictMode defaultConfig @?= False
         strictMode strictConfig @?= True,
+      H.testCase "normal translation does not opt into readonly approximation" $ do
+        result <- translateBashScript defaultConfig "spec.sh" "readonly value=one"
+        case result of
+          Left _ -> pure ()
+          Right _ -> H.assertFailure "an approximation requires a named opt-in",
       H.testCase "renderDiagnostic includes stable code, risk, and source range" $
         renderDiagnostic (sampleDiagnostic Review)
           @?= "spec.sh:3:5: warning[monk.read][review]: read semantics require review",

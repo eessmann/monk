@@ -6,110 +6,86 @@ on:
   push:
     branches: [main]
   schedule:
-    # additionally run once per week (At 00:00 on Sunday) to maintain cache
     - cron: '0 0 * * 0'
+  workflow_dispatch:
 
 jobs:
-  cabal:
-    name: ubuntu / ghc ${{ matrix.ghc }} / fish ${{ matrix.fish }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+  quality:
+    name: Pinned lint and formatting tools
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v5
+    - uses: haskell-actions/setup@v2.10.1
+      with:
+        ghc-version: '9.12.2'
+        cabal-version: '3.16.1'
+    - name: Bootstrap tools independently of the project
+      run: |
+        cabal update
+        cabal install hlint-3.10 ormolu-0.9.0.0 --ignore-project --installdir="$HOME/.local/bin"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - run: hlint .
+    - run: git ls-files '*.hs' -z | xargs -0 ormolu --mode check
+    - run: cabal check
+
+  acceptance:
+    name: GHC ${{ matrix.ghc }} / Fish ${{ matrix.fish }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest]
-        cabal: ["3.16.1"]
-        fish: ["4.6.0", "ppa-4"]
-        ghc:
-          - "9.12.2"
-          - "9.14.1"
-
+        ghc: ['9.12.2', '9.14.1']
+        fish: [pinned, moving]
+    env:
+      LC_ALL: C
+      LANG: C
+      MONK_INTEGRATION: '1'
     steps:
     - uses: actions/checkout@v5
-
     - uses: haskell-actions/setup@v2.10.1
-      id: setup-haskell-cabal
-      name: Setup Haskell
+      id: haskell
       with:
         ghc-version: ${{ matrix.ghc }}
-        cabal-version: ${{ matrix.cabal }}
-
-    - name: Configure
-      run: |
-        cabal configure --enable-tests --enable-benchmarks --enable-documentation --test-show-details=direct --write-ghc-environment-files=always
-
-    - name: Freeze
-      run: |
-        cabal freeze
-
+        cabal-version: '3.16.1'
     - uses: actions/cache@v5
-      name: Cache ~/.cabal/store
       with:
-        path: ${{ steps.setup-haskell-cabal.outputs.cabal-store }}
-        key: ${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('cabal.project.freeze') }}
-
-    - name: Install pinned fish 4.6.0
-      if: matrix.fish == '4.6.0'
+        path: ${{ steps.haskell.outputs.cabal-store }}
+        key: cabal-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('monk.cabal') }}
+        restore-keys: cabal-${{ runner.os }}-${{ matrix.ghc }}-
+    - name: Install and identify execution profile
+      run: bash scripts/install-ci-runtimes.sh "$RUNNER_TEMP/monk-runtime" '${{ matrix.fish }}'
+    - name: Resolve dependencies
       run: |
-        curl --fail --location --retry 3 \
-          https://github.com/fish-shell/fish-shell/releases/download/4.6.0/fish-4.6.0-linux-x86_64.tar.xz \
-          --output /tmp/fish.tar.xz
-        tar -xJf /tmp/fish.tar.xz -C /tmp
-        sudo install /tmp/fish /usr/local/bin/fish
-
-    - name: Install moving fish 4 PPA
-      if: matrix.fish == 'ppa-4'
+        cabal update
+        cabal configure -fdevelopment --enable-tests --enable-benchmarks --test-show-details=direct
+        cabal freeze
+    - run: cabal build all -fdevelopment
+    - name: Expose the matching native runtime
+      run: echo "$(dirname "$(cabal list-bin exe:monk-runtime)")" >> "$GITHUB_PATH"
+    - run: timeout 20m cabal test all -fdevelopment
+    - name: Native byte protocol, child transport, and publication
       run: |
-        sudo add-apt-repository --yes ppa:fish-shell/release-4
-        sudo apt-get update
-        sudo apt-get install --yes fish
-
-    - name: Report fish version
-      run: fish --version
-
-    - name: Install dependencies
-      run: |
-        cabal build all --only-dependencies
-        cabal install hlint ormolu --ignore-project --installdir="$HOME/.local/bin" --overwrite-policy=always
-
-    - name: Lint
-      run: |
-        export PATH="$HOME/.local/bin:$PATH"
-        hlint .
-
-    - name: Formatting
-      run: |
-        export PATH="$HOME/.local/bin:$PATH"
-        git ls-files '*.hs' -z | xargs -0 ormolu --mode check
-
-    - name: Build
-      run: |
-        cabal build all
-
-    - name: Test
-      env:
-        MONK_INTEGRATION: "1"
-      run: |
-        timeout 20m cabal test all
-
-    - name: Linux process substitution evidence
-      env:
-        MONK_INTEGRATION: "1"
-      run: |
-        timeout 5m cabal test monk-test --test-options='-p procsub-output'
-
-    - name: Fixture syntax and parity manifest
-      run: |
-        cabal build exe:monk
-        scripts/generate-parity-manifest.sh \
-          "$(cabal list-bin exe:monk)" \
-          artifacts/parity-manifest.tsv
-
+        python3 runtime-test/protocol.py "$(cabal list-bin exe:monk-runtime)"
+        bash test/native/child-transport.sh "$(cabal list-bin exe:monk-runtime)"
+        MONK_NATIVE_TEST_BINARY="$(cabal list-bin exe:monk)" MONK_NATIVE_RUNTIME="$(cabal list-bin exe:monk-runtime)" python3 scripts/test_native_publication.py
+    - name: Verify public abstraction boundaries with a positive control
+      run: cabal exec -- python3 scripts/check-public-boundaries.py --report artifacts/public-boundaries.json
+    - name: Linux execution and rejection selectors
+      run: timeout 5m cabal test monk-test -fdevelopment --test-options="-p '/procsub-output/ || /Planned child isolation/'"
+    - name: Fixture syntax and admission manifest
+      run: bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity-manifest.tsv
+    - name: Build Monk API documentation without rebuilding dependency docs
+      run: cabal haddock all -fdevelopment --disable-documentation
+    - name: Unpacked source build and install smoke
+      run: bash scripts/check-source-distribution.sh artifacts/sdist
     - uses: actions/upload-artifact@v4
+      if: always()
       with:
-        name: parity-ghc-${{ matrix.ghc }}-fish-${{ matrix.fish }}
-        path: artifacts/parity-manifest.tsv
-
-    - name: Documentation
-      run: |
-        cabal haddock all
+        name: acceptance-ghc-${{ matrix.ghc }}-fish-${{ matrix.fish }}
+        path: |
+          artifacts/
+          cabal.project.freeze
+          ${{ runner.temp }}/monk-runtime/runtime-evidence.txt
+          ${{ runner.temp }}/monk-runtime/bash-build.log

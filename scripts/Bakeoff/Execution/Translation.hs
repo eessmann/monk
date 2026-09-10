@@ -24,10 +24,8 @@ import Bakeoff.Types
 import Control.Exception (evaluate)
 import Data.ByteString qualified as BS
 import Data.List qualified as L
-import Data.Map.Strict qualified as M
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
-import Monk.AST (renderScript)
 import Monk.Diagnostics
   ( DiagnosticCounts (..),
     renderDiagnostic,
@@ -37,11 +35,14 @@ import Monk.Diagnostics
     summarizeDiagnostics,
     translationNoteCount,
   )
+import Monk.Output (OutputTarget (OutputStdout), planCombinedOutputBundle, renderOutputBundle)
 import Monk.Source
-  ( SourceGraph (..),
+  ( SourceGraph,
     SourceGraphFailure (..),
-    Translation (..),
-    inlineSourceGraph,
+    sourceGraphDiagnostics,
+    sourceGraphRuntimeRequirements,
+    sourceGraphStatistics,
+    sourceRoot,
     translateSourceGraph,
   )
 import Monk.Translation
@@ -50,7 +51,10 @@ import Monk.Translation
     RuntimeProgram (..),
     RuntimeRequirement (..),
     TranslationFailure (..),
-    defaultConfig,
+    TranslationStatistics (..),
+    fishFeatureName,
+    nativeOperationName,
+    platformCapabilityName,
   )
 import Path
   ( Abs,
@@ -66,6 +70,7 @@ data MonkTranslationArtifact = MkMonkTranslationArtifact
   { mtaOutput :: Text,
     mtaDiagnostics :: [Diagnostic],
     mtaRuntimeRequirements :: [RuntimeRequirement],
+    mtaStatistics :: TranslationStatistics,
     mtaNoteCount :: Int,
     mtaStderrLines :: [Text]
   }
@@ -75,7 +80,7 @@ buildMonkTranslationReport cfg fixture artifacts =
   case specSkipReason fixture of
     Just reason -> pure (skippedTranslationReport ToolMonk reason)
     Nothing -> do
-      result <- timeoutIO (bakeoffTranslationTimeoutSeconds cfg) (translateFixtureWithMonk fixture)
+      result <- timeoutIO (bakeoffTranslationTimeoutSeconds cfg) (translateFixtureWithMonk (bakeoffTranslationSettings cfg) fixture)
       case result of
         Nothing -> do
           writeTextFile (faMonkTranslateStderr artifacts) "translation timed out\n"
@@ -91,6 +96,7 @@ buildMonkTranslationReport cfg fixture artifacts =
                 translationInputBytes = Nothing,
                 translationOutputBytes = Nothing,
                 translationExpansionRatio = Nothing,
+                translationStatistics = Nothing,
                 translationHelperBytes = Nothing,
                 translationHelperInvocations = 0,
                 translationExternalRequirements = [],
@@ -112,6 +118,7 @@ buildMonkTranslationReport cfg fixture artifacts =
                 translationInputBytes = Nothing,
                 translationOutputBytes = Nothing,
                 translationExpansionRatio = Nothing,
+                translationStatistics = Nothing,
                 translationHelperBytes = Nothing,
                 translationHelperInvocations = 0,
                 translationExternalRequirements = [],
@@ -137,8 +144,9 @@ buildMonkTranslationReport cfg fixture artifacts =
                 translationInputBytes = Just inputBytes,
                 translationOutputBytes = Just outputBytes,
                 translationExpansionRatio = expansionRatio inputBytes outputBytes,
-                translationHelperBytes = Just (helperFootprintBytes (mtaOutput artifact)),
-                translationHelperInvocations = helperInvocationCount (mtaOutput artifact),
+                translationStatistics = Just (mtaStatistics artifact),
+                translationHelperBytes = Nothing,
+                translationHelperInvocations = statisticsHelperCallSites (mtaStatistics artifact),
                 translationExternalRequirements = map (runtimeProgramText . requirementProgram) (mtaRuntimeRequirements artifact),
                 translationOutputPath = Just (faMonkFish artifacts),
                 translationStderrPath = Just (faMonkTranslateStderr artifacts),
@@ -174,6 +182,7 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                 translationInputBytes = Just (textBytes bashSource),
                 translationOutputBytes = Nothing,
                 translationExpansionRatio = Nothing,
+                translationStatistics = Nothing,
                 translationHelperBytes = Nothing,
                 translationHelperInvocations = 0,
                 translationExternalRequirements = [],
@@ -199,6 +208,7 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                     translationInputBytes = Just (textBytes bashSource),
                     translationOutputBytes = Just (textBytes poStdout),
                     translationExpansionRatio = expansionRatio (textBytes bashSource) (textBytes poStdout),
+                    translationStatistics = Nothing,
                     translationHelperBytes = Nothing,
                     translationHelperInvocations = 0,
                     translationExternalRequirements = [],
@@ -219,6 +229,7 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                     translationInputBytes = Just (textBytes bashSource),
                     translationOutputBytes = Nothing,
                     translationExpansionRatio = Nothing,
+                    translationStatistics = Nothing,
                     translationHelperBytes = Nothing,
                     translationHelperInvocations = 0,
                     translationExternalRequirements = [],
@@ -227,69 +238,51 @@ buildBabelfishTranslationReport cfg tools fixture artifacts processEnv =
                     translationErrorMessage = Just (translationFailureMessage poExitCode poStderr)
                   }
 
-translateFixtureWithMonk :: FixtureSpec -> IO (Either Text MonkTranslationArtifact)
-translateFixtureWithMonk fixture
-  | fmRecursive (specMetadata fixture) = translateRecursiveFixture (specPath fixture)
-  | otherwise = translateSingleFixture (specPath fixture)
+translateFixtureWithMonk :: BakeoffTranslationSettings -> FixtureSpec -> IO (Either Text MonkTranslationArtifact)
+translateFixtureWithMonk settings fixture
+  | fmRecursive (specMetadata fixture) = translateRecursiveFixture settings (specPath fixture)
+  | otherwise = translateSingleFixture settings (specPath fixture)
 
-translateSingleFixture :: Path Abs File -> IO (Either Text MonkTranslationArtifact)
-translateSingleFixture = translateFixtureViaGraph False
+translateSingleFixture :: BakeoffTranslationSettings -> Path Abs File -> IO (Either Text MonkTranslationArtifact)
+translateSingleFixture settings = translateFixtureViaGraph settings False
 
-translateRecursiveFixture :: Path Abs File -> IO (Either Text MonkTranslationArtifact)
-translateRecursiveFixture = translateFixtureViaGraph True
+translateRecursiveFixture :: BakeoffTranslationSettings -> Path Abs File -> IO (Either Text MonkTranslationArtifact)
+translateRecursiveFixture settings = translateFixtureViaGraph settings True
 
-translateFixtureViaGraph :: Bool -> Path Abs File -> IO (Either Text MonkTranslationArtifact)
-translateFixtureViaGraph recursive path = do
-  graphE <- translateSourceGraph defaultConfig recursive (toFilePath path)
+translateFixtureViaGraph :: BakeoffTranslationSettings -> Bool -> Path Abs File -> IO (Either Text MonkTranslationArtifact)
+translateFixtureViaGraph settings recursive path = do
+  graphE <- translateSourceGraph (bakeoffTranslateConfig settings) recursive (toFilePath path)
   case graphE of
     Left err -> pure (Left (renderSourceGraphFailureText err))
-    Right graph -> Right <$> buildMonkArtifactFromGraph recursive path graph
+    Right graph -> buildMonkArtifactFromGraph graph
 
-buildMonkArtifactFromGraph :: Bool -> Path Abs File -> SourceGraph -> IO MonkTranslationArtifact
-buildMonkArtifactFromGraph recursive path graph = do
-  let rootPath = toFilePath path
-      orderedTranslations =
-        mapMaybe (`M.lookup` sgTranslations graph) (sgOrder graph)
-      translationDiagnostics = map trDiagnostics orderedTranslations
-      allDiagnostics = concat translationDiagnostics
-      allRequirements = L.nub (concatMap trRuntimeRequirements orderedTranslations)
-      totalNotes = sum (map translationNoteCount translationDiagnostics)
-      stderrLines = concatMap (stderrLinesForPath graph) (sgOrder graph)
-  (renderedOutput, inlineWarns) <-
-    if recursive
-      then do
-        (inlined, inlineDiagnostics) <- inlineSourceGraph graph rootPath
-        pure (renderScript inlined, map renderDiagnostic inlineDiagnostics)
-      else case M.lookup rootPath (sgTranslations graph) of
-        Just translation ->
-          pure (renderTranslationSingle translation, [])
-        Nothing ->
-          pure ("", [])
-  pure
-    MkMonkTranslationArtifact
-      { mtaOutput = renderedOutput,
-        mtaDiagnostics = allDiagnostics,
-        mtaRuntimeRequirements = allRequirements,
-        mtaNoteCount = totalNotes,
-        mtaStderrLines = stderrLines <> inlineWarns
-      }
-
-stderrLinesForPath :: SourceGraph -> FilePath -> [Text]
-stderrLinesForPath graph path =
-  case M.lookup path (sgTranslations graph) of
-    Nothing -> []
-    Just translation ->
-      map renderDiagnostic (trDiagnostics translation)
-        <> renderTranslationNotes path (trDiagnostics translation)
-        <> map renderRuntimeRequirement (trRuntimeRequirements translation)
-
-renderTranslationSingle :: Translation -> Text
-renderTranslationSingle translation =
-  renderScript (trScript translation)
+buildMonkArtifactFromGraph :: SourceGraph -> IO (Either Text MonkTranslationArtifact)
+buildMonkArtifactFromGraph graph = do
+  planned <- planCombinedOutputBundle OutputStdout graph
+  pure $ case planned of
+    Left diagnostic -> Left (renderDiagnostic diagnostic)
+    Right bundle -> case L.lookup OutputStdout (renderOutputBundle bundle) of
+      Nothing -> Left "combined planner did not produce its stdout entry"
+      Just rendered ->
+        Right
+          MkMonkTranslationArtifact
+            { mtaOutput = rendered,
+              mtaDiagnostics = allDiagnostics,
+              mtaRuntimeRequirements = allRequirements,
+              mtaStatistics = sourceGraphStatistics graph,
+              mtaNoteCount = translationNoteCount allDiagnostics,
+              mtaStderrLines =
+                map renderDiagnostic allDiagnostics
+                  <> renderTranslationNotes (sourceRoot graph) allDiagnostics
+                  <> map renderRuntimeRequirement allRequirements
+            }
+  where
+    allDiagnostics = sourceGraphDiagnostics graph
+    allRequirements = sourceGraphRuntimeRequirements graph
 
 renderSourceGraphFailureText :: SourceGraphFailure -> Text
 renderSourceGraphFailureText = \case
-  SourceGraphFailure _ failure -> T.unlines (map renderDiagnostic (toList (failureDiagnostics failure)))
+  MkSourceGraphFailure _ failure -> T.unlines (map renderDiagnostic (toList (failureDiagnostics failure)))
 
 translationFailureMessage :: ExitCode -> Text -> Text
 translationFailureMessage exitCode stderrText
@@ -317,41 +310,16 @@ reviewRiskText = \case
 runtimeProgramText :: RuntimeProgram -> Text
 runtimeProgramText = \case
   RequiresCommand commandName -> commandName
-  RequiresFishFeature featureName -> "fish:" <> featureName
+  RequiresFishFeature featureName -> "fish:" <> fishFeatureName featureName
+  RequiresPlatformCapability capability -> "platform:" <> platformCapabilityName capability
+  RequiresNativeRuntime abi profile operations -> "monk-runtime:abi-" <> show abi <> ":" <> show profile <> ":" <> show (map nativeOperationName (toList operations))
 
-helperFootprintBytes :: Text -> Int
-helperFootprintBytes = textBytes . T.unlines . fst . helperTextParts
-
-helperInvocationCount :: Text -> Int
-helperInvocationCount output =
-  let (helperLines, userLines) = helperTextParts output
-      helperNames = mapMaybe helperName helperLines
-      userText = T.unlines userLines
-   in sum (map (`T.count` userText) helperNames)
-
-helperTextParts :: Text -> ([Text], [Text])
-helperTextParts = go False [] [] . T.lines
-  where
-    go _ helperLines userLines [] = (reverse helperLines, reverse userLines)
-    go inHelper helperLines userLines (line : rest)
-      | not inHelper && isHelperStart line = go True (line : helperLines) userLines rest
-      | inHelper && line == "end" = go False (line : helperLines) userLines rest
-      | inHelper = go True (line : helperLines) userLines rest
-      | otherwise = go False helperLines (line : userLines) rest
-    isHelperStart = T.isPrefixOf "function __monk_"
-
-helperName :: Text -> Maybe Text
-helperName line =
-  case T.words line of
-    "function" : name : _ | "__monk_" `T.isPrefixOf` name -> Just name
-    _ -> Nothing
-
-runWorkerFixture :: ToolName -> Path Abs File -> Path Abs File -> IO (Maybe ToolName)
-runWorkerFixture tool babelfishPath path =
+runWorkerFixture :: BakeoffTranslationSettings -> ToolName -> Path Abs File -> Path Abs File -> IO (Maybe ToolName)
+runWorkerFixture settings tool babelfishPath path =
   case tool of
     ToolMonk -> do
       recursive <- loadFixtureRecursive path
-      translation <- if recursive then translateRecursiveFixture path else translateSingleFixture path
+      translation <- if recursive then translateRecursiveFixture settings path else translateSingleFixture settings path
       case translation of
         Left _ -> pure (Just tool)
         Right artifact -> do

@@ -1,0 +1,91 @@
+fixture	expected	diagnostic_prefix	rationale
+test/fixtures/corpus/if-then.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/corpus/simple-echo.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/golden/assignments.bash	reject	monk.semantic.	Dense array construction and storage attributes are not implemented.
+test/fixtures/golden/case-pattern-expansion-glob.bash	reject	monk.semantic.pattern-envelope	Unknown active parameter patterns may contain excluded bracket/escape syntax; known simple patterns have positive word-context coverage.
+test/fixtures/golden/double-bracket-eq.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/golden/echo-echo.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/golden/echo-exit.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/golden/extglob-basic.bash	reject	monk.semantic.	Extended pathname patterns cannot use an arbitrary Bash interpreter fallback.
+test/fixtures/golden/glob-basic.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/golden/pipeline.bash	reject	monk.semantic.pipeline-signal-lifetime	The initial builtin-writer pipeline envelope proves only downstream cat and literal tr a-z A-Z drain behavior; wc has no admitted lifetime proof. Exact pipeline positives remain mandatory elsewhere.
+test/fixtures/golden/read-prompt.bash	reject	monk.semantic.	Read prompt, terminal, and input buffering semantics are excluded.
+test/fixtures/integration/arith-short-circuit.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/background-fail-wait.bash	reject	monk.semantic.	Asynchronous job lifetime, wait, and job identifiers have no admitted materialization.
+test/fixtures/integration/background-jobs.bash	reject	monk.semantic.	Asynchronous job lifetime, wait, and job identifiers have no admitted materialization.
+test/fixtures/integration/background-local-scope.bash	reject	monk.semantic.	Asynchronous job lifetime, wait, and job identifiers have no admitted materialization.
+test/fixtures/integration/background-pipefail.bash	reject	monk.semantic.	Asynchronous job lifetime, wait, and job identifiers have no admitted materialization.
+test/fixtures/integration/background-success-wait.bash	reject	monk.semantic.	Asynchronous job lifetime, wait, and job identifiers have no admitted materialization.
+test/fixtures/integration/cd-tmp.bash	reject	monk.semantic.	Logical directory state, CDPATH, and directory-stack effects are outside the initial builtin envelope.
+test/fixtures/integration/compound-status-pipeline.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/errexit-andor.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/errexit-basic.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/errexit-conditionals.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/errexit-grouped-andor.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/for-underscore.bash	reject	monk.semantic.	Bash underscore is ambient special state and conflicts with Fish read-only underscore.
+test/fixtures/integration/here-string-basic.bash	reject	monk.semantic.	Read buffering and here-string input ownership are not implemented.
+test/fixtures/integration/param-expansion-args.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/param-expansion-case.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/param-expansion-redirection.bash	reject	monk.semantic.	Arbitrary shared-scope file redirection requires owned open failures and descriptor lifetime; preflight plus native reopen cannot establish exactness.
+test/fixtures/integration/pipefail-basic.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/pipefail-conditional-toggle.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/pipefail-negated.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/pipefail-toggle.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/procsub-input.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output-compound.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output-errexit.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output-pipeline.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output-status.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output-variable.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/procsub-output.bash	reject	monk.semantic.	Process substitution needs asynchronous streaming and descriptor lifetime semantics; the old synchronous temporary-file lowering is not equivalent.
+test/fixtures/integration/pushd-popd.bash	reject	monk.semantic.	Logical directory state, CDPATH, and directory-stack effects are outside the initial builtin envelope.
+test/fixtures/integration/pwd-cd.bash	reject	monk.semantic.	Logical directory state, CDPATH, and directory-stack effects are outside the initial builtin envelope.
+test/fixtures/integration/read-delimiter-flags.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/read-delimiter-ifs.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/read-delimiter-null-array.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/read-delimiter-null-vars.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/read-delimiter.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/read-flags.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/source-recursive-child.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/source-recursive-runtime-child.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/source-recursive-runtime.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/source-recursive.bash	reject	monk.source.entry-context	The second source sees changed binding/export facts; initial support requires one compatible context per file. Repeated same-context execution has positive source and managed-bundle tests.
+test/fixtures/integration/stdout-stderr-exit.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/subshell-status-pipefail.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/subshell-status-read-delimiter.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/subshell-status-variable.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/syntax-brace-expansion.bash	exact	-	Brace distribution duplicates occurrences before expansion.
+test/fixtures/integration/syntax-dollar-bracket-arithmetic.bash	exact	-	Owned dollar-bracket arithmetic source sites.
+test/fixtures/integration/syntax-dollar-single-quote.bash	exact	-	C-locale ANSI byte decoding.
+test/fixtures/integration/syntax-standalone-negation.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/integration/time-prefix.bash	reject	monk.semantic.	Timing and stderr-order observations require a dedicated execution boundary.
+test/fixtures/integration/trap-exit-expansion.bash	reject	monk.semantic.	Handler lifetime and transitive callback effects cannot be discharged by the initial contract.
+test/fixtures/integration/trap-exit.bash	reject	monk.semantic.	Handler lifetime and transitive callback effects cannot be discharged by the initial contract.
+test/fixtures/realworld/a2l.bash	reject	monk.semantic.	Errtrace/nounset, readonly, arrays, and additional parameter operations exceed the initial profile.
+test/fixtures/realworld/argparse-mini.bash	reject	monk.semantic.	Array storage and parameter trimming are outside the admitted scalar core.
+test/fixtures/realworld/coat.bash	reject	monk.semantic.	Errtrace/nounset, readonly, arrays, and additional parameter operations exceed the initial profile.
+test/fixtures/realworld/echo-args.bash	reject	monk.semantic.	Errtrace/nounset, readonly, arrays, and additional parameter operations exceed the initial profile.
+test/fixtures/realworld/envfile-preview.bash	reject	monk.semantic.	Read-loop buffering and parameter transformations require additional semantics.
+test/fixtures/realworld/hello-world.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/realworld/neofetch-mini.bash	exact	-	Literal replacement and owned function argv shifts.
+test/fixtures/realworld/neofetch.bash	reject	monk.semantic.	Dynamic configuration, arrays, traps, and unsupported shell options are excluded.
+test/fixtures/realworld/path-filter.bash	reject	monk.semantic.	Array storage and parameter trimming are outside the admitted scalar core.
+test/fixtures/realworld/pyramid-left.bash	exact	-	Owned arithmetic-for headers, nested loops and native integer operations.
+test/fixtures/realworld/pyramid-right.bash	exact	-	Owned arithmetic-for headers and native integer operations.
+test/fixtures/realworld/semver-normalize.bash	exact	-	Bounded byte parameter trimming.
+test/fixtures/realworld/taoc.bash	reject	monk.semantic.	Errtrace/nounset, readonly, arrays, and additional parameter operations exceed the initial profile.
+test/fixtures/realworld/version-compare.bash	reject	monk.semantic.	Parameter transformations or dynamic pathname expansion exceed the initial scalar envelope.
+test/fixtures/semantic/arithmetic-integral-intermediate.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/array-mixed.bash	reject	monk.semantic.	Sparse/mixed array storage is explicitly excluded.
+test/fixtures/semantic/case-fallthrough.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/case-unreached-effect.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/dynamic-command.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/dynamic-local.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/eval-bash-syntax.bash	reject	monk.semantic.	Arbitrary eval is explicitly excluded.
+test/fixtures/semantic/ifs-set.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/positive-control-flow.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/positive-function-call.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/positive-simple-command.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/quoted-argv-adjacent.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/uncalled-option-function.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
+test/fixtures/semantic/untaken-option.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.

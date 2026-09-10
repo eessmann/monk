@@ -1,111 +1,239 @@
-# Monk Migration Guide
+# Migrating to the principled translator
 
-This guide covers the warning classes and best-effort areas that most often need manual cleanup after translating Bash to Fish.
+The redesign deliberately changes the pre-1.0 API and CLI. The active
+implementation and verification status is in
+[the roadmap](design/translator-todo.md).
 
-## Library API Change
+Run output under the [versioned execution profile](design/execution-profile.md).
+It specifies startup options, locale, command requirements and caller obligations
+separately from the checks performed by generated code.
 
-- Monk 0.4 makes one deliberate pre-1.0 API break. `Monk.AST` is the structural
-  Fish DSL; raw constructors and lowering modules are private and unsupported.
-- Use `script`, `stmt`, `command`, `arg`, `redirect`, `begin`, `pipeline`, `if_`, `while`, `for`, `switch`, `function`, and related smart constructors for normal construction.
-- The DSL enforces non-empty blocks and pipeline stages with `NonEmpty`, separates renderable command arguments from redirections with `Arg`, and provides typed constructors for common control forms.
-- `TranslationResult` contains only `translationScript`, ordered
-  `translationDiagnostics`, and deduplicated `translationRuntimeRequirements`.
-- `TranslationFailure` contains a nonempty `failureDiagnostics` collection.
-- Recursive source consumers should use typed `SourceGraph` and `OutputBundle`
-  values instead of callback warnings or raw inline statements.
+## Policy and entry mode
 
-## Reading Diagnostics
+The Boolean configuration field is replaced by explicit `translationPolicy`,
+`targetProfile`, `entryMode`, and `callerContract` fields. Use `strictConfig` for
+exact-only standalone translation. `defaultConfig` also permits no
+approximations unless they are selected by name.
 
-- Treat diagnostic code, phase, severity, and risk as the stable contract;
-  rendered message text is for humans.
-- Rendered diagnostics include explicit values such as
-  `warning[monk.read][review]`.
-- `Unsafe` means the generated Fish contains an unsupported construct,
-  compatibility fallback, high-risk approximation, or error. Diagnostic counts
-  remain available separately; numeric confidence has been removed.
-- If the translator is run with `--strict`, unsupported best-effort branches fail instead of emitting output.
+```haskell
+cfg = defaultConfig
+  { translationPolicy = Migration (Set.singleton ReadonlyUnchecked) }
+```
 
-## `set -e` / `pipefail`
+The CLI accepts `--target-profile bash-5.3-fish-4.6` and
+`--entry standalone|sourceable`. `--strict` cannot be combined with
+`--allow-approximation NAME`. The initial approximation identifier is
+`readonly-unchecked`; selecting it never authorizes unrelated unsupported behavior. A selected approximation
+still needs a materialized implementation and its own diagnostic.
 
-- Treat Monk's `set -e` and `pipefail` lowering as conservative, especially around compound-list edge cases.
-- The focused runtime suite now covers grouped `&&` / `||` bodies, negated pipeline status, and conditional enable/disable boundaries, so those specific branches are less speculative than before.
-- Translated background jobs / `$!` / `wait` now use Monk-managed job tokens and have focused parity coverage, but PID-specific follow-ons such as `kill $!` still deserve manual review.
-- Monk targets Bash's default non-`inherit_errexit` behavior inside command substitutions. If a translated substitution still needs bespoke control flow, rewrite it as explicit Fish `if` / `begin ... end` logic.
+Unsupported input now returns diagnostics without executable output. The old
+normal-mode comment/false or silent-success replacements are retired from the
+public translation path. Do not treat an absent output file as a translated
+script, or an approximation warning as exactness evidence.
 
-## `read`
+`translateParseResult` remains an advanced syntax-only entry. Because a raw
+ShellCheck parse result does not own the original source bytes, it rejects
+operations needing exact error spelling. Use `translateBashScript` or
+`translateBashFile` for ordinary translation; use source-graph translation for
+literal dependencies. Tests that deliberately construct parser nodes can still
+exercise syntax admission through the limited entry.
 
-- The exact path covers the currently accepted `read` surface:
-  - empty delimiters
-  - arrays
-  - multiple destination variables
-  - supported mixed flag clusters
-  - numeric `-u` helper-backed reads
-  - no-variable reads through Bash-compatible `REPLY`
-  - newline-delimited array and multi-variable reads
-- Remaining warning-driven `read` cases still need manual review:
-  - non-numeric fd values
-  - unsupported flag clusters
-  - unsupported option combinations
-- If Monk still emits a `ReadIssue` warning, validate the translated parser against real Bash input instead of trusting the generated Fish blindly.
-- Raw single-variable non-newline delimiter reads use a Fish 4.6 native loop
-  when its proven preconditions hold. Harder delimiter/IFS combinations use one
-  Python process and no nested Fish process; `python3` is declared explicitly.
+## Sourceable caller contract
 
-## Here-strings
+`--entry sourceable` requires `--caller-contract FILE`. A contract is rejected
+in standalone mode so its obligations cannot silently go unused. The JSON
+format is versioned and rejects unknown fields:
 
-- `<<<` is a best-effort approximation with the stable `monk.here-string`
-  diagnostic.
-- Strict mode rejects it. Normal mode keeps the covered `printf`-based lowering,
-  so scripts that depend on byte-exact or trailing-newline behavior still need
-  differential review.
+```json
+{
+  "version": 1,
+  "ambientEffects": "none",
+  "variables": {
+    "result": { "access": "read-write", "scope": "visible", "exported": false }
+  },
+  "functions": {
+    "visit": { "target": "host_visit", "reads": ["result"], "writes": ["result"] }
+  }
+}
+```
 
-## Process Substitution
+`access` is `read`, `write` or `read-write`; `scope` is `visible` or `global`.
+`exported` describes the initial binding attribute (default false), not a desired
+attribute synthesized by assignment. An absent global output may initially be
+created only unexported; changing export status requires an executed Bash
+`export`. Visible writable bindings must already exist in the caller frame.
+`exportedFunctions` lists the function names the source is allowed to leave
+installed, and those functions must remain callable after the source returns.
+Function effects must refer to appropriately accessible declared variables.
+A declared imported function must have equivalent output/status behavior and
+only its declared state effects. Imported functions must not inspect private
+runtime bindings or reenter the translated artifact. `ambientEffects: none` promises that no
+relevant callbacks or ambient effects intervene; omitting it means unknown,
+which does not authorize sourceable execution. Runtime shape/lookup checks
+cannot prove these behavioral obligations. Reserved runtime and Fish names
+are rejected.
 
-- `<(...)` has direct runtime coverage for simple cases, but larger pipelines should still be exercised in Fish.
-- Covered stdout redirect-target `>(...)` forms now lower through a temp-file-backed block that preserves the producer status, honors parent `set -e`, and ignores the consumer status, matching the covered Bash behavior more closely than a plain pipeline.
-- The current simple, pipeline, variable-sink, status-sensitive, `set -e`, and compound-consumer fixtures are the covered Linux evidence surface once the dedicated Ubuntu CI step passes.
-- Argument-position output process substitutions emit `ProcessSubstitutionIssue` and remain manual-review surfaces until they have their own focused runtime evidence.
-- If the translated output depends on streaming or asynchronous timing, prefer rewriting it as explicit `mktemp` / producer / consumer steps in hand-edited Fish.
+Programmatically constructed contracts undergo the same semantic validation as
+JSON contracts before any imported facts enter normalization. Nonempty caller
+contracts in standalone mode reject through the library API as well as the CLI.
 
-## `trap`
+Sourceable entry arguments are explicit. Internal literal Bash `source` calls
+without operands inherit argv and must forward it explicitly. Return exits an
+owned source-body frame; it must not escape the caller function. Caller argv
+mutation and unsupported nonlocal exits are initially excluded.
 
-- Covered `trap '...' EXIT`, named real-signal handlers such as `SIGINT`, numeric signal handlers such as `2`, and `trap - SIGNAL...` reset forms now lower without generating invalid fish.
-- Numeric trap signals stay numeric to avoid assuming Linux signal-number mappings on other platforms.
-- Bash pseudo-signals such as `ERR`, `DEBUG`, and `RETURN`, uncatchable signals such as `KILL` and `STOP`, and option-heavy forms still warn for manual review.
-- When cleanup ordering matters, prefer an explicit helper function and `--on-process-exit %self` in hand-edited Fish.
+## Results and output
 
-## Subshell Isolation
+`TranslationResult` is opaque. Use `translationScript`,
+`translationDiagnostics`, `translationRuntimeRequirements`, and
+`renderTranslation` to inspect it. They are ordinary functions, so record
+updates cannot forge a new result. General `Monk.AST` / `Language.Fish.DSL`
+construction remains supported, but arbitrary scripts cannot become certified
+translation products. Source graph and output bundle consumers use
+inspection accessors and authoritative planners on the same principle.
 
-- Bash subshells isolate variable, directory, and function-local side effects. Fish `begin ... end` does not.
-- Monk now applies the same best-effort subshell policy in statement, status, and command-substitution contexts:
-  - normal mode emits `BestEffortSubshell`
-  - `--strict` fails
-- If isolation matters, rewrite the block as an explicit helper function, separate script, or another structure that restores the required boundary.
+Diagnostics have parse, translate, source and output phases. `PhaseRuntime`
+is removed. `RequiresFishFeature` takes a typed capability instead of free text.
+Consumers should pattern-match the capability or call `fishFeatureName`.
+`RequiresPlatformCapability Linux64DescriptorFilesystem` has a child producer,
+a profile admission check and a runtime descriptor preflight; use
+`platformCapabilityName` for display.
 
-## `shopt`
+Separate bundles migrate from direct root/child writes to managed immutable
+generations and one atomic entry loader. Rendered inspection output is not a
+publication protocol: use the bundle publisher. Prior generations are retained;
+automatic garbage collection is outside this change. Recovery distinguishes
+an unpublished attempt from a replacement whose final durability is uncertain.
 
-- Monk lowers `shopt` to a warning plus `true`; no Fish semantic equivalent is applied.
-- Replace `shopt`-dependent logic manually with explicit Fish behavior or Bash-only compatibility guards.
+Source lookup uses the declared execution cwd, PATH and Bash sourcepath state.
+It does not fall back to the directory containing the Bash source file.
+Output relocation never changes discovery semantics. Computed sources and
+cycles require manual restructuring.
 
-## `readonly` / `declare -r`
+## Rechecking scripts
 
-- Fish has no direct readonly variable enforcement.
-- If immutability matters, keep the value local to a narrow scope or move it into a function argument instead of relying on the translated `set`.
+Keep exact positive examples alongside exclusions. Test stdout, stderr, exit
+status, argument boundaries, filesystem changes and declared caller updates
+against the selected Bash profile. Arrays, runtime expression-string arithmetic,
+recursion, unknown dynamic dispatch and arbitrary eval need explicit redesign
+rather than disabling diagnostics.
 
-## Non-literal `source`
+Both `planCombinedOutputBundle` and `planSeparateOutputBundle` return their
+planning result in `IO`; resolving a relative output destination does not write
+files. `publishOutputBundle` returns an opaque receipt or structured failure.
+Inspect `outputFailureKind`, `outputFailureDiagnostic` and
+`outputFailureObservedEntry`; do not assume that a post-rename failure rolled
+back the entry. Separate rendered inspection files include the entry loader
+and pinned generation members. There is no helper extraction pass after
+admission and no unversioned child path to overwrite in place.
 
-- Recursive translation only inlines literal source paths.
-- Literal recursive source resolution now tries the working-directory-relative path first and then falls back to the parent source file directory.
-- `--recursive --sources separate --output FILE` now emits a self-contained bundle rooted at the output path and rewrites literal child sources relative to that bundle.
-- Generated helpers are structurally deduplicated into at most one
-  `_monk_runtime.fish`; dependent files resolve quoted relative paths from
-  `status current-filename`, so launching a bundle from another directory does
-  not break its child or runtime imports.
-- Dynamic source paths remain manual-review territory.
+General file redirection is now an explicit exclusion: an access check followed
+by native Fish reopening would introduce races and different failure behavior.
+The admitted standard descriptor and `/dev/null` forms preserve ordering and
+function invocation timing. Literal source dependencies can repeat under one
+compatible entry context; a second call after incompatible binding/definition
+changes rejects rather than reusing stale analysis.
 
-## Cleanup Workflow
+The bake-off now executes standalone output and records `ShellRunExec`; legacy
+fixture `.mode` sidecars no longer select sourcing for that runner. Use the
+dedicated caller-contract suite for sourceable comparisons. Run
+`scripts/compare-bakeoff-bash.py` after the runner to compare raw stdout/stderr
+and status against Bash. The refreshed `--compatible` selector denotes the
+dated shared matching subset, rather than mere translation success.
 
-- Run Monk and review the typed warnings, not only the rendered script.
-- Re-run the translated script against representative Bash inputs.
-- Use `hlint .`, `cabal test`, and `MONK_INTEGRATION=1 cabal test` as the current project-level regression gates.
-- Treat `docs/design/translator-audit.md` as the fidelity source of truth when deciding whether a warning can be ignored.
+## Opt into stable directory operations
+
+Standalone output can enable the bounded directory envelope with:
+
+```bash
+monk script.bash --strict --directory-contract stable --runtime /absolute/path/monk-runtime
+```
+
+The obligation is empty CDPATH, an ordinary exported scalar global PWD naming
+the actual cwd, and logical cwd ancestry that remains valid throughout
+execution, including external commands. Renaming a cwd ancestor is outside
+this contract. Supported forms include proved `cd DIR` with `--`/`-L`, proved
+`cd -`, `pwd` with `-L`/`-P`, `pushd DIR`, and no-argument `popd`. Interior
+`name/..` paths, unknown paths, implicit HOME cd, physical cd and rotations
+reject. The runtime attempts the actual parent Fish cd and converts its actual
+C-locale diagnostic to the Bash source origin.
+
+For sourceable output, keep the standalone CLI option absent and use version 2:
+
+```json
+{
+  "version": 2,
+  "ambientEffects": "none",
+  "directory": {
+    "contract": "stable",
+    "cwd": "read-write",
+    "PWD": "read-write",
+    "OLDPWD": "read-write",
+    "stack": "read-write"
+  }
+}
+```
+
+Each directory permission independently accepts `none` (the default), `read`,
+`write`, or `read-write`. These permissions do not authorize arbitrary PWD
+assignment. The stack bridge is an ordinary unexported global Fish `dirstack`
+list of nonempty ordinary absolute logical paths. OLDPWD keeps its existing
+export attribute; after explicit unset, successful cd creates it unexported.
+Failure preserves the old value, cwd and stack. Standalone initialization also
+models Bash's export-marked but unset initial OLDPWD.
+
+A version 2 imported function may declare a `directory` object containing the
+same four access keys; no `contract` key is needed within that effect object.
+Undeclared directory effects mean preservation, and declared effects cannot
+exceed the caller's permissions. Version 1 contracts continue to reject
+directory operations. Unknown relevant ambient effects authorize neither
+version. Relative sources require a known execution cwd on their actual
+control edge: `cd /known/path && source ./dependency.bash` may establish that
+fact, while `cd /known/path; source ./dependency.bash` cannot assume cd succeeds.
+
+The bounded Linux directory envelope limits each UTF-8 path component to 255
+bytes and the operand to 4095 bytes. These are lexical admission limits, not
+filesystem existence checks. Longer operands reject because Fish can emit its
+ENAMETOOLONG diagnostic outside the builtin stderr stream that the parent
+operation captures. Control-byte and non-ASCII operands within the envelope
+use Bash ANSI-C diagnostic quoting.
+
+The resolved logical directory path must also remain shorter than 4096 bytes.
+A pure lexical runtime check enforces that obligation before parent cd, using
+the actual PWD and operand; a violation returns/exits with status 125 before
+the attempted directory operation. This guard performs no filesystem target
+precheck.
+
+## Install or bundle the native runtime
+
+Install both executables with `cabal install exe:monk exe:monk-runtime`.
+Generated support no longer uses Python. Combined/stdout output needs a
+compatible installed runtime when its typed requirements include native
+operations. `--runtime FILE` overrides PATH lookup; the provider must remain
+immutable and compatible during execution. Entries check ABI/profile/operations
+before body effects and return 125 with `monk.runtime` on incompatibility.
+
+```bash
+monk script.bash --strict --runtime /absolute/path/monk-runtime -o script.fish
+monk script.bash --strict --managed --runtime /absolute/path/monk-runtime -o entry.fish
+```
+
+`--managed` also works for a single input file. It captures provider bytes in
+an immutable generation at mode 0700; the provider is not needed on PATH when
+that bundle executes. The executable still needs its platform loader/libraries.
+Existing exported functions keep their previous runtime generation after a new
+entry is published. Prior generations must remain available.
+
+Library callers select `translationRuntime` (`RuntimeOnPath` or `RuntimePath`)
+and use `planManagedOutputBundle`. `RuntimeGeneration` is reserved for the
+publisher's rematerialization. The unused `bundleRuntimeFile` slot is replaced
+by `bundleRuntimeArtifacts`; inspect each artifact with `runtimeArtifactTarget`,
+`runtimeArtifactMode`, `runtimeArtifactImage`, and the `nativeImage*` functions.
+`renderOutputBundle` remains Fish text inspection; use `publishOutputBundle` to
+publish binary members and executable modes correctly. Runtime image and
+artifact constructors remain private.
+
+`RequiresNativeRuntime` carries ABI, target profile and typed operation sets;
+use `nativeOperationName` for display. `translationStatistics`,
+`sourceGraphStatistics`, and `generatedStatistics` expose structural counts.
+Static native-call sites are not a measurement of launched processes.

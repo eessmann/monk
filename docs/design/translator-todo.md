@@ -1,215 +1,125 @@
-# Monk Translator Roadmap
+# Translator redesign and release evidence
 
-Last refreshed: 2026-07-31
+Last refreshed: 2026-09-10. Implementation branch: `codex/principled-translator`.
+The 2026-09-09 conditional core is the frozen baseline for the approved
+[native runtime and coverage extension](../superpowers/plans/2026-09-10-native-runtime-coverage.md).
+Its historical [verification report](translator-verification.md) remains available;
+the new final-tree evidence is recorded separately in
+[native runtime verification](native-runtime-verification.md).
 
-This is Monk's ordered engineering backlog. It separates the evidence and
-decisions required to ship 0.4 from work that should follow the release.
+The [approved design](principled-translator-design.md) supersedes the earlier
+release-only backlog. Its [implementation plan](../superpowers/plans/2026-09-09-principled-translator.md)
+requires a working exact core, truthful exclusions, and safe publication before
+release readiness. Tagging and publishing are separate actions.
 
-## Evidence Policy
+## Evidence policy
 
-- Close an item only when a reproducible local command or a linked CI run on the
-  relevant commit supports it.
-- Treat platform-specific skips as open evidence gaps, not successful coverage.
-- Keep detailed semantic status in [translator-audit.md](translator-audit.md),
-  ShellCheck node policy in
-  [shellcheck-syntax-inventory.md](shellcheck-syntax-inventory.md), and user
-  remediation in [migration-guide.md](../migration-guide.md).
-- Keep dated measurements as baselines, not as permanent claims about the
-  current tree.
+Close a gate only with reproducible evidence on the final tree. A passing
+rejection proves classification, not implemented functionality. Keep platform
+skips, missing toolchains, unrun remote jobs, and unexplained failures visible.
+Track zero-diagnostic semantic mismatches separately from translation failures.
 
-## Status Snapshot
+Main `1a2c3826d5265b9be997c5365cd8c138f6cf015f` passed all 339 existing tests
+with integrations enabled on Linux, Bash 5.3.9 and Fish 4.6.0. All six Linux
+process-substitution fixtures executed. Nevertheless, eleven newly reproduced
+strict translations had no diagnostics and disagreed with Bash. Their source
+programs now live in `test/fixtures/semantic/`; the new suite initially failed
+11 of 14 tests, with three successful exact controls. This supersedes the old
+inference that the passing 339-test baseline established semantic readiness.
 
-| Area | Status on 2026-07-31 | Evidence | Remaining gap |
-| --- | --- | --- | --- |
-| Structural 0.4 API and module boundaries | Verified locally | Commit `53029d9`; focused API and refactor-seam coverage passes in the local suite. Public raw modules and lowering internals are absent from Cabal's exposed modules. | The unpublished checkpoint has not run in GitHub Actions. |
-| Local behavioral suite | Verified on macOS | Commit `53029d9`; `MONK_INTEGRATION=1 "$(cabal list-bin test:monk-test)" --hide-successes` reports all 339 tests passed on GHC 9.14.1 and Fish 4.8.1. | Six Linux-only `procsub-output` fixtures are skipped on macOS; `taoc` is skipped locally because `tac` is unavailable. |
-| Fixture parity manifest | Verified locally | Commit `53029d9`; `scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" /tmp/monk-parity-manifest.tsv` translates and Fish-syntax-checks all 76 Bash fixtures. | No Ubuntu manifest has been captured for the architecture checkpoint. |
-| CI definition | Present, not verified | The local workflow defines GHC 9.12.2/9.14.1 and pinned/moving Fish 4 jobs, full integrations, the Linux selector, HLint, Ormolu, Haddock, and parity artifacts. | The workflow has not run on the unpublished checkpoint. |
-| Published CI | Blocked | At the 2026-07-31 review, [run 30183469449](https://github.com/eessmann/monk/actions/runs/30183469449) on `095f247ef78df9b1386922a15dc3828d4dbb2df1` failed while installing HLint under GHC 9.14.1, before build or test execution. | Make quality-tool installation compatible and obtain a current green run. |
-| Hackage readiness | Conditional blocker | `cabal check` rejects unconditional `-Werror` and reports missing upper bounds. | Decide whether 0.4 targets Hackage; fix these findings if it does. |
+Both earlier branches are prototypes. The typed checkpoint `db0aed4` recorded
+332 failures out of 1093 and did not certify the final materialized artifacts.
+Its source identity and execution-boundary ideas inform this redesign, but its
+failure backlog and overlapping analyses are not acceptance evidence.
 
-## Ship 0.4
+## Implementation gates
 
-Work in this order. Do not expand the semantic surface unless a release gate
-finds a correctness regression.
+| Stage | Required outcome | Current evidence |
+| --- | --- | --- |
+| 1. Evidence/admission | Every parser constructor and semantic context has an exact envelope, named approximation, or rejection; useful positive suite is mandatory. | Exhaustive ShellCheck 0.11 constructor match and context policy; all 11 original counterexamples retained; no legacy translation fallback. |
+| 2. Words/evaluation | Scalar/list boundaries, zero/one/many fields, empty quoted substitutions, IFS, admitted globs, lazy case and all case terminators. | Owned scalar/field and pattern plans; mandatory differentials for quoted argv, splitting, pathname patterns, lazy effects and all case outcomes. |
+| 3. Arithmetic/state | Signed 64-bit operator-tree execution; intermediate truncation, wrapping, side effects, lazy errors; actual-path option state. | Structured integer primitives and framed operands; one runtime binding owner; finite flow joins; executed option transitions with short-circuit/error regressions. |
+| 4. Functions/dispatch | Definite identity before builtin interception; definition order; compatible finite call contexts; deferred redirects. | Definition identities include absence/builtin lookup dependencies; compatible body-local contexts, ordered redefinition, imported calls and invocation-time standard redirects. |
+| 5. Sourceable/sources | Owned return/status/argv boundary, declared caller changes, immutable literal dependencies and repeated acyclic execution. | Versioned caller contract and guards; normalization-driven discovery; owned snapshots and occurrences; explicit argv/status/return frame and persistent function helpers. |
+| 6. Residual effects | Shared/child ownership and callback relevance; useful exact cases retained, other cases rejected with explanations. | Isolated substitutions, subshells and bounded pipelines, with large/invalid-byte and transitive closure tests. Background jobs, process substitution and traps explicitly reject. Superseded semantic walkers removed. |
+| 7. Publication/release | Immutable generations, atomic entry replacement, durable failure recovery, package/CI/docs consistency. | Managed pinned generations, typed recovery and retry durability; private failure injection and concurrent reader/publisher coverage. Final compiler/runtime/package gates recorded below. |
 
-### 1. Restore Trustworthy CI
+## Native runtime and coverage acceptance, 2026-09-10
 
-- [ ] Move HLint and Ormolu onto a compatible, deliberately pinned toolchain or
-  a compiler-independent quality job.
-- [ ] Avoid reinstalling and rerunning compiler-independent quality gates for
-  every Fish matrix entry unless the duplication supplies distinct evidence.
+The approved extension is implemented in the existing worktree. Its accepted
+304-file build-input manifest is
+`7bb370a18da2c3f90a3abe190b423cd4cb9ee35e7ad3f36bb03b5cde53c70043`.
+The [verification report](native-runtime-verification.md) records the compiler,
+runtime, publication, abstraction and packaging evidence; the
+[comparison report](../babelfish-comparison.md) records frozen inputs and raw
+measurements. Earlier checkpoints remain historical evidence.
 
-Acceptance:
+- [x] Compiled Haskell runtime replaces all generated Python support; bounded
+  operations use a versioned byte protocol and preserve child I/O ownership.
+- [x] Runtime selection and compatibility checks precede body effects; managed
+  publication captures provider bytes and pins executable generations, including
+  deferred exported functions. Binary roles, modes and bytes enter identity.
+- [x] One optimization stage precedes admission: shared integer folding, bounded
+  pure arithmetic batching, helper interning, transitive child requirements and
+  structural statistics. Simple literal output needs no native helper.
+- [x] Arithmetic loops and dollar-bracket arithmetic, ANSI-C words, brace
+  products, bounded parameter operators, scalar append, shift and fixed-arity
+  conditions have positive differential and explicit rejection coverage.
+- [x] The stable directory contract and caller-contract version 2 cover the
+  admitted directory operations, distinct binding/stack state and failure flow.
+- [x] Frozen coverage reaches 45/95 by default and 48/95 under the stable
+  directory contract, preserving all 38 baseline matches with zero admitted
+  mismatches. All seven common and three directory target fixtures match.
+- [x] Serial, alternating measurements with three warmups and twenty samples
+  pass all optimization gates: arithmetic aggregate medians improve 6.52 times,
+  the original 16-fixture common subset improves 2.66 times, and `large-exact`
+  Fish is 170,987 bytes, 10.4% of its 1,641,887-byte baseline.
+- [x] The 725-test suite passes with integrations enabled on both GHC 9.12.2
+  and 9.14.1 and both pinned Fish 4.6.0 and moving Fish 4.8.1; Bash evidence
+  uses 5.3.9.
+- [x] Native byte/descriptor/signal tests, 38 private publication tests, nine
+  native publication blackboxes, twelve public boundary controls, Linux
+  selectors, parity manifests, HLint, Ormolu, Haddock and `cabal check` pass.
+- [x] Both supported compilers build and install both executables from unpacked
+  source, with combined/managed smoke comparisons and Python-free execution.
+- [x] Independent native and semantic reviews are closed; superseded candidate
+  measurements and failed sandboxed installation attempts remain identified.
+- [ ] Remote CI acceptance remains unrun on this unpushed tree. Local results
+  establish the verified candidate, not execution of the configured remote jobs.
 
-- A bootstrap-validation run reaches HLint, Ormolu check mode, build, tests,
-  Haddock, and parity generation without an installation or timeout failure.
-- Record that run's URL and tested commit SHA in this snapshot before
-  publishing the architecture checkpoint.
+Bundled executables remain specific to the declared Linux platform and recorded
+dynamic libraries. Publishing, tagging and generation garbage collection are
+outside this implementation.
 
-### 2. Publish And Exercise The Architecture Checkpoint
+## Historical 2026-09-09 acceptance record
 
-- [ ] Publish the checkpoint after the CI bootstrap is credible.
-- [ ] Run the supported GHC 9.12.2 and 9.14.1 jobs against pinned Fish 4.6.0
-  and the moving Fish 4 signal.
-- [ ] Download the Ubuntu parity manifests and compare translation success,
-  Fish syntax, hashes, byte counts, diagnostic codes, helper counts, and
-  external requirements with the local checkpoint.
-- [ ] Capture current Linux evidence for all six `procsub-output` fixtures.
+- [x] Original eleven counterexamples: nine exact differential successes and two explicit rejections.
+- [x] Zero/one/many fields, quoted empties, IFS, glob/no-match and evaluation-region interactions.
+- [x] Arithmetic intermediate truncation, signed overflow, short-circuiting, context-specific errors.
+- [x] Branch/call option changes, redefinitions, dynamic heads, invocation-time redirects.
+- [x] Both entry modes: return, incoming/final status, argv, repeated sources, exported and caller-local changes.
+- [x] Namespace collisions, relevant callback uncertainty, shared and child effects.
+- [x] Bounded generated compositions with shrinking; no zero-diagnostic mismatches in admitted cases.
+- [x] Opaque product compile-fail checks with positive controls and private record-label checks.
+- [x] Publication failures during staging, flushing, replacement, recovery; concurrent readers/publishers.
+- [x] Full tests with integrations, explicitly accounted changes to old expectations, no unexplained failures.
+- [x] GHC 9.12.2 and 9.14.1; pinned Bash/Fish evidence; moving Fish 4.8.1 compatibility on both compilers.
+- [x] Linux selectors, parity manifests, HLint, Ormolu, Haddock, `cabal check`.
+- [x] Unpacked source build/install smoke tests with both compilers, including UTF-8 combined and managed output.
+- [x] Current remote CI acceptance is explicitly recorded as an external evidence gap.
 
-Acceptance:
+The passing main-suite count is 438 on each supported GHC, with 36 additional
+publication tests. One oversized manual neofetch baseline is explicitly skipped;
+it contributes no translator acceptance evidence. No unexplained failures remain.
+The remote matrix is configured but has not run on this unpushed candidate.
 
-- All supported matrix jobs are green on one commit.
-- Every manifest has 76 successful translations and 76 successful Fish syntax
-  checks, or an investigated platform-specific difference is recorded.
-- The dedicated Linux selector runs rather than skips all six fixtures.
+The subsequent [Babelfish comparison](../babelfish-comparison.md) reruns 95
+fixtures with independent Bash byte/status checks and serial timings. Monk
+matches all 38 admitted translations, rejects 57, and has no admitted mismatch
+in that run. Runtime overhead remains substantial; the report records both
+the full corpus and the 16-fixture shared matching subset.
 
-### 3. Choose The 0.4 Release Channel
-
-- [ ] Record whether 0.4 is a GitHub/source release or a Hackage release.
-
-Acceptance for a GitHub/source release:
-
-- Record the GitHub/source release channel and its documentation and artifact
-  contract.
-- Hackage-only warnings are explicitly classified as post-release packaging
-  work rather than silently ignored.
-
-Additional acceptance for a Hackage release decision:
-
-- Make `-Werror` a development/CI policy rather than an unconditional package
-  option.
-- Add deliberate PVP-compatible dependency bounds.
-- `cabal check` exits successfully with no Hackage rejection.
-
-### 4. Finalize Public 0.4 Contracts
-
-- [ ] Decide whether `PhaseRuntime` has a defined producer and consumer; remove
-  it before release if it does not.
-- [ ] Decide whether `RequiresFishFeature` is part of the supported requirement
-  model; remove or document and test it before release.
-- [ ] Give output-planning diagnostics an explicit output phase, or document a
-  deliberate alternative; do not label output collisions and missing output
-  roots as source failures by accident.
-- [ ] Add focused public API tests for the chosen diagnostic and requirement
-  taxonomy.
-
-Acceptance:
-
-- Every exported constructor in `Monk.Translation.Types` has a documented
-  meaning and at least one intended producer or an explicit extension role.
-- Output-planning errors render with the chosen stable phase and code.
-- README, architecture, migration guide, Haddocks, and tests agree with the
-  final public surface.
-
-### 5. Close Documentation Drift
-
-- [ ] Make `architecture.md`, `translator-audit.md`, `migration-guide.md`,
-  `babelfish-comparison.md`, the changelog, and current test descriptions use
-  one canonical structural Fish representation.
-- [ ] Remove current-tense claims that the translator lowers through a distinct
-  raw AST when the compatibility lowering is an identity boundary.
-- [ ] Leave old Superpowers specs and plans unchanged as dated historical
-  records.
-
-Acceptance:
-
-- Current documentation distinguishes the canonical structural DSL from
-  private compatibility module names without describing two live ASTs.
-- Documentation links resolve and `git diff --check` reports no errors.
-
-### 6. Cut The Release Checkpoint
-
-- [ ] Re-run local build, tests with integrations, HLint, Ormolu check mode,
-  Haddock, and the parity manifest.
-- [ ] Confirm the green remote matrix and archived Linux/parity artifacts refer
-  to the release commit.
-- [ ] Move the changelog entry from `Unreleased` to `0.4.0`.
-- [ ] Tag or publish 0.4 according to the selected release channel.
-
-Acceptance:
-
-- All previous `Ship 0.4` acceptance conditions are closed on the release
-  commit.
-- The release tag, changelog, package version, documentation, and CI evidence
-  identify the same commit and contract.
-
-## After 0.4
-
-### P1: Correctness And Output Robustness
-
-- [ ] Design staged, atomic replacement for multi-file output bundles so a
-  filesystem failure cannot leave a partially updated bundle.
-- [ ] Add failure-injection coverage for directory creation, staging, rename,
-  and cleanup behavior before changing the CLI writer.
-
-Success condition: a separately approved design defines rollback and recovery,
-and automated tests prove that an interrupted write preserves the prior bundle
-or leaves no published bundle.
-
-### P1: Evidence Expansion
-
-- [ ] Add a curated external Bash corpus with provenance and stable selection
-  rules.
-- [ ] Add mutation or fuzz-driven Bash/Fish differential testing for constructs
-  already represented in the typed translator.
-- [ ] Cluster mismatches by diagnostic code and translator subsystem, then use
-  those clusters to rank semantic work.
-
-Success condition: the roadmap can cite reproducible mismatch counts and
-fixtures rather than intuition when promoting a semantic item.
-
-### P2: Conservative Semantic Closure
-
-Candidates, in evidence order rather than assumed priority:
-
-- broader `set -e` and `pipefail` exception boundaries;
-- asynchronous and argument-position output process substitution;
-- subshell environment isolation;
-- nonliteral source discovery and rewrite behavior;
-- option-heavy traps, `shopt`, and coprocesses;
-- residual warning-driven `read` combinations.
-
-Success condition for promoting any candidate: a focused failing differential
-fixture, an exact or explicitly bounded strategy, stable diagnostics, and a
-measurable reduction in the external-corpus mismatch cluster.
-
-### P2: Architecture Cleanup
-
-- [ ] Evaluate replacing `inlineSourceGraph`'s IORef callback collection with a
-  pure typed result.
-- [ ] Evaluate retiring identity-lowering and legacy raw/`Fish*` vocabulary
-  where it no longer protects a real boundary.
-- [ ] Keep architecture cleanup separate from semantic changes so the existing
-  differential suite remains a useful behavior gate.
-
-Success condition: each cleanup has an approved narrow design, preserves the
-public 0.4 contract, and passes the complete local/CI evidence suite unchanged.
-
-### P3: Measured Performance Work
-
-- [ ] Profile translator throughput with `-N1`, accumulation hot spots, source
-  queue behavior, and parser configuration before selecting an optimization.
-- [ ] Preserve translation fidelity, diagnostic ordering, and generated-output
-  quality as hard constraints.
-
-Success condition: every optimization names a reproducible corpus, baseline,
-target metric, and regression gate.
-
-### P3: Preservation And Repository Hygiene
-
-- [ ] Reconsider comments and shebang preservation only when a concrete
-  consumer or corpus demonstrates the need.
-
-## Documentation Maintenance
-
-- A semantic status change updates this roadmap,
-  [translator-audit.md](translator-audit.md), the syntax inventory when
-  applicable, and [migration-guide.md](../migration-guide.md) together.
-- A pure release-evidence change normally updates this roadmap and the
-  changelog only.
-- Architecture boundary changes update [architecture.md](architecture.md);
-  dated comparison results stay in
-  [babelfish-comparison.md](../babelfish-comparison.md).
-- Do not expand the status snapshot back into a completed-work archive; Git and
-  the changelog already preserve that history.
+Keep [semantic audit](translator-audit.md), [syntax policy](shellcheck-syntax-inventory.md),
+[architecture](architecture.md), and [migration guidance](../migration-guide.md)
+aligned with the actual admitted surface. Historical Superpowers plans remain
+historical records and are not rewritten to imply completed work.

@@ -10,6 +10,9 @@ module Bakeoff.Types
     CommandStatus (..),
     DiffStatus (..),
     BakeoffConfig (..),
+    BakeoffTranslationSettings (..),
+    defaultBakeoffTranslationSettings,
+    bakeoffTranslateConfig,
     ResolvedTools (..),
     GitMetadata (..),
     FixtureSpec (..),
@@ -33,8 +36,9 @@ where
 
 import Bakeoff.Fixture (FixtureMetadata (..))
 import Bakeoff.Shell (ShellRunMode)
-import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson (FromJSON (..), ToJSON (..), object, withObject, (.:), (.=))
 import Data.Time (UTCTime)
+import Monk.Translation (DirectoryContract (..), RuntimeSelection (..), TranslateConfig (..), TranslationStatistics, defaultConfig)
 import Path (Abs, Dir, File, Path, Rel)
 
 data FixtureGroup
@@ -89,8 +93,51 @@ data DiffStatus
   deriving stock (Eq, Ord, Show, Generic)
   deriving anyclass (ToJSON, FromJSON)
 
+-- | Explicit settings preserved across the serialized benchmark worker boundary.
+data BakeoffTranslationSettings = MkBakeoffTranslationSettings
+  { settingsRuntime :: RuntimeSelection,
+    settingsDirectory :: DirectoryContract
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON BakeoffTranslationSettings where
+  toJSON settings =
+    object
+      [ "runtime" .= runtimeTag,
+        "runtimePath" .= runtimePath,
+        "stableDirectory" .= (settingsDirectory settings == StableDirectoryContract)
+      ]
+    where
+      (runtimeTag, runtimePath) = case settingsRuntime settings of
+        RuntimeOnPath -> ("path" :: Text, Nothing :: Maybe FilePath)
+        RuntimePath path -> ("file", Just path)
+        RuntimeGeneration path -> ("generation", Just path)
+
+instance FromJSON BakeoffTranslationSettings where
+  parseJSON = withObject "BakeoffTranslationSettings" $ \obj -> do
+    tag <- obj .: "runtime"
+    path <- obj .: "runtimePath"
+    stable <- obj .: "stableDirectory"
+    runtime <- case (tag :: Text, path :: Maybe FilePath) of
+      ("path", Nothing) -> pure RuntimeOnPath
+      ("file", Just file) -> pure (RuntimePath file)
+      ("generation", Just file) -> pure (RuntimeGeneration file)
+      _ -> fail "invalid benchmark runtime selection"
+    pure (MkBakeoffTranslationSettings runtime (if stable then StableDirectoryContract else NoDirectoryContract))
+
+defaultBakeoffTranslationSettings :: BakeoffTranslationSettings
+defaultBakeoffTranslationSettings = MkBakeoffTranslationSettings RuntimeOnPath NoDirectoryContract
+
+bakeoffTranslateConfig :: BakeoffTranslationSettings -> TranslateConfig
+bakeoffTranslateConfig settings =
+  defaultConfig
+    { translationRuntime = settingsRuntime settings,
+      directoryContract = settingsDirectory settings
+    }
+
 data BakeoffConfig = MkBakeoffConfig
-  { bakeoffCwd :: Path Abs Dir,
+  { bakeoffTranslationSettings :: BakeoffTranslationSettings,
+    bakeoffCwd :: Path Abs Dir,
     bakeoffOutputDir :: Path Abs Dir,
     bakeoffForce :: Bool,
     bakeoffGroups :: [FixtureGroup],
@@ -162,6 +209,7 @@ data TranslationReport = MkTranslationReport
     translationInputBytes :: Maybe Int,
     translationOutputBytes :: Maybe Int,
     translationExpansionRatio :: Maybe Double,
+    translationStatistics :: Maybe TranslationStatistics,
     translationHelperBytes :: Maybe Int,
     translationHelperInvocations :: Int,
     translationExternalRequirements :: [Text],
@@ -216,7 +264,8 @@ data FixtureReport = MkFixtureReport
   deriving anyclass (ToJSON, FromJSON)
 
 data ConfigReport = MkConfigReport
-  { configTranslationTimeoutSeconds :: Int,
+  { configTranslationSettings :: BakeoffTranslationSettings,
+    configTranslationTimeoutSeconds :: Int,
     configRuntimeTimeoutSeconds :: Int,
     configBenchmarksEnabled :: Bool,
     configHyperfineRuns :: Int,
@@ -272,7 +321,9 @@ data RuntimeShell
   deriving anyclass (ToJSON, FromJSON)
 
 data BenchmarkPlan = MkBenchmarkPlan
-  { benchmarkAllFixtures :: [Path Abs File],
+  { benchmarkCwd :: Path Abs Dir,
+    benchmarkTranslationSettings :: BakeoffTranslationSettings,
+    benchmarkAllFixtures :: [Path Abs File],
     benchmarkFixtures :: [Path Abs File],
     benchmarkAllRuntime :: [RuntimeBenchmarkEntry],
     benchmarkRuntimeFixtures :: [RuntimeBenchmarkEntry],

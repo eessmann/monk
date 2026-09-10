@@ -1,21 +1,19 @@
-# Fixtures that both monk and babelfish translate successfully.
-# Keep this list in sync with bake-off notes when failures change.
-
+# Standalone fixtures where both translators matched Bash stdout/stderr bytes and exit status.
+# Refreshed 2026-09-09 with Bash 5.3.9, Fish 4.6.0, Babelfish 1.2.1.
+# Membership is dated evidence, not a permanent equivalence guarantee; rerun the Bash comparison.
+../benchmark/fixtures/small.bash
 ../test/fixtures/corpus/if-then.bash
 ../test/fixtures/corpus/simple-echo.bash
-../benchmark/fixtures/small.bash
-../test/fixtures/integration/cd-tmp.bash
-../test/fixtures/integration/pushd-popd.bash
-../test/fixtures/integration/pwd-cd.bash
-../test/fixtures/integration/stdout-stderr-exit.bash
-../test/fixtures/integration/time-prefix.bash
-../test/fixtures/golden/assignments.bash
-../test/fixtures/golden/case-pattern-expansion-glob.bash
 ../test/fixtures/golden/double-bracket-eq.bash
 ../test/fixtures/golden/echo-echo.bash
 ../test/fixtures/golden/echo-exit.bash
-../test/fixtures/golden/glob-basic.bash
-../test/fixtures/golden/pipeline.bash
-../test/fixtures/golden/read-prompt.bash
+../test/fixtures/integration/source-recursive-child.bash
+../test/fixtures/integration/stdout-stderr-exit.bash
+../test/fixtures/integration/syntax-standalone-negation.bash
 ../test/fixtures/realworld/hello-world.bash
-../test/fixtures/realworld/version-compare.bash
+../test/fixtures/semantic/dynamic-command.bash
+../test/fixtures/semantic/positive-control-flow.bash
+../test/fixtures/semantic/positive-function-call.bash
+../test/fixtures/semantic/positive-simple-command.bash
+../test/fixtures/semantic/uncalled-option-function.bash
+../test/fixtures/semantic/untaken-option.bash

@@ -1,17 +1,7 @@
-{-# LANGUAGE OverloadedStrings #-}
+module Unit.Pipefail (unitPipefailTests) where
 
-module Unit.Pipefail
-  ( unitPipefailTests,
-  )
-where
-
-import Data.Text qualified as T
 import Monk.Translation
-  ( defaultConfig,
-    parseBashScript,
-    renderTranslation,
-    translateParseResult,
-  )
+import ShellSupport
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -19,14 +9,19 @@ unitPipefailTests :: TestTree
 unitPipefailTests =
   testGroup
     "Pipefail"
-    [ H.testCase "Pipefail does not wrap single-command pipelines" $ do
-        result <- parseBashScript "spec.sh" "set -o pipefail\necho hi\n"
-        case translateParseResult defaultConfig result of
-          Left err -> H.assertFailure ("unexpected error: " <> show err)
-          Right translation -> do
-            let out = renderTranslation translation
-            T.isInfixOf "echo 'hi'" out H.@? "expected echo preserved"
-            H.assertBool
-              "unexpected __monk_pipefail in single command"
-              (not (T.isInfixOf "__monk_pipefail" out))
+    [ H.testCaseSteps "pipefail toggles preserve single-command status and output" $ \step -> do
+        let source = "set -o pipefail; printf 'one\\n'; false; printf 'status:%s\\n' \"$?\"; set +o pipefail; printf 'two\\n'"
+        result <- translateBashScript strictConfig "pipefail.bash" source
+        case result of
+          Left failure -> H.assertFailure ("mandatory pipefail admission failed: " <> show failure)
+          Right translated -> do
+            ready <- shouldRunIntegration
+            case ready of
+              Left reason -> step ("skipped runtime: " <> reason)
+              Right () -> do
+                environment <- prepareEnv
+                bash <- runShellWithMode ShellRunExec ShellBash environment source [] ""
+                fish <- runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) [] ""
+                let observations value = (rrExit value, rrStdout value, rrStderr value)
+                H.assertEqual "ZERO_DIAGNOSTIC_MISMATCH" (observations bash) (observations fish)
     ]

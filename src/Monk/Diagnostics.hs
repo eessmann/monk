@@ -93,7 +93,9 @@ riskText = \case
 runtimeProgramText :: RuntimeProgram -> Text
 runtimeProgramText = \case
   RequiresCommand commandName -> commandName
-  RequiresFishFeature featureName -> "fish:" <> featureName
+  RequiresFishFeature featureName -> "fish:" <> fishFeatureName featureName
+  RequiresPlatformCapability capability -> "platform:" <> platformCapabilityName capability
+  RequiresNativeRuntime abi profile operations -> "monk-runtime:abi-" <> show abi <> ":" <> show profile <> ":" <> show (map nativeOperationName (toList operations))
 
 formatRange :: SourceRange -> Text
 formatRange MkSourceRange {rangeStart = MkSourcePos {..}} =

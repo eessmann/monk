@@ -7,6 +7,7 @@ where
 
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
+import FixtureAdmission
 import Monk.Translation
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -25,6 +26,7 @@ goldenFixtures :: [GoldenFixture]
 goldenFixtures =
   [ MkGoldenFixture "echo-exit" "test/fixtures/golden/echo-exit.bash" "test/fixtures/golden/echo-exit.fish",
     MkGoldenFixture "echo-echo" "test/fixtures/golden/echo-echo.bash" "test/fixtures/golden/echo-echo.fish",
+    MkGoldenFixture "pipeline" "test/fixtures/golden/pipeline.bash" "test/fixtures/golden/pipeline.fish",
     MkGoldenFixture "assignments" "test/fixtures/golden/assignments.bash" "test/fixtures/golden/assignments.fish",
     MkGoldenFixture "read-prompt" "test/fixtures/golden/read-prompt.bash" "test/fixtures/golden/read-prompt.fish",
     MkGoldenFixture "double-bracket-eq" "test/fixtures/golden/double-bracket-eq.bash" "test/fixtures/golden/double-bracket-eq.fish",
@@ -40,18 +42,18 @@ goldenTest :: GoldenFixture -> TestTree
 goldenTest MkGoldenFixture {gfName, gfBashPath, gfFishPath} =
   H.testCase gfName $ do
     bashSrc <- TIO.readFile gfBashPath
-    expected <- TIO.readFile gfFishPath
-    result <- translateScriptText gfBashPath bashSrc
-    case result of
-      Left err -> H.assertFailure err
-      Right actual -> normalize actual @?= normalize expected
-
-translateScriptText :: FilePath -> Text -> IO (Either String Text)
-translateScriptText path script = do
-  parseResult <- parseBashScript path script
-  case translateParseResult defaultConfig parseResult of
-    Left err -> pure (Left ("translateParseResult failed: " <> show err))
-    Right translation -> pure (Right (renderTranslation translation))
+    policy <- loadFixtureAdmission gfBashPath
+    result <- translateBashScript strictConfig gfBashPath bashSrc
+    case (policy, result) of
+      (RejectedFixture prefix rationale, Left failure) ->
+        H.assertBool
+          (toString rationale)
+          (any (T.isPrefixOf prefix . diagnosticCodeText . diagnosticCode) (failureDiagnostics failure))
+      (RejectedFixture _ rationale, Right _) -> H.assertFailure ("excluded golden fixture emitted executable output: " <> toString rationale)
+      (ExactFixture, Left failure) -> H.assertFailure (show failure)
+      (ExactFixture, Right translated) -> do
+        expected <- TIO.readFile gfFishPath
+        normalize (renderTranslation translated) @?= normalize expected
 
 normalize :: Text -> Text
 normalize = T.stripEnd . T.replace "\r\n" "\n"

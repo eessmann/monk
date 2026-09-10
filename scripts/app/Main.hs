@@ -3,14 +3,17 @@
 module Main (main) where
 
 import Bakeoff.Runner (runBakeoff, runBenchmarkWorker, runRuntimeBenchmarkWorker)
-import Bakeoff.Types (BakeoffConfig (..), BenchmarkSuite (..), FixtureGroup (..), RuntimeShell (..), ToolName (..))
+import Bakeoff.Types (BakeoffConfig (..), BakeoffTranslationSettings (..), BenchmarkSuite (..), FixtureGroup (..), RuntimeShell (..), ToolName (..))
 import Data.Time (getCurrentTime)
 import Data.Time.Format (defaultTimeLocale, formatTime)
+import GHC.IO.Encoding (setFileSystemEncoding, setForeignEncoding, setLocaleEncoding)
+import Monk.Translation (DirectoryContract (..), RuntimeSelection (..))
 import Options.Applicative
 import Path (Abs, Dir, Path, parseRelDir, parseRelFile, (</>))
 import Path.IO qualified as PathIO
 import System.Exit (ExitCode (..))
 import System.Exit qualified as Exit
+import System.IO (hSetEncoding, utf8)
 
 data Command
   = Run RawOptions
@@ -18,7 +21,9 @@ data Command
   | RuntimeBenchmarkWorker RuntimeShell FilePath BenchmarkSuite
 
 data RawOptions = MkRawOptions
-  { roOutDir :: Maybe FilePath,
+  { roRuntime :: Maybe FilePath,
+    roDirectoryContract :: DirectoryContract,
+    roOutDir :: Maybe FilePath,
     roGroups :: [FixtureGroup],
     roFiles :: [FilePath],
     roFileLists :: [FilePath],
@@ -38,6 +43,10 @@ data RawOptions = MkRawOptions
 
 main :: IO ()
 main = do
+  setLocaleEncoding utf8
+  setFileSystemEncoding utf8
+  setForeignEncoding utf8
+  mapM_ (`hSetEncoding` utf8) [stdin, stdout, stderr]
   parsedCommand <- execParser (info (commandParser <**> helper) (fullDesc <> progDesc "Run Monk vs babelfish bake-offs"))
   case parsedCommand of
     Run raw -> do
@@ -51,7 +60,8 @@ main = do
       hyperfinePathHint <- traverse PathIO.resolveFile' (roHyperfinePath raw)
       let cfg =
             MkBakeoffConfig
-              { bakeoffCwd = cwd,
+              { bakeoffTranslationSettings = MkBakeoffTranslationSettings (maybe RuntimeOnPath RuntimePath (roRuntime raw)) (roDirectoryContract raw),
+                bakeoffCwd = cwd,
                 bakeoffOutputDir = outputDir,
                 bakeoffForce = roForce raw,
                 bakeoffGroups = roGroups raw,
@@ -94,7 +104,9 @@ commandParser =
 rawOptionsParser :: Parser RawOptions
 rawOptionsParser =
   MkRawOptions
-    <$> optional (strOption (long "out-dir" <> metavar "DIR" <> help "Output directory"))
+    <$> optional (strOption (long "runtime" <> metavar "FILE" <> help "Pin the native runtime executable"))
+    <*> option (eitherReader directoryContractReader) (long "directory-contract" <> metavar "CONTRACT" <> value NoDirectoryContract <> help "Directory contract: none or stable")
+    <*> optional (strOption (long "out-dir" <> metavar "DIR" <> help "Output directory"))
     <*> fmap concat (many groupOptionParser)
     <*> many (strOption (long "file" <> metavar "PATH" <> help "Bake off a specific fixture"))
     <*> many (strOption (long "file-list" <> metavar "PATH" <> help "Read fixture paths from a file"))
@@ -110,6 +122,11 @@ rawOptionsParser =
     <*> optional (strOption (long "hyperfine" <> metavar "PATH" <> help "Path to hyperfine"))
     <*> optional (strOption (long "babelfish-version" <> metavar "TEXT" <> help "Override babelfish version in metadata"))
     <*> switch (long "force" <> help "Overwrite an existing non-empty output directory")
+
+directoryContractReader :: String -> Either String DirectoryContract
+directoryContractReader "none" = Right NoDirectoryContract
+directoryContractReader "stable" = Right StableDirectoryContract
+directoryContractReader other = Left ("invalid directory contract: " <> other)
 
 groupOptionParser :: Parser [FixtureGroup]
 groupOptionParser =

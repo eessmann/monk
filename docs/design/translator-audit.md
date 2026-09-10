@@ -1,90 +1,149 @@
-# Translator Audit (2026-07-16)
+# Translator semantic audit
 
-This audit evaluates Monk as a conservative Bash-to-Fish migrator.
+Refreshed 2026-09-10 for the native runtime and broader coverage. This document replaces the
+older blanket exactness claims based on the 339-test suite.
 
-Status labels used here:
+## Contract and evidence
 
-- `exact`: direct lowering plus focused runtime evidence on the current suite
-- `best-effort`: lowering exists, but semantics are intentionally approximate or warning-driven
-- `unsupported`: warning-only or strict-mode failure with no meaningful lowering
-- `unverified`: implementation exists, but evidence is still too thin to promote confidence
+Exact means observable equivalence under the selected execution contract:
+output bytes, status/control flow, argument boundaries, filesystem effects and
+declared caller-state changes. Ordering is included when observable. The
+initial profile is noninteractive Bash 5.3 with signed 64-bit arithmetic and
+Fish 4.6, UTF-8 source and C locale on 64-bit Linux. Current local endpoints are
+Bash 5.3.9 and Fish 4.6.0; other Bash profiles need separate evidence. The
+[versioned execution profile](execution-profile.md) records startup options,
+runtime requirements, checks and caller obligations.
 
-Current evidence used for this audit:
+A constructor's presence in the implementation is not evidence of exactness.
+An opt-in permits only its named approximation. Rejected input produces no
+executable artifact in either normal or strict translation. Caller promises
+are obligations, not runtime proofs about arbitrary functions or handlers.
 
-- the translator implementation under `src/Language/Fish/Translator/`
-- the public API and diagnostics layers under `src/Monk/`
-- the current unit, golden, property, integration, and real-world tests
-- the bake-off runner under `scripts/`
-- focused local unit/property/golden/integration checks, including the Linux-gated `procsub-output*` selector
-- a dedicated Ubuntu CI step for the Linux-gated `>(...)` fixtures
-- a successful local `cabal bench` run
-- the current bake-off workflow and documentation
+## Reproduced main defects
 
-## Current Assessment
+The [2026-09-09 Babelfish bake-off](../babelfish-comparison.md) adds standalone
+execution evidence: all 38 admitted translations among 95 selected fixtures
+match Bash stdout/stderr bytes and status; 57 reject. This bounded comparison
+does not test filesystem or caller-state equivalence and changes no admission
+classification.
 
-Monk is now in a better place to be judged as a correctness-first migrator rather than a sprawling feature checklist.
+All eleven programs below were accepted by main in strict mode without a
+translation diagnostic. Their new regression group originally failed eleven
+of fourteen tests; three useful controls passed.
 
-The biggest correctness issue in the previous phase was subshell drift across contexts. Statement lowering already used a best-effort `begin ... end` strategy, but status-context subshells were still being rendered through `fish -c`, which lost parent variables and generated helpers. That bug is now fixed.
+| Fixture | Defect | Required closure |
+| --- | --- | --- |
+| `untaken-option` | An unexecuted branch changed translator option state. | Runtime option update only on the executed path. |
+| `uncalled-option-function` | An uncalled function body changed later behavior. | Defer body effects to invocation. |
+| `ifs-set` | Field splitting lost Bash boundaries. | Explicit zero/one/many field plan with IFS semantics. |
+| `quoted-argv-adjacent` | Quoted positional arguments collapsed or duplicated fields. | Preserve prefix/suffix attachment and empty argv cases. |
+| `case-unreached-effect` | A pattern's expansion ran before its arm was reached. | Pattern evaluation belongs to the lazy matching region. |
+| `case-fallthrough` | Case terminator semantics were discarded. | Represent stop, unconditional next body, and retest explicitly. |
+| `arithmetic-integral-intermediate` | Floating evaluation changed integer intermediate results. | Operator-tree signed 64-bit primitives with per-operation truncation. |
+| `dynamic-local` | Lexical local classification lost Bash's dynamic binding. | Compatible invocation context and verified body-local storage. |
+| `dynamic-command` | A provably constant command head disappeared. | Resolve definite command identity before lowering. |
+| `array-mixed` | Mixed dense/sparse array initialization silently lost elements. | Reject until sparse storage is implemented. |
+| `eval-bash-syntax` | Bash program text was interpreted as Fish. | Reject arbitrary eval without executable output. |
 
-The current subshell policy is consistent:
+The fixture directory and test sources are the durable counterexamples. The
+current implementation pass/fail counts belong in the roadmap and final-tree
+evidence; the old main result is a historical baseline.
 
-- normal mode emits the stable `BestEffortSubshell` warning and lowers to non-isolating `begin ... end`
-- `--strict` fails on subshells in statement, status, and command-substitution contexts
-- focused runtime fixtures now cover parent-variable access, exact `read -d`, and pipefail inside status-context subshells
+## Current admission responsibilities
 
-The public diagnostics model is also materially stronger than before:
+| Area | Exact envelope | Exclusions requiring diagnostics |
+| --- | --- | --- |
+| Words | ANSI byte literals, pre-expansion nested comma braces, lazy default/alternate modifiers, bounded trim/literal replacement; quoted scalars and empties; one quoted argv splice with adjacent scalar prefix/suffix; IFS splitting over data proved free of later glob characters; literal star/question-mark pathname patterns including Bash no-match behavior. | Multiple argv products, mixed splitting regions, unknown later globbing, bracket/extglob patterns and unimplemented parameter modifiers. |
+| Arithmetic | Arithmetic commands, dollar parentheses/brackets and arithmetic-for headers; owned operator trees over proved numeric storage; signed-64 wrapping, intermediate truncation, ordered updates and lazy errors; context-specific error spelling retained from owned source. | Runtime expression strings, unsupported numeric spellings, array lvalues and loss of numeric facts through control joins. |
+| Runtime options/control | Executed errexit/pipefail transitions, short-circuit suppression through calls, branches and loops; lazy case patterns with `;;`, `;&`, `;;&`; immediate owned loop control. | Other options, unsupported startup states, loop targets across source/function frames and undischargeable exception boundaries. |
+| Functions/dispatch | Finite definite definition identities, declared imports and constant dynamic heads; explicit builtin/command lookup; compatible binding context; body-local scalar storage and invocation-time redirects. | Recursion, ambiguous/redefined dependencies, conditional/nested definitions or locals, local deletion, namerefs and unknown dispatch. |
+| Binding state | One runtime owner for scalar presence, export state and inherited environment of unset locals; declaration operands expand before storage changes; scalar append evaluates RHS before reading and replacing the current binding. | Arrays, readonly enforcement without its one named opt-in, unrepresented caller attributes and reserved target bindings. |
+| Sources | Immutable acyclic literal dependencies; continuation-based discovery with cwd/PATH/sourcepath; repeated occurrence execution under one compatible file entry context. | Computed sources, cycles, incompatible repeated contexts, deferred source calls in functions/children and inherited caller argv mutation; literal-source shifts require a provably nonempty effective argument frame. |
+| Sourceable entry | Owned incoming/final status, return and explicit argv frame; declared visible/global scalar updates, imports and persistent installed functions with owned helpers. | Unknown relevant handlers, undeclared effects/dispatch, sourceable option or IFS mutation, unsupported attributes and nonlocal exits. |
+| Child/shared effects | Command substitutions, subshells and bounded pipelines use owned snapshots, function closures, descriptor transport and status; byte/NUL capture behavior is explicit. | Background jobs, process substitution, traps, unproved transitive effects and nondraining builtin-writer signal lifetime. |
+| Redirections | Ordered standard descriptor duplication/closure where effects are admitted, and `/dev/null`; shared compound state and deferred function redirects. | General file opens, computed targets, extra descriptors and unowned failure or scope lifetime. |
+| Publication | Verified and flushed immutable generations before atomic loader replacement; pinned members, retained old generations, retry durability and observed-entry recovery under publisher serialization. | Ownership collisions, unsupported symlink layouts and unsafe destinations. |
 
-- `Diagnostic` carries a stable explicit code, phase, severity, risk, message,
-  and optional source range
-- rendered text includes stable values such as `warning[monk.read][review]`
-- `ReviewRisk = Clean | Review | Unsafe` replaces lossy confidence percentages
-- `RuntimeRequirement` deduplicates external programs/facilities while retaining
-  use reasons and optional ranges
-- private translator warnings are converted at the public boundary and raw
-  ShellCheck AST dumps are not part of user-facing diagnostics
+These are the implemented conditional admission envelopes. Consult
+[the roadmap](translator-todo.md) for final verification and remaining gaps,
+[the full constructor policy](shellcheck-syntax-inventory.md) for syntax, and
+[the architecture](architecture.md) for ownership. Do not interpret this table
+as an unconditional promise about arbitrary Bash syntax or caller state.
 
-Helper emission is likewise in better shape:
+## Stable directory slice (2026-09-10)
 
-- pipefail, background runtime, exact `read`, and fallback helper-backed process substitution paths go through one helper registry keyed by helper ID
-- separate recursive bundles extract live preambles into one shared runtime file
-- arbitrary-delimiter hard cases use one Python process and no nested Fish;
-  a proven raw single-variable path is native Fish 4.6
+Standalone directory behavior requires `--directory-contract stable`.
+Sourceable directory behavior requires explicit version 2 cwd/PWD/OLDPWD/stack
+permissions; version 1 remains restrictive. The stable obligation includes
+empty CDPATH and logical ancestry that external commands cannot rename or
+invalidate. Direct PWD mutation, unknown directory paths, implicit HOME `cd`,
+physical `cd` options and stack rotations remain rejected.
 
-## Capability Matrix
+Local evidence adds the three existing fixtures `cd-tmp`, `pwd-cd` and
+`pushd-popd`: all were rejected by the frozen baseline and now match Bash
+stdout/stderr/status. A focused 142-case directory run passed with integrations
+enabled and one test thread. It covers both entry modes, actual missing/file
+errors, failed push/pop state, export preservation, spaces, symlink logical and
+physical pwd, `cd -` after a successful edge, isolated child/substitution stacks,
+a preexisting caller stack, and relative-source success/failure cwd edges.
+The run also covers the independent permission matrix, exported functions after
+entry return, and executed inline/separate source argv/return boundaries. The imported-cwd/deep-path cases and updated import/source fixture also pass
+in the final 725-test compiler/runtime matrix; see the separate verification
+record for release evidence. The detailed ledger is
+`.superpowers/sdd/2026-09-10-native-runtime-coverage/directory-report.md`.
 
-| Area | Status | Diagnostics | Current Evidence | Notes |
-| --- | --- | --- | --- | --- |
-| `set -e` / `pipefail` | best-effort | warnings on unsupported option surfaces; no warning on covered helper paths | focused runtime integration, background wait fixtures, properties, and real-world `echo-args` coverage | grouped `&&` / `||`, negated pipelines, and conditional enable/disable boundaries now have focused fixtures, but the area is still conservative overall |
-| Subshells `(...)` | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit plus focused runtime integration on status-context regressions | environment isolation is still not preserved |
-| Command-substitution subshells | best-effort / unsupported in `--strict` | stable `BestEffortSubshell` warning; strict-mode failure | unit coverage | no longer silently collapse to `true` |
-| Side-effecting parameter expansion in args / redirections / `case` | exact on covered forms | no warning on covered forms | focused runtime integration plus unit coverage | one of the strongest semantic areas now |
-| Arrays and 0-based to 1-based indexing | exact on covered forms | no warning | unit, property, and runtime evidence | stable area |
-| `read` covered exact path | exact on covered forms | no warning on covered forms; explicit `python3` requirement on hard paths | focused runtime integration, unit coverage, and measured size/runtime gate | covered surface includes a Fish-native raw single-variable delimiter path plus one-Python hard paths for empty delimiters, arrays, multi-variable assignment, supported clusters, numeric `-u`, and `REPLY` |
-| Residual `read` fallback surface | best-effort | `ReadIssue` warnings | direct unit coverage | non-numeric `-u`, unsupported clusters, and unsupported option combinations remain warning-driven |
-| Here-strings `<<<` | best-effort / unsupported in `--strict` | stable `monk.here-string` diagnostic | focused unit and runtime integration | normal mode retains the covered printf approximation |
-| Process substitution `<(...)` | exact on covered forms | no dedicated warning | focused runtime integration | current simple surface is in good shape |
-| Process substitution `>(...)` | exact on covered Linux redirect-target fixtures / best-effort overall | no warning on covered redirect-target forms; `ProcessSubstitutionIssue` on argument-position output forms | temp-file-backed status-preserving lowering, unit coverage, Linux-gated fixtures, dedicated Ubuntu CI selector | covered `cmd > >(consumer)` forms preserve producer status, honor parent `set -e`, and ignore consumer status; broader async shapes and argument-position forms remain conservative |
-| Recursive literal `source` | exact on covered forms | warnings on unsupported/non-literal variants | source-graph, shared-runtime bundle, relocation, and runtime integration coverage | ShellCheck source expansion is disabled; Monk owns discovery and separate bundles use one optional shared runtime with relative quoted paths |
-| Background jobs / translated `wait` | exact on covered translated-wait surface / best-effort otherwise | warning on PID-specific `$!` follow-ons | focused runtime integration | `kill $!`-style PID assumptions remain manual-review territory |
-| `trap` | best-effort overall / exact on covered `EXIT`, reset, named real-signal, and numeric-signal forms | typed warnings for pseudo-signals, named uncatchable signals, and unsupported option surfaces | unit diagnostics plus simple `EXIT` runtime integration | numeric signals stay numeric to avoid platform-specific name mapping; named `KILL`/`STOP` warn instead of registering invalid handlers |
-| `readonly` / `declare -r` | best-effort | stable readonly warning | unit coverage plus incidental runtime evidence | fish has no readonly enforcement |
-| `shopt` | unsupported | stable warning | direct unit coverage | lowered to `true` |
-| `coproc` | unsupported | stable warning / strict failure | direct unit coverage | intentionally unsupported |
+## Native common-syntax verification slice (2026-09-10)
 
-## Highest-Priority Remaining Gaps
+The seven historical targets `pyramid-left`, `pyramid-right`,
+`syntax-dollar-single-quote`, `syntax-dollar-bracket-arithmetic`,
+`semver-normalize`, `neofetch-mini`, and `syntax-brace-expansion` now compare
+exactly with Bash in stdout bytes, stderr bytes and exit status. They were all
+explicit baseline rejections. They remain members of the original fixture
+inventory; new interaction tests do not alter its denominator.
 
-1. Residual warning-driven `read` branches should stay narrow and explicit until they gain exact evidence.
-2. Covered `>(...)` redirect-target lowering still needs the dedicated Ubuntu evidence step to pass before the active backlog item is closed.
-3. `set -e` / `pipefail` should continue to be treated as conservative overall, even though grouped conjunctions, negated pipelines, and toggle boundaries now have focused runtime evidence.
-4. Non-literal `source`, option-heavy `trap`, `shopt`, and `coproc` should remain warning-driven unless a clearly exact strategy is worth the complexity.
+`Unit.PlannedCommonCoverage` exercises both standalone and sourceable entry,
+including arithmetic-for header failures and nested continue ownership,
+invalid-byte/NUL ANSI quotes, brace effect duplication, quoted lazy operands,
+scalar append ordering, positional alternates, fixed-arity tests, and literal
+source argv ownership. Unsupported arrays, computed operands and inherited
+source argv writes retain explicit rejections.
 
-## Documentation Contract
+Materialization shares native signed-integer operations for successful constant
+folding and batches only total pure arithmetic islands. Failing arithmetic,
+lazy alternatives and writes stay in distinct evaluation regions. Helper
+closure follows structural command identities. Child snapshots are pruned
+only when the closed child has no transitive external environment consumer;
+export/fallback projections remain intact when external commands can observe
+them. Effects justify removing unused option/IFS/substitution state and
+substitution bookkeeping from ordinary assignments. These optimizations do
+not relax source admission or replace the final suite and benchmark evidence
+recorded in the roadmap.
 
-The project now has a cleaner documentation split:
+The bounded Linux directory envelope limits each UTF-8 path component to 255
+bytes and the operand to 4095 bytes. These are lexical admission limits, not
+filesystem existence checks. Longer operands reject because Fish can emit its
+ENAMETOOLONG diagnostic outside the builtin stderr stream that the parent
+operation captures. Control-byte and non-ASCII operands within the envelope
+use Bash ANSI-C diagnostic quoting.
 
-- `docs/design/translator-todo.md`: active engineering backlog
-- `docs/design/translator-audit.md`: fidelity source of truth
-- `docs/design/shellcheck-syntax-inventory.md`: parser-node support and scope
-- `docs/migration-guide.md`: user-facing cleanup guide for warning-driven areas
+The resolved logical directory path must also remain shorter than 4096 bytes.
+A pure lexical runtime check enforces that obligation before parent cd, using
+the actual PWD and operand; a violation returns/exits with status 125 before
+the attempted directory operation. This guard performs no filesystem target
+precheck.
 
-Those three documents should move together whenever a best-effort branch changes status.
+## Native materialization and failure flow
+
+Generated support uses native Fish and the versioned Haskell runtime described
+in [the runtime specification](native-runtime.md). No Monk-generated Python support remains.
+Helpers consume framed bytes and typed bounded operations. Native images are
+opaque captured products; generation identity includes role, path, mode and
+bytes, and existing generation members are verified as data before reuse.
+
+Arithmetic flow retains separate successful and possible failing outcomes.
+A later assignment in a sequence is not definite when an earlier operation can
+fail. Loop continuation facts belong to their actual depth; break exits also
+participate in post-loop numeric admission. Constant folding cannot turn these
+partial updates into unconditional facts. Literal sources inherit caller argv
+when operand expansion produces zero fields; a quoted empty field still owns
+a one-argument frame. Transitive writes through inherited/unknown frames reject.

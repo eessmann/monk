@@ -5,35 +5,40 @@ The changelog is available [on GitHub][2].
 
 ## Unreleased
 
-* Breaking API: replace the raw-backed Fish facade with a structural DSL and
-  remove public raw constructors, lowering modules, translator state, raw inline
-  results, callback warnings, and confidence scores.
-* Public results: expose structural scripts, ordered stable diagnostics,
-  nonempty failures, review risk, and deduplicated runtime requirements.
-* Sources/output: make Monk's typed source graph authoritative and add typed
-  combined/separate output bundles with one optional shared runtime file;
-  resolve nested imports from each generated file rather than the caller's CWD,
-  reject duplicate output targets, and traverse nested typed source positions
-  during inlining. Inlined source argv/redirections preserve exact source
-  status after argv restoration. CLI inline output now uses the combined planner.
-* Semantics: support standalone negation and covered compound status positions;
-  make unsupported statements fail closed; add dedicated here-string and
-  extglob fallback diagnostics with strict-mode outcomes.
-* Generated runtime: combine exact delimiter capture/assignment into one Python
-  process, remove nested Fish status restoration, and add a proven Fish-native
-  raw single-variable delimiter path.
-* Generated output: bound multiline command-substitution indentation, preserve
-  trailing backslashes safely, and keep parameter-operator path separators as
-  literal word parts. Full neofetch output now measures a 1.7652 expansion ratio.
-* Bake-off: report translated bytes, expansion ratio, helper footprint and
-  invocations, external requirements, diagnostic counts, review risk, and
-  Hyperfine medians for original Bash versus Monk-generated Fish runtime;
-  runtime plans require successful translations and valid Bash/Fish syntax.
-* Requirements: retain operation-specific reasons and source ranges for every
-  deduplicated helper-backed runtime dependency.
-* CI/evidence: add bounded GHC 9.12.2/9.14.1 and Fish 4.6.0/moving-Fish-4 jobs,
-  formatting/lint/Haddock gates, full integrations, Linux process-substitution
-  evidence, syntax validation, and parity manifests.
+* Replace generated Python support with native Fish and the compiled Haskell
+  `monk-runtime`, using a versioned byte protocol and typed operations. Add
+  `--runtime` selection and `--managed` executable bundling.
+* Extend arithmetic loops, byte ANSI quotes, comma brace products, bounded
+  parameter modifiers, scalar append, owned shifts and fixed-arity conditions.
+  Preserve zero-field source argument inheritance and loop failure facts.
+* Add an explicit stable directory contract and sourceable caller-contract
+  version 2 permissions for cwd, PWD, OLDPWD and directory-stack effects.
+* Fold and batch proved arithmetic, intern helper implementations and remove
+  unused state before admission. Expose structural materialization statistics;
+  preserve child scripts structurally until rendering.
+
+* Replace the best-effort translator with one private semantic and admitted
+  materialization pipeline. Unsupported inputs return diagnostics without
+  executable output in both normal and strict mode.
+* Replace Boolean-only configuration with translation policy, target profile,
+  entry mode and a versioned sourceable caller contract. Named approximations
+  require explicit selection. See the migration guide.
+* Preserve source occurrence identity, expansion cardinality and evaluation
+  regions; use bounded signed 64-bit arithmetic primitives, definite command
+  dispatch, owned source return boundaries and isolated child execution.
+* Make translation results, source graphs and output bundles opaque. Keep the
+  structural Fish DSL public and the renderer private. Remove superseded
+  semantic walkers and rewrites.
+* Add typed runtime capabilities and output-phase failures. Retain every use's
+  reason and source range when deduplicating requirements by program.
+* Stage managed immutable output generations, pin references, serialize
+  publishers, and atomically replace the entry with explicit recovery results.
+* Preserve the eleven zero-diagnostic main counterexamples, add generated and
+  focused differential regressions, and classify excluded syntax explicitly.
+  The roadmap records current evidence and remaining release gates.
+* Bound package dependencies and make warnings-as-errors a development flag.
+  Add pinned runtime bootstrap, compiler/runtime CI matrices, abstraction
+  controls, parity manifests and unpacked-source build/install checks.
 
 ## 0.0.0.0
 

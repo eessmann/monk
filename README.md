@@ -1,241 +1,137 @@
 # Monk
 
-Monk is a Haskell project that tries to translate Bash scripts into fish.
-It started as a fun excuse to learn more about shell parsing, typed ASTs, and
-all the weird corners where Bash and fish do not line up cleanly.
+Monk translates an admitted subset of Bash into Fish under a versioned
+execution contract. Unsupported semantics
+produce structured diagnostics and a failure in both normal and strict mode.
+Named approximations require an explicit opt-in.
 
-Monk is deliberately conservative: it
-translates what it understands, emits warnings for the parts that need a human to look again, and can fail fast in `--strict` mode when it would rather stop than try its best.
+The [roadmap](docs/design/translator-todo.md) records verified coverage,
+deliberate exclusions and remaining external CI evidence. The
+[verification report](docs/design/translator-verification.md) gives reproducible
+local candidate results.
 
-## What It Does
+## Build and translate
 
-Monk parses Bash with ShellCheck, hands translation output through a typed fish
-IR, applies typed source/output passes, and renders fish source.
+Use GHC 9.12.2 or 9.14.1 and Cabal 3.16.1:
 
-Today it handles a lot of ordinary shell code:
+```bash
+cabal build all -fdevelopment
+cabal run monk -- script.bash --strict --output script.fish
+fish --no-config script.fish
+```
 
-- control flow such as `if`, `while`, `for`, and `case`
-- functions, arrays, variable assignments, and common special variables
-- pipelines, background jobs, and command substitution
-- redirections, here-strings, and a chunk of process substitution
-- recursive `source` translation for literal source paths
+The initial profile is Bash 5.3, signed 64-bit arithmetic, UTF-8 source and C
+locale. Runtime evidence uses Bash 5.3.9 and Fish 4.6.0 on Linux x86-64. Generated
+operations use native Fish and declare a compatible compiled `monk-runtime`
+when bounded byte or integer operations need it. Install both executables with
+`cabal install exe:monk exe:monk-runtime`, or select a provider with `--runtime FILE`.
+`--managed --output script.fish` captures that provider in an immutable bundle.
+Generated support requires no Python and never evaluates Bash expression strings.
+See the [execution contract](docs/design/execution-profile.md)
+for startup conditions and caller obligations.
 
-It also has a long tail of best-effort behavior.
+```bash
+# Combined output on stdout:
+cabal run monk -- script.bash --strict
 
-## What To Expect
+# Literal dependencies, using the declared execution cwd and PATH:
+cabal run monk -- script.bash --strict --recursive --sources inline
 
-If you run Monk on a script, the happy path is:
+# Explicitly permit the readonly enforcement approximation:
+cabal run monk -- script.bash --allow-approximation readonly-unchecked
 
-1. it produces fish output
-2. it tells you where translation got lossy or approximate
-3. you review the result like generated migration code, not handwritten code
+# Output intended to be sourced by a declared caller:
+cabal run monk -- script.bash --strict --entry sourceable \
+  --caller-contract caller.json --output script.fish
+```
 
-The current source of truth for exact vs best-effort behavior is
-`docs/design/translator-audit.md`.
+`--target-profile bash-5.3-fish-4.6` names the initial profile. `--strict` cannot be
+combined with `--allow-approximation`. Warnings, notes and runtime requirements
+go to stderr; `--quiet-warnings` suppresses them, not translation failures.
 
-Constructs that still deserve extra attention include:
+## Supported semantics
 
-- subshell-heavy scripts
-- residual `read` edge cases outside the exact helper-backed surface
-- `set -e` / `pipefail` interactions in compound shell logic
-- non-literal `source`
-- option-heavy `trap`, uncatchable trap signals, `shopt`, and `coproc`
-- argument-position or broader `>(...)` forms outside the covered Linux redirect-target fixtures
+The implementation supports exact words, integer arithmetic, control
+flow, definite function calls and literal sources. Quotation, empty arguments,
+field splitting, lazy expansion effects and invocation order are part of the
+contract. Child execution has an explicit isolation plan. Sourceable output has
+an owned return/status/argv boundary and declared scalar and function effects.
 
-## How It Works
+Admission depends on context, not just syntax. Arrays, arbitrary `eval`, unknown
+dynamic dispatch, recursion, computed sources, source cycles, callbacks and
+unsupported binding or option states require diagnostics. A rejection test
+establishes an exclusion; it does not establish implemented functionality.
+Consult the [semantic audit](docs/design/translator-audit.md) and
+[constructor policy](docs/design/shellcheck-syntax-inventory.md) for exact
+boundaries. Old best-effort support claims do not apply to this translator.
 
-Monk works like a small compiler:
+## Library and architecture
 
 ```text
-Bash source
-  -> ShellCheck parser and Bash AST
-  -> Monk translator
-  -> structural fish DSL
-  -> typed source graph and output bundle
-  -> pretty-printed fish source
+ShellCheck syntax and immutable source input
+  -> private semantic plan
+  -> admitted materialization plan, including helpers and execution boundaries
+  -> structural Fish DSL
+  -> rendering and publication
 ```
 
-1. `Language.Bash.Parser` asks ShellCheck to parse Bash and retain source
-   positions and parse diagnostics.
-2. `Language.Fish.Translator` recursively translates ShellCheck tokens.
-   Focused modules handle control flow, commands, variables, arithmetic,
-   redirections, parameter expansion, process substitution, and other semantic
-   areas.
-3. The translator produces a typed `Language.Fish.DSL.Script`. Its types keep
-   blocks and pipelines non-empty, distinguish expression types, and restrict
-   pipeline stages to status-returning commands.
-4. Typed simplification, renaming, source rewriting, inlining, and output
-   planning operate on that same structural representation.
-5. The private renderer boundary produces final fish source while the translation
-   result retains structured diagnostics for the caller.
-
-The translator also tracks context such as function scope, local variables,
-command substitution, `errexit`, and `pipefail`. When fish has no direct
-equivalent for required Bash behavior, Monk can emit a generated helper
-preamble for supported cases such as background-job tracking, exact `read`
-behavior, process substitution, and `pipefail` handling.
-
-## Diagnostics And Strict Mode
-
-Diagnostics are structured values with a stable code, phase, severity, message,
-optional source range, and `ReviewRisk` (`Clean`, `Review`, or `Unsafe`). The CLI
-prints them to stderr together with deduplicated runtime requirements. Numeric
-confidence scores are not part of the 0.4 API.
-
-Default mode keeps translating when a best-effort result is available.
-`--strict` instead turns unsupported constructs into translation failures. This
-makes normal mode useful for migrations and strict mode useful when approximate
-output is unacceptable.
-
-## Recursive Sources
-
-With `--recursive`, Monk discovers literal `source` and `.` references and
-builds a graph of the scripts it can resolve. `--sources inline` combines
-translated files into one output, while `--sources separate` emits individual
-`.fish` files and rewrites source paths to their translated targets. Separate
-recursive bundles extract live generated helpers into at most one
-`_monk_runtime.fish`, sourced through quoted relative paths.
-
-Dynamic source expressions cannot be resolved statically and remain
-warning-driven manual-review cases.
-
-## Quick Start
-
-Build it from source:
-
-```bash
-git clone https://github.com/eessmann/monk.git
-cd monk
-cabal build
-```
-
-Generated scripts target Fish 4.6 or newer. Python 3 is declared as an explicit
-runtime requirement only when an exact hard-case fallback needs it.
-
-Translate a script:
-
-```bash
-monk script.sh > script.fish
-monk script.sh --output script.fish
-monk script.sh --strict
-monk script.sh --recursive --sources separate
-```
-
-Useful flags:
-
-- `--output FILE` writes to a file instead of stdout
-- `--strict` turns best-effort warnings into failures where supported
-- `--quiet-warnings` suppresses warning output
-- `--recursive` follows literal `source` / `.`
-- `--sources inline|separate` controls how recursive source translation is emitted
-
-Warnings and notes go to stderr.
-
-## Library Surface
-
-The public modules are intentionally small:
-
-- `Monk.Translation` for parse + translate entry points
-- `Monk.Translation.Types` for the stable translation/diagnostics contract
-- `Monk.AST` / `Language.Fish.DSL` for the public type-safe Fish construction DSL
-- `Monk.Source` for recursive source-graph helpers
-- `Monk.Output` for typed stdout, combined, and separate bundle planning
-- `Monk.Diagnostics` for diagnostics, review-risk, and requirement rendering
-- `Monk` as a thin convenience re-export
-
-`Monk.AST` now exposes smart constructors such as `script`, `stmt`,
-`command`, `arg`, `redirect`, `begin`, `pipeline`, `if_`, `while`, `for`,
-`switch`, and `function`. The DSL keeps block and pipeline bodies non-empty at
-the type level. Raw constructors and lowering internals are no longer public;
-callers that depended on them must migrate to the structural DSL in 0.4.
-
-Successful translations retain the structural `Script`, ordered diagnostics,
-and declared requirements in `TranslationResult`.
-
-Example:
+`Monk.Translation` owns parse/translate entry points. `Monk.Source` discovers
+literal dependencies through the same semantic analysis. `Monk.Output` plans
+output separately from filesystem writes. Translation results, source graphs
+and output bundles are opaque, with inspection functions. General
+`Language.Fish.DSL` / `Monk.AST` construction remains available without allowing
+arbitrary constructed scripts to become certified translations.
 
 ```haskell
 import Monk.Translation
 
-main :: IO ()
-main = do
-  result <- translateBashFile defaultConfig "script.sh"
+translateFile = do
+  result <- translateBashFile strictConfig "script.bash"
   case result of
-    Left err -> print err
+    Left failure -> print failure
     Right translation -> do
-      putStrLn (toString (renderTranslation translation))
+      print (renderTranslation translation)
       print (translationDiagnostics translation)
       print (translationRuntimeRequirements translation)
 ```
 
-## Development
+Sourceable callers declare binding access, initial export attributes, lookup
+and ambient effects in a versioned JSON contract. Runtime guards check
+observable preconditions; equivalence of imported functions and absence of
+relevant callbacks remain caller obligations. See the
+[migration guide](docs/migration-guide.md) for the deliberate API/CLI changes.
 
-The normal local loop is:
+Managed publication stages immutable generations on the destination filesystem
+and replaces one entry loader atomically. Child references remain pinned to a
+generation and prior generations remain available. This guarantee concerns
+publication and reader consistency; executing scripts can still have their
+declared effects. Use the output publisher, rather than manually writing the
+files returned by inspection accessors.
+
+## Development and evidence
 
 ```bash
-cabal build
-cabal test
-MONK_INTEGRATION=1 cabal test
+cabal build all -fdevelopment
+MONK_INTEGRATION=1 cabal test all -fdevelopment
 hlint .
+git ls-files '*.hs' -z | xargs -0 ormolu --mode check
+cabal haddock all -fdevelopment
+cabal check
 ```
 
-### Repository Map
+The development flag retains warnings as errors without making release package
+metadata reject unconditional `-Werror`. Tests compare output, status, argument
+boundaries, filesystem effects and declared caller updates. Generated
+compositions include shrinking and classify zero-diagnostic mismatches
+separately. Compile-fail checks include positive controls. Publication tests
+exercise failure recovery and concurrent readers and publishers. Skipped
+runtime and platform checks remain explicit evidence gaps.
 
-- `app/`: the `monk` CLI entry point
-- `src/Monk/`: public translation, diagnostics, and source-graph APIs
-- `src/Language/Bash/`: the ShellCheck parser boundary
-- `src/Language/Fish/DSL*`: the structural fish IR and safe construction API
-- `src/Language/Fish/Translator/`: translation orchestration and semantic
-  subsystems
-- `src/Language/Fish/Pretty/`: the private structural Fish renderer
-- `test/`: unit, property, golden, integration, and real-world tests
-- `scripts/Bakeoff/`: the Monk-versus-Babelfish comparison harness
-- `docs/design/`: architecture, fidelity evidence, and active translator
-  design notes
+- [Architecture](docs/design/architecture.md)
+- [Roadmap and acceptance evidence](docs/design/translator-todo.md)
+- [Legacy test migration](docs/design/legacy-test-migration.md)
+- [Bake-off workflow](docs/babelfish-comparison.md)
 
-### Testing Strategy
-
-The test suite checks both generated structure and runtime behavior:
-
-- unit tests cover focused translator, DSL, renderer, diagnostics, source, and
-  harness behavior
-- property tests exercise rendering and translation invariants
-- golden tests compare generated fish text with checked-in expected output
-- integration and real-world tests run Bash and translated fish, then compare
-  exit status, stdout, stderr, and environment changes
-- the bake-off runner compares Monk with Babelfish, benchmarks both
-  translators, and reports Bash-versus-generated-Fish runtime medians
-
-Run `cabal test` for the normal suite. Set `MONK_INTEGRATION=1` to enable tests
-that require Bash and fish execution.
-
-### Bake-Off
-
-The bake-off runner compares Monk and Babelfish:
-
-```bash
-cabal run monk-bakeoff -- --compatible --no-benchmark --out-dir /tmp/monk-bakeoff
-```
-
-Bake-off prerequisites:
-
-- `babelfish` and `fish` are required
-- `hyperfine` is optional and only needed for benchmark runs
-- the runner now validates tool paths up front and reports actionable preflight errors or benchmark-skip notes
-- runtime benchmark workers replay fixture arguments, stdin, and execution mode
-  against the original Bash and Monk-generated Fish scripts
-
-## Docs
-
-- [`docs/design/translator-audit.md`](docs/design/translator-audit.md): fidelity
-  matrix and evidence backlog
-- [`docs/design/translator-todo.md`](docs/design/translator-todo.md): active
-  translator backlog
-- [`docs/design/architecture.md`](docs/design/architecture.md): module layout
-  and subsystem boundaries
-- [`docs/design/shellcheck-syntax-inventory.md`](docs/design/shellcheck-syntax-inventory.md):
-  explicit parser-node support and scope decisions
-- [`docs/migration-guide.md`](docs/migration-guide.md): manual cleanup patterns
-  after translation
-- [`docs/babelfish-comparison.md`](docs/babelfish-comparison.md): current
-  bake-off workflow and comparison notes
+The current bake-off compares each generated script directly with Bash. It
+records translation rejections separately and measures standalone stdout,
+stderr and status; caller-state and filesystem equivalence need other tests.

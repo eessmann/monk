@@ -1,374 +1,205 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
-
--- |
--- Copyright: (c) 2025 Erich Essmann
--- SPDX-License-Identifier: MIT
--- Maintainer: Erich Essmann <essmanne@gmail.com>
---
--- Recursive source discovery and source-path rewriting helpers.
+-- | Authoritative literal-source discovery. Each dependency is read once, while
+-- each source occurrence resumes normalization and executes at its own boundary.
 module Monk.Source
   ( SourceMode (..),
-    Translation (..),
-    SourceGraph (..),
+    SourceEnvironment (..),
+    captureSourceEnvironment,
+    resolveSourcePathIn,
+    SourceGraph,
+    SourceDependency,
+    SourceOccurrence,
     SourceGraphFailure (..),
+    sourceRoot,
+    sourcePaths,
+    sourceDependencies,
+    sourceDependencyPath,
+    sourceDependencyIdentity,
+    sourceOccurrences,
+    sourceOccurrenceId,
+    sourceOccurrenceParent,
+    sourceOccurrenceDependency,
+    sourceOccurrenceRange,
+    sourceGraphDiagnostics,
+    sourceGraphRuntimeRequirements,
+    sourceGraphStatistics,
     translateSourceGraph,
-    inlineSourceGraph,
-    rewriteSources,
-    collectSourceMap,
-    resolveSourcePath,
+    translateSourceGraphWithEnvironment,
   )
 where
 
-import Control.Monad (foldM)
-import Data.Char (isDigit)
+import Control.Exception (IOException, try)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Set qualified as Set
 import Data.Text qualified as T
-import Data.Typeable (cast)
-import Language.Fish.DSL.Internal
-import Language.Fish.Inline
-  ( InlineEvent (..),
-    Translation (..),
-    inlineStatements,
-    sourceStatusHelperStatement,
+import Language.Bash.Plan qualified as P
+import Language.Bash.Plan.Normalize
+  ( NormalizationResult (..),
+    SourceDocument (..),
+    beginNormalization,
   )
-import Monk.Translation
-  ( Diagnostic (..),
-    DiagnosticCode (..),
-    DiagnosticPhase (PhaseParse, PhaseSource),
-    DiagnosticSeverity (DiagnosticError, DiagnosticWarning),
-    ReviewRisk (Review, Unsafe),
-    TranslateConfig,
-    TranslationFailure (..),
-    TranslationResult (..),
-    parseBashFile,
-    translateParseResult,
-  )
-import ShellCheck.AST
-import ShellCheck.ASTLib (getLiteralStringDef)
-import ShellCheck.Interface
-  ( Comment (..),
-    Position (..),
-    PositionedComment (..),
-    prRoot,
-  )
-import System.Directory (canonicalizePath, doesFileExist)
-import System.FilePath (isRelative, makeRelative, replaceExtension, takeDirectory, (</>))
+import Language.Fish.DSL (SourceRange)
+import Language.Fish.Translator.Plan (compileSourcePlan, plannedDiagnostics, plannedRequirements, plannedStatistics)
+import Monk.Source.Environment
+import Monk.Source.Product
+import Monk.Translation (TranslationFailure (..), parseBashScript)
+import Monk.Translation.ParseDiagnostics (genericParseDiagnostic, positionedCommentDiagnostic)
+import Monk.Translation.Types
+import ShellCheck.Interface (ParseResult, prComments, prRoot)
 
-data SourceMode
-  = SourceInline
-  | SourceSeparate
+data SourceMode = SourceInline | SourceSeparate
   deriving stock (Show, Eq)
 
-data SourceGraph = MkSourceGraph
-  { sgOrder :: [FilePath],
-    sgTranslations :: M.Map FilePath Translation
-  }
+data SourceGraphFailure = MkSourceGraphFailure FilePath TranslationFailure
   deriving stock (Show, Eq)
 
-data SourceGraphFailure
-  = SourceGraphFailure FilePath TranslationFailure
-  deriving stock (Show, Eq)
+sourceRoot :: SourceGraph -> FilePath
+sourceRoot = graphRoot
 
-translateSourceGraph ::
-  TranslateConfig ->
-  Bool ->
-  FilePath ->
-  IO (Either SourceGraphFailure SourceGraph)
-translateSourceGraph cfg recursive rootPath =
-  go Set.empty [] mempty [rootPath]
+sourcePaths :: SourceGraph -> [FilePath]
+sourcePaths = map snapshotPath . graphSnapshots
+
+sourceDependencies :: SourceGraph -> [SourceDependency]
+sourceDependencies = map (\input -> MkSourceDependency (snapshotPath input) (snapshotIdentity input)) . graphSnapshots
+
+sourceDependencyPath :: SourceDependency -> FilePath
+sourceDependencyPath (MkSourceDependency path _) = path
+
+sourceDependencyIdentity :: SourceDependency -> Text
+sourceDependencyIdentity (MkSourceDependency _ label) = label
+
+sourceOccurrences :: SourceGraph -> [SourceOccurrence]
+sourceOccurrences = graphOccurrences
+
+sourceOccurrenceId :: SourceOccurrence -> Int
+sourceOccurrenceId = occurrenceSequence
+
+sourceOccurrenceParent :: SourceOccurrence -> FilePath
+sourceOccurrenceParent = occurrenceParent
+
+sourceOccurrenceDependency :: SourceOccurrence -> FilePath
+sourceOccurrenceDependency = occurrenceDependency
+
+sourceOccurrenceRange :: SourceOccurrence -> Maybe SourceRange
+sourceOccurrenceRange = occurrenceRange
+
+sourceGraphDiagnostics :: SourceGraph -> [Diagnostic]
+sourceGraphDiagnostics graph = graphParseDiagnostics graph <> plannedDiagnostics (graphTranslation graph)
+
+sourceGraphRuntimeRequirements :: SourceGraph -> [RuntimeRequirement]
+sourceGraphRuntimeRequirements = plannedRequirements . graphTranslation
+
+sourceGraphStatistics :: SourceGraph -> TranslationStatistics
+sourceGraphStatistics = plannedStatistics . graphTranslation
+
+translateSourceGraph :: TranslateConfig -> Bool -> FilePath -> IO (Either SourceGraphFailure SourceGraph)
+translateSourceGraph cfg recursive rootPath = do
+  environment <- try @IOException captureSourceEnvironment
+  case environment of
+    Left err -> pure (Left (oneFailure rootPath (sourceDiagnostic Nothing "environment" (show err))))
+    Right value -> translateSourceGraphWithEnvironment cfg value recursive rootPath
+
+translateSourceGraphWithEnvironment ::
+  TranslateConfig -> SourceEnvironment -> Bool -> FilePath -> IO (Either SourceGraphFailure SourceGraph)
+translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
+  rootInput <- readSourceSnapshot rootPath
+  case rootInput of
+    Left diagnostic -> pure (Left (oneFailure rootPath diagnostic))
+    Right input -> do
+      parsed <- parseBashScript (snapshotPath input) (snapshotText input)
+      case parsedFailure parsed of
+        Just failure -> pure (Left (MkSourceGraphFailure (snapshotPath input) failure))
+        Nothing ->
+          drive
+            (snapshotPath input)
+            (M.singleton (snapshotPath input) (input, parsed, Nothing))
+            [input]
+            []
+            (map positionedCommentDiagnostic (prComments parsed))
+            (beginNormalization cfg (snapshotText input) parsed)
   where
-    go _ order translations [] =
-      pure
-        ( Right
-            MkSourceGraph
-              { sgOrder = order,
-                sgTranslations = translations
-              }
+    drive root cache inputs occurrences diagnostics = \case
+      NormalizationFailed errors -> pure (Left (MkSourceGraphFailure root (MkTranslationFailure errors)))
+      NormalizationComplete plan -> pure $ case compileSourcePlan plan of
+        Left errors -> Left (MkSourceGraphFailure root (MkTranslationFailure errors))
+        Right translated -> Right (MkSourceGraph root environment inputs occurrences plan translated diagnostics)
+      NormalizationNeedsSource request resume
+        | not recursive ->
+            pure
+              ( Left
+                  ( oneFailure
+                      root
+                      (sourceDiagnostic (P.sourceRequestRange request) "disabled" "Literal source requires recursive graph translation")
+                  )
+              )
+        | otherwise -> do
+            let resolveDirectory path =
+                  let absolute = if T.isPrefixOf "/" path then path else toText (sourceWorkingDirectory environment) <> "/" <> path
+                      component parts "" = parts
+                      component parts "." = parts
+                      component parts ".." = drop 1 parts
+                      component parts value = value : parts
+                   in "/" <> T.intercalate "/" (reverse (foldl' component [] (T.splitOn "/" absolute)))
+                executionEnvironment = maybe environment (\path -> environment {sourceWorkingDirectory = toString (resolveDirectory path)}) (P.sourceRequestWorkingDirectory request)
+            resolved <- resolveSourcePathIn executionEnvironment (P.sourceRequestTarget request)
+            case resolved of
+              Left diagnostic -> pure (Left (oneFailure root diagnostic {diagnosticRange = P.sourceRequestRange request}))
+              Right path
+                | toText path `elem` P.sourceRequestStack request ->
+                    pure
+                      ( Left
+                          ( oneFailure
+                              path
+                              (sourceDiagnostic (P.sourceRequestRange request) "cycle" "Source cycles are outside the acyclic execution contract")
+                          )
+                      )
+                | otherwise -> do
+                    loaded <- case M.lookup path cache of
+                      Just value -> pure (Right value)
+                      Nothing ->
+                        readSourceSnapshot path >>= \case
+                          Left diagnostic -> pure (Left diagnostic)
+                          Right input -> do
+                            parsed <- parseBashScript (snapshotPath input) (snapshotText input)
+                            pure (Right (input, parsed, Just (P.sourceRequestEntryContext request)))
+                    case loaded of
+                      Left diagnostic -> pure (Left (oneFailure path diagnostic {diagnosticRange = P.sourceRequestRange request}))
+                      Right (input, parsed, priorContext)
+                        | maybe False (/= P.sourceRequestEntryContext request) priorContext ->
+                            pure
+                              ( Left
+                                  ( oneFailure
+                                      path
+                                      (sourceDiagnostic (P.sourceRequestRange request) "entry-context" "A dependency was reached under incompatible binding or dispatch facts")
+                                  )
+                              )
+                        | otherwise -> case parsedFailure parsed of
+                            Just failure -> pure (Left (MkSourceGraphFailure path failure))
+                            Nothing -> do
+                              let fresh = not (M.member path cache)
+                                  parent = maybe root toString (listToMaybe (reverse (P.sourceRequestStack request)))
+                                  occurrence = MkSourceOccurrence (length occurrences) (P.sourceRequestId request) parent path (P.sourceRequestRange request)
+                              drive
+                                root
+                                (M.insert path (input, parsed, Just (P.sourceRequestEntryContext request)) cache)
+                                (inputs <> [input | fresh])
+                                (occurrences <> [occurrence])
+                                (diagnostics <> [positionedCommentDiagnostic comment | fresh, comment <- prComments parsed])
+                                (resume (SourceDocument (snapshotText input) parsed))
+
+parsedFailure :: ParseResult -> Maybe TranslationFailure
+parsedFailure parsed
+  | isJust (prRoot parsed) = Nothing
+  | otherwise =
+      Just
+        ( MkTranslationFailure
+            ( fromMaybe
+                (genericParseDiagnostic :| [])
+                (NE.nonEmpty (map positionedCommentDiagnostic (prComments parsed)))
+            )
         )
-    go seen order translations (path : rest)
-      | Set.member path seen = go seen order translations rest
-      | otherwise = do
-          parseResE <- parseBashFile path
-          case parseResE of
-            Left errs ->
-              pure (Left (SourceGraphFailure path (sourceParseFailure errs)))
-            Right parseRes ->
-              case translateParseResult cfg parseRes of
-                Left failure ->
-                  pure (Left (SourceGraphFailure path failure))
-                Right result -> do
-                  sourceMap <-
-                    if recursive
-                      then collectSourceMap path (prRoot parseRes)
-                      else pure mempty
-                  let translation =
-                        MkTranslation
-                          { trPath = path,
-                            trScript = translationScript result,
-                            trDiagnostics = translationDiagnostics result,
-                            trRuntimeRequirements = translationRuntimeRequirements result,
-                            trSourceMap = sourceMap
-                          }
-                      next =
-                        if recursive
-                          then catMaybes (M.elems sourceMap)
-                          else []
-                  go
-                    (Set.insert path seen)
-                    (order <> [path])
-                    (M.insert path translation translations)
-                    (rest <> next)
 
-inlineSourceGraph :: SourceGraph -> FilePath -> IO (Script, [Diagnostic])
-inlineSourceGraph graph rootPath = do
-  messagesRef <- newIORef []
-  needsStatusHelperRef <- newIORef False
-  statements <-
-    inlineStatements
-      ( \case
-          InlineWarning message -> modifyIORef' messagesRef (message :)
-          InlineNeedsSourceStatusHelper -> writeIORef needsStatusHelperRef True
-      )
-      (sgTranslations graph)
-      Set.empty
-      rootPath
-  messages <- reverse <$> readIORef messagesRef
-  needsStatusHelper <- readIORef needsStatusHelperRef
-  let withStatusHelper
-        | needsStatusHelper && sourceStatusHelperStatement `notElem` statements = sourceStatusHelperStatement : statements
-        | otherwise = statements
-  pure (MkScript withStatusHelper, map inlineDiagnostic messages)
-  where
-    inlineDiagnostic message =
-      MkDiagnostic
-        { diagnosticCode = MkDiagnosticCode "monk.source.inline",
-          diagnosticPhase = PhaseSource,
-          diagnosticSeverity = DiagnosticWarning,
-          diagnosticRisk = Review,
-          diagnosticMessage = message,
-          diagnosticRange = Nothing
-        }
+oneFailure :: FilePath -> Diagnostic -> SourceGraphFailure
+oneFailure path diagnostic = MkSourceGraphFailure path (MkTranslationFailure (diagnostic :| []))
 
-rewriteSources :: M.Map FilePath Translation -> Translation -> Script
-rewriteSources translations tr =
-  case trScript tr of
-    MkScript statements -> MkScript (map (rewriteStatement sourceRewrite) statements)
-  where
-    currentOutputDir = takeDirectory (translationOutputPath tr)
-
-    sourceRewrite txt =
-      case join (M.lookup txt (trSourceMap tr)) of
-        Just resolved
-          | Just target <- M.lookup resolved translations ->
-              let targetOutputPath = translationOutputPath target
-                  defaultOutputPath = replaceExtension resolved "fish"
-               in if targetOutputPath == defaultOutputPath
-                    then toText (replaceExtension (toString txt) "fish")
-                    else toText (makeRelative currentOutputDir targetOutputPath)
-        _ -> txt
-
-    translationOutputPath translation =
-      replaceExtension (trPath translation) "fish"
-
-sourceParseFailure :: [PositionedComment] -> TranslationFailure
-sourceParseFailure comments =
-  MkTranslationFailure
-    (fromMaybe generic (NE.nonEmpty (map sourceParseDiagnostic comments)))
-  where
-    generic =
-      MkDiagnostic
-        { diagnosticCode = MkDiagnosticCode "shellcheck.parse",
-          diagnosticPhase = PhaseParse,
-          diagnosticSeverity = DiagnosticError,
-          diagnosticRisk = Unsafe,
-          diagnosticMessage = "Unable to parse sourced Bash input",
-          diagnosticRange = Nothing
-        }
-        :| []
-
-sourceParseDiagnostic :: PositionedComment -> Diagnostic
-sourceParseDiagnostic positioned =
-  MkDiagnostic
-    { diagnosticCode = MkDiagnosticCode ("shellcheck." <> toText (filter isDigit (show (cCode payload)))),
-      diagnosticPhase = PhaseParse,
-      diagnosticSeverity = DiagnosticError,
-      diagnosticRisk = Unsafe,
-      diagnosticMessage = toText (cMessage payload),
-      diagnosticRange = Just (MkSourceRange (sourcePos (pcStartPos positioned)) (sourcePos (pcEndPos positioned)))
-    }
-  where
-    payload = pcComment positioned
-    sourcePos position =
-      MkSourcePos
-        { srcFile = toText (posFile position),
-          srcLine = fromInteger (posLine position),
-          srcColumn = fromInteger (posColumn position)
-        }
-
-collectSourceMap :: FilePath -> Maybe Token -> IO (M.Map Text (Maybe FilePath))
-collectSourceMap path mRoot = do
-  let sources = maybe [] collectSourceArgs mRoot
-      baseDir = takeDirectory path
-      literals = map tokenToLiteralText sources
-  foldM (resolveSource baseDir) M.empty literals
-  where
-    resolveSource base acc txt
-      | T.null txt = pure acc
-      | M.member txt acc = pure acc
-      | otherwise = do
-          mPath <- resolveSourcePath base txt
-          pure (M.insert txt mPath acc)
-
-resolveSourcePath :: FilePath -> Text -> IO (Maybe FilePath)
-resolveSourcePath base txt
-  | T.null txt = pure Nothing
-  | otherwise = do
-      let raw = toString txt
-          candidates
-            | isRelative raw = ordNub [raw, base </> raw]
-            | otherwise = [raw]
-      resolveExisting candidates
-  where
-    resolveExisting = \case
-      [] -> pure Nothing
-      (candidate : rest) -> do
-        exists <- doesFileExist candidate
-        if exists
-          then Just <$> canonicalizePath candidate
-          else resolveExisting rest
-
-collectSourceArgs :: Token -> [Token]
-collectSourceArgs tok =
-  let direct =
-        case tok of
-          T_SimpleCommand _ _ (cmdTok : argTok : _)
-            | isSourceCmd cmdTok -> [argTok]
-          _ -> []
-   in direct <> concatMap collectSourceArgs (tokenChildren tok)
-
-tokenChildren :: Token -> [Token]
-tokenChildren = \case
-  T_Script _ _ stmts -> stmts
-  T_SimpleCommand _ assignments cmdToks -> assignments <> cmdToks
-  T_Pipeline _ _ cmds -> cmds
-  T_IfExpression _ conditionBranches elseBranch ->
-    concatMap (uncurry (<>)) conditionBranches <> elseBranch
-  T_WhileExpression _ cond body -> cond <> body
-  T_UntilExpression _ cond body -> cond <> body
-  T_Arithmetic _ exprTok -> [exprTok]
-  T_ForArithmetic _ initTok condTok incTok body -> [initTok, condTok, incTok] <> body
-  T_Function _ _ _ _ body -> [body]
-  T_BraceGroup _ tokens -> tokens
-  T_Subshell _ tokens -> tokens
-  T_AndIf _ left right -> [left, right]
-  T_OrIf _ left right -> [left, right]
-  T_Backgrounded _ inner -> [inner]
-  T_Annotation _ _ inner -> [inner]
-  T_Include _ inner -> [inner]
-  T_SourceCommand _ original _ -> [original]
-  T_ForIn _ _ tokens body -> tokens <> body
-  T_SelectIn _ _ tokens body -> tokens <> body
-  T_CaseExpression _ switchExpr cases ->
-    switchExpr : concatMap (\(_, pats, body) -> pats <> body) cases
-  T_Redirecting _ redirs inner -> redirs <> [inner]
-  T_NormalWord _ parts -> parts
-  T_DoubleQuoted _ parts -> parts
-  T_DollarBraced _ _ inner -> [inner]
-  _ -> []
-
-isSourceCmd :: Token -> Bool
-isSourceCmd tok =
-  let name = tokenToLiteralText tok
-   in name == "source" || name == "."
-
-tokenToLiteralText :: Token -> Text
-tokenToLiteralText = T.pack . getLiteralStringDef ""
-
-rewriteStatement :: (Text -> Text) -> FishStatement -> FishStatement
-rewriteStatement f = \case
-  Stmt cmd -> Stmt (rewriteCommand f cmd)
-  StmtList xs -> StmtList (map (rewriteStatement f) xs)
-  other -> other
-
-rewriteCommand :: (Text -> Text) -> FishCommand t -> FishCommand t
-rewriteCommand f = \case
-  Command name args
-    | name == "source" || name == "." ->
-        Command name (rewriteSourceArgs f args)
-  Source expr -> Source (rewriteSourceExpr f expr)
-  Begin body suffix -> Begin (NE.map (rewriteStatement f) body) suffix
-  If cond thn els suffix ->
-    If
-      (rewriteJobList f cond)
-      (NE.map (rewriteStatement f) thn)
-      (map (rewriteStatement f) els)
-      suffix
-  While cond body suffix ->
-    While (rewriteJobList f cond) (NE.map (rewriteStatement f) body) suffix
-  For var listExpr body suffix ->
-    For var listExpr (NE.map (rewriteStatement f) body) suffix
-  Switch expr cases suffix ->
-    Switch expr (NE.map (rewriteCaseItem f) cases) suffix
-  Function func ->
-    Function func {funcBody = NE.map (rewriteStatement f) (funcBody func)}
-  Pipeline pipe -> Pipeline (rewritePipeline f pipe)
-  JobConj jc -> JobConj (rewriteConjunction f jc)
-  Semicolon c1 c2 -> Semicolon (rewriteCommand f c1) (rewriteCommand f c2)
-  Not cmd -> Not (rewriteCommand f cmd)
-  Background cmd -> Background (rewriteCommand f cmd)
-  Decorated dec cmd -> Decorated dec (rewriteCommand f cmd)
-  other -> other
-
-rewriteSourceExpr :: (Text -> Text) -> FishExpr TStr -> FishExpr TStr
-rewriteSourceExpr f = \case
-  ExprLiteral txt -> ExprLiteral (f txt)
-  other -> other
-
-rewriteSourceArgs :: (Text -> Text) -> [ExprOrRedirect] -> [ExprOrRedirect]
-rewriteSourceArgs f = \case
-  ExprVal expr : rest ->
-    case cast expr of
-      Just stringExpr -> ExprVal (rewriteSourceExpr f stringExpr) : rest
-      Nothing ->
-        case cast expr of
-          Just listExpr -> ExprVal (rewriteSourceListExpr f listExpr) : rest
-          Nothing -> ExprVal expr : rest
-  other -> other
-
-rewriteSourceListExpr :: (Text -> Text) -> FishExpr (TList TStr) -> FishExpr (TList TStr)
-rewriteSourceListExpr f = \case
-  ExprListLiteral [ExprLiteral txt] -> ExprListLiteral [ExprLiteral (f txt)]
-  other -> other
-
-rewriteCaseItem :: (Text -> Text) -> CaseItem -> CaseItem
-rewriteCaseItem f (MkCaseItem pats body) =
-  MkCaseItem pats (NE.map (rewriteStatement f) body)
-
-rewriteJobList :: (Text -> Text) -> FishJobList -> FishJobList
-rewriteJobList f (MkFishJobList conj) =
-  MkFishJobList (NE.map (rewriteConjunction f) conj)
-
-rewriteConjunction :: (Text -> Text) -> FishJobConjunction -> FishJobConjunction
-rewriteConjunction f jc =
-  jc
-    { jcJob = rewritePipeline f (jcJob jc),
-      jcContinuations = map (rewriteConjCont f) (jcContinuations jc)
-    }
-
-rewriteConjCont :: (Text -> Text) -> FishJobConjCont -> FishJobConjCont
-rewriteConjCont f = \case
-  JCAnd pipe -> JCAnd (rewritePipeline f pipe)
-  JCOr pipe -> JCOr (rewritePipeline f pipe)
-
-rewritePipeline :: (Text -> Text) -> FishJobPipeline -> FishJobPipeline
-rewritePipeline f pipe =
-  pipe
-    { jpStatement = rewriteStatement f (jpStatement pipe),
-      jpCont = map rewritePipeCont (jpCont pipe)
-    }
-  where
-    rewritePipeCont cont =
-      cont {jpcStatement = rewriteStatement f (jpcStatement cont)}
+sourceDiagnostic :: Maybe SourceRange -> Text -> Text -> Diagnostic
+sourceDiagnostic range code message = MkDiagnostic (MkDiagnosticCode ("monk.source." <> code)) PhaseSource DiagnosticError Unsafe message range

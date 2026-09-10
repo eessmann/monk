@@ -1,286 +1,336 @@
-# Monk vs Babelfish (Bash -> Fish)
+# Monk and Babelfish bake-off
 
-This document compares Monk with the Go-based babelfish translator and outlines a reproducible bake-off to evaluate real-world behavior.
+The 2026-09-09 run compares the redesigned Monk translator with Babelfish 1.2.1.
+Monk matched Bash on all 38 translations it admitted and rejected 57 fixtures.
+Babelfish translated 58 fixtures: 26 matched Bash and 32 differed. Babelfish
+also matched 10 fixtures that Monk rejects. This corpus shows the tradeoff
+between Monk's narrower admission contract and Babelfish's broader output.
 
-## Goals
+A match here means identical **stdout bytes, stderr bytes and exit status** for
+one standalone execution with the recorded inputs. It does not establish
+filesystem, caller-state or general semantic equivalence. Read the
+[semantic audit](design/translator-audit.md) for Monk's supported contract.
 
-- **Translation fidelity**: does the output preserve runtime behavior?
-- **Safety/visibility**: are lossy translations surfaced clearly?
-- **Coverage**: what Bash constructs are translated vs left as-is?
-- **Ergonomics**: how easy is it to run on a corpus and review results?
+## Results
 
-## High-level differences
+All 95 selected fixtures were classified; there were no prerequisite/platform
+skips or translation/runtime timeouts. Bash execution was needed for the 66
+fixtures where at least one translator succeeded. The other 29 failed
+translation in both tools and contribute no runtime evidence. In particular,
+full `neofetch.bash` failed translation in both tools and was not executed.
 
-- **Architecture**: Monk now exposes a typed Fish DSL and lowers the translation handoff through it before rendering with the raw pretty-printer backend; remaining raw-shaped translator internals are isolated behind an internal syntax boundary. Babelfish writes Fish text directly from a Bash AST.
-- **Diagnostics**: Monk emits warnings and inline notes for lossy translations and offers `--strict`; babelfish tends to emit a best-effort script with fewer diagnostics.
-- **Translation strategy**: Monk hoists side effects and emulates short-circuit arithmetic to preserve semantics; babelfish focuses on pragmatic, readable output.
+| Outcome | Monk | Babelfish |
+| --- | ---: | ---: |
+| Translation succeeded | 38 | 58 |
+| Translation rejected/failed | 57 | 37 |
+| Matched Bash | 38 | 26 |
+| Differed from Bash | 0 | 32 |
+| Zero-diagnostic mismatches | 0 | 32 |
 
-## Translation approaches (worked example)
+All successful Babelfish translations had empty translation stderr. Its 32
+mismatches include 27 with different stdout and five with additional runtime
+stderr; five also returned a different status. No output normalization was
+applied. The stderr-only differences contain real Fish errors, not merely
+different script filenames. Monk's successful results have no errors or
+warnings; informational notes are retained in the raw reports.
 
-Bash input:
+| Fixture group | Selected | Monk matches / rejected | Babelfish matches / mismatches / failed |
+| --- | ---: | ---: | ---: |
+| Corpus | 2 | 2 / 0 | 2 / 0 / 0 |
+| Benchmark | 5 | 3 / 2 | 1 / 0 / 4 |
+| Golden | 9 | 4 / 5 | 7 / 1 / 1 |
+| Integration | 51 | 16 / 35 | 9 / 24 / 18 |
+| Real-world | 14 | 1 / 13 | 1 / 3 / 10 |
+| Semantic regressions and controls | 14 | 12 / 2 | 6 / 4 / 4 |
 
-```bash
-#!/usr/bin/env bash
-name=${NAME:-world}
-echo "hi $name"
-if [[ $name == w* ]]; then
-  echo "starts with w"
-fi
-```
+The original eleven counterexamples now give Monk nine matches and two explicit
+rejections (`array-mixed`, `eval-bash-syntax`). Babelfish gives three matches,
+four mismatches and four translation failures on those same eleven. Both tools
+match the three additional positive controls.
 
-Monk output (current CLI):
+Babelfish's semantic mismatches include dynamic local binding, nondefault IFS,
+embedded quoted `$@`, and `eval`. Across the wider corpus, option handling,
+subshell state, delimiter reads and parameter expansion account for many of
+its differences. Per-fixture classifications are in the
+[machine-readable evidence](evidence/bakeoff-2026-09-09.json).
 
-```fish
-set --global name (if set '-q' 'NAME'
-                      and test '-n' (string join ' ' $NAME ; or printf '')
-                     if test (count $NAME) '-gt' '0'
-                       printf '%s\n' $NAME
-                     end
-                   else
-                     if test (count 'world') '-gt' '0'
-                       printf '%s\n' 'world'
-                     end
-                   end)
-echo 'hi '(string join ' ' $name ; or printf '')
-if string 'match' '-q' '--' (string join ' ' w* ; or printf '') (string join ' ' $name ; or printf '')
-  echo 'starts with w'
-else
-  begin
-    true
-  end
-end
-```
+Babelfish matches these ten fixtures that Monk rejects: `assignments`,
+`case-pattern-expansion-glob`, `pipeline`, `read-prompt`, `cd-tmp`, `pushd-popd`,
+`pwd-cd`, `time-prefix`, `trap-exit-expansion` and `trap-exit`. These observations
+do not establish support for every interaction of those constructs. Monk's
+exclusions remain described in the audit; this comparison changed no admission
+policy or translator production code.
 
-Babelfish output:
+## Performance
 
-```fish
-#!/usr/bin/env bash
-set name (test -n "$NAME" && echo "$NAME" || echo 'world')
-echo 'hi '"$name"
-if test "$name" = 'w*'
-  echo 'starts with w'
-end
-```
+Hyperfine 1.20.0 ran ten measurements after one warmup, with Shake `--jobs 1`
+to keep benchmark suites from competing with one another. Values below are
+batch means ± sample standard deviations. No CPU affinity or exclusive host
+reservation was used. The April macOS timings are not a comparable baseline.
 
-Notes:
+| Translation workload | Monk | Babelfish |
+| --- | ---: | ---: |
+| All 95 fixtures, including failures | 1,174 ± 29 ms | 158.1 ± 1.8 ms |
+| All five benchmark fixtures, including failures | 244 ± 21 ms | 23.60 ± 0.60 ms |
+| Shared 16-fixture matching subset | 21.23 ± 0.90 ms | 24.62 ± 0.55 ms |
+| Shared benchmark (`small.bash`) | 8.74 ± 0.39 ms | 8.28 ± 0.31 ms |
 
-- Monk expands `${NAME:-world}` using `set -q` plus list-safe handling. It's more verbose, but aims to preserve empty-list behavior and word splitting semantics.
-- Monk lowers `[[ $name == w* ]]` to `string match -q -- 'w*' $name`, which preserves bash-style pattern matching. Babelfish emits `test "$name" = 'w*'`, which is a literal string comparison in fish (no glob matching), so semantics differ for patterns.
-- Babelfish preserves the original shebang and keeps the output compact; Monk emits notes/warnings to stderr for review (not shown above).
+The first two batches return status 1 for **both** translators because the
+worker aggregates translation failures; Hyperfine deliberately records those
+runs with `--ignore-failure`. They measure processing the corpus, not throughput
+of successful equivalent translations. The shared batches return status 0 in
+every sample. The worker calls Monk's library in process and launches Babelfish
+once per input, so these are harness throughput measurements, not equivalent
+per-file CLI startup or isolated compiler timings.
 
-## Bake-off protocol
+| Generated-script runtime workload | Bash | Monk-generated Fish | Babelfish-generated Fish |
+| --- | ---: | ---: | ---: |
+| Shared 16 matching fixtures, three-way run | 53.5 ± 3.0 ms | 206.0 ± 3.8 ms | 60.0 ± 3.6 ms |
+| All 38 Monk-admitted fixtures | 47.7 ± 1.0 ms | 4,805.5 ± 47.2 ms | — |
+| Three Monk-admitted benchmark fixtures | 12.90 ± 0.23 ms | 3,806.6 ± 50.8 ms | — |
 
-### Inputs
+Each row is a separate measurement; compare shells within a row. The runtime
+worker includes process startup and accepts a fixture's intentional nonzero
+status. Direct Bash comparisons independently verified all admitted entries.
+The three-way shared run includes both translators; the existing full runtime
+benchmark compares only Bash with Monk-generated Fish.
 
-Use a mix of synthetic and real-world inputs:
+Monk's runtime overhead is substantial, especially on the arithmetic-heavy
+benchmark fixtures. On the shared subset, Monk emits 69,116 bytes versus
+Babelfish's 765 bytes. Contract guards, generated control/storage code and
+bounded helpers contribute to Monk's cost, but this run does not isolate their
+individual contributions. Output size alone says nothing about correctness.
+The raw JSON's legacy helper-byte/invocation heuristic does not recognize the
+new planner's helpers; its zero estimates are not measurements and are unused
+here.
 
-- **Monk corpus**: `test/fixtures/corpus/*.bash`
-- **Monk benchmarks**: `benchmark/fixtures/*.bash`
-- **Integration fixtures**: `test/fixtures/integration/*.bash`
-- **Golden fixtures**: `test/fixtures/golden/*.bash`
-- **Real-world fixtures**: `test/fixtures/realworld/*.bash`
-- **Your scripts**: add representative Bash scripts under `benchmark/fixtures/` or a separate folder.
+## Reproduction and evidence
 
-### Baseline commands
+Environment: Linux x86-64, GHC 9.14.1, Cabal 3.16.1.0, Bash 5.3.9, Fish 4.6.0,
+Python 3.14.7, Babelfish 1.2.1 and
+[Hyperfine 1.20.0](https://github.com/sharkdp/hyperfine/releases/tag/v1.20.0).
+Shell runs use C locale and UTF-8 source. The direct comparator clears Bash
+startup injection/options and uses a separate Fish configuration directory.
+It preserves fixture argv and raw stdin, runs from the repository root, and
+captures bytes without decoding or normalization. It runs trusted fixtures
+sequentially; it is not a filesystem sandbox or a filesystem-effects audit.
 
-Translate each script with both tools:
-
-```bash
-# Monk (via cabal)
-cabal run monk -- path/to/script.bash > /tmp/monk.fish
-
-# Babelfish (reads stdin)
-babelfish < path/to/script.bash > /tmp/babelfish.fish
-```
-
-If you want recursive source translation in Monk:
-
-```bash
-cabal run monk -- path/to/script.bash --recursive --sources inline > /tmp/monk.fish
-```
-
-### Normalization (for diffing)
-
-Strip trailing whitespace and normalize line endings before diffing:
-
-```bash
-normalize() {
-  sed -e 's/[[:space:]]\\+$//' "$1" | sed -e 's/\\r$//'
-}
-normalize /tmp/monk.fish > /tmp/monk.norm
-normalize /tmp/babelfish.fish > /tmp/babelfish.norm
-
-diff -u /tmp/babelfish.norm /tmp/monk.norm
-```
-
-### Behavioral checks
-
-For each script, run both outputs in fish and compare stdout, stderr, and exit code.
-
-```bash
-fish /tmp/monk.fish > /tmp/monk.out 2>/tmp/monk.err; echo $? > /tmp/monk.rc
-fish /tmp/babelfish.fish > /tmp/babelfish.out 2>/tmp/babelfish.err; echo $? > /tmp/babelfish.rc
-
-diff -u /tmp/babelfish.out /tmp/monk.out
-```
-
-### Recording results
-
-Capture the following for each script:
-
-- **Translation errors** (if any)
-- **Warnings/notes** (Monk)
-- **Diff summary** (line count, key differences)
-- **Runtime deltas** (stdout, stderr, exit code)
-- **Tooling context** (monk git SHA, babelfish version if available)
-
-A simple result template:
-
-```
-Script: <path>
-Monk warnings: <count> (<high/medium/low>)
-Babelfish notes: <count if any>
-Output diff: <none | summary>
-Runtime diff: <none | summary>
-Notes: <interesting observations>
-```
-
-## Bake-off helper (optional)
-
-Use the dedicated bake-off executable:
+Build the current tree, put the pinned Bash/Fish on `PATH`, and run:
 
 ```bash
-cabal run monk-bakeoff -- --out-dir /tmp/monk-babelfish
+cabal build exe:monk-bakeoff -fdevelopment
+BAKEOFF_BIN=$(cabal list-bin exe:monk-bakeoff)
+"$BAKEOFF_BIN" --group all --file-list scripts/bakeoff-semantic.txt \
+  --jobs 1 --babelfish-version 1.2.1 --out-dir artifacts/bakeoff-full
+python3 scripts/compare-bakeoff-bash.py artifacts/bakeoff-full
+"$BAKEOFF_BIN" --compatible --jobs 1 --babelfish-version 1.2.1 \
+  --out-dir artifacts/bakeoff-compatible
+python3 scripts/compare-bakeoff-bash.py artifacts/bakeoff-compatible
 ```
 
-The bake-off code lives under `scripts/` and builds as a separate Cabal target so Shake/Aeson/process tooling does not affect the main `monk` library or executable.
+Babelfish and Fish are required. Hyperfine is optional for the runner, but is
+required to reproduce the timing tables; missing timing tools are reported.
+Use `--babelfish`, `--fish` and `--hyperfine` for explicit paths. Pass matching
+`--bash` and `--fish` paths to the companion. Use a fresh output directory for
+each run. The checked-in `--compatible` list now contains the 16 observed
+matches in both tools; rerun the Bash comparison before relying on membership.
 
-Tool prerequisites:
+The runner now records and uses standalone execution. Legacy `.mode` sourcing
+sidecars cannot change the translator's entry contract. Sourceable behavior
+requires a caller contract and remains covered by the dedicated sourceable
+suite. Executing a source-child fixture standalone does not test source calls.
 
-- `babelfish` and `fish` are required for all bake-off runs
-- `hyperfine` is optional and only needed when benchmark runs are enabled
-- `--babelfish`, `--fish`, and `--hyperfine` accept explicit tool paths
-- the runner performs tool preflight before Shake starts and reports actionable path/install guidance if a required tool is missing
-
-The runner writes:
-
-- `meta.json`
-- `report.json`
-- `summary.md`
-- per-fixture artifact directories under `fixtures/`
-
-Useful selectors and options:
+The runner's `report.json` retains translation and execution records;
+`summary.md` retains its historical pairwise Monk/Babelfish comparison. Its
+runtime `succeeded` means the process completed, including intentional nonzero
+exits. The companion's `bash-comparison/report.json` supplies the independent
+Bash classifications and raw byte evidence. Its four regression checks cover
+two translators agreeing on a wrong answer, nonzero status, unavailable comparisons,
+empty/spaced arguments, binary streams and timeout cleanup:
 
 ```bash
-cabal run monk-bakeoff -- --compatible --out-dir /tmp/monk-babelfish-compatible
-cabal run monk-bakeoff -- --group integration --group realworld --no-benchmark
-cabal run monk-bakeoff -- --file test/fixtures/realworld/version-compare.bash
-cabal run monk-bakeoff -- --babelfish-version 1.2.1
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts \
+  -p test_compare_bakeoff_bash.py
 ```
 
-The runner normalizes runtime stderr by stripping the output directory and tool-specific `.monk/.babelfish` suffixes to avoid path-only diffs.
-It respects fixture sidecar files: `<name>.args`, `<name>.stdin`, `<name>.mode`, `<name>.platforms`, `<name>.prereqs`, and `<name>.recursive`.
-If `hyperfine` is installed, the runner records translator timing plus original-Bash-versus-Monk-generated-Fish runtime timing. Runtime workers replay each fixture's arguments, stdin, and run mode, and `summary.md` reports medians, means, and standard deviations. If Hyperfine is missing, the runner emits an explicit preflight note and skips benchmark targets. Configure benchmark runs with:
+The [evidence snapshot](evidence/bakeoff-2026-09-09.json) records all 95 fixture
+classifications, input/generated hashes, all Hyperfine samples, tool hashes,
+source manifest and provenance. This is the uncommitted
+`codex/principled-translator` tree based on
+`1a2c3826d5265b9be997c5365cd8c138f6cf015f`, not a published version. Raw generated
+scripts, streams, plans and reports are retained locally under
+`.superpowers/sdd/2026-09-09-principled-translator/bakeoff-full/` and
+`bakeoff-compatible/`. The latter also retains the alternate Babelfish runtime
+plan, `three-way-command.json` and `hyperfine-runtime-three-way.json` for the
+three-way measurement. These local artifacts are not included in the package. After measurement,
+`extra-doc-files` was extended to package the evidence JSON; the measured
+`monk.cabal` is retained beside the artifacts as `bakeoff-build-monk.cabal`.
+No compiler options or dependencies changed.
+
+This report supersedes the pre-redesign 2026-04-16 comparison. Its former
+58/58 Monk translation count and broad feature claims do not describe current
+admission. Release verification remains a separate
+[dated evidence record](design/translator-verification.md).
+
+## Native runtime follow-up (2026-09-10)
+
+The [accepted native-runtime evidence](evidence/bakeoff-native-2026-09-10.json)
+preserves the original 95 fixtures and common 16. Three frozen, baseline-admitted
+arithmetic programs form a separate performance cohort and do not increase the
+historic denominator. Results use standalone entry points and compare raw
+stdout, stderr and exit status independently with Bash 5.3.9 on Fish 4.6.0.
+
+| Translator / contract | Admitted | Matched Bash | Admitted mismatches |
+|---|---:|---:|---:|
+| Frozen Python-runtime Monk baseline | 38/95 | 38/95 | 0 |
+| Native Monk, default | 45/95 | 45/95 | 0 |
+| Native Monk, stable directories | 48/95 | 48/95 | 0 |
+| Babelfish 1.2.1, fresh default comparison | 58/95 | 26/95 | 32 |
+| Babelfish 1.2.1, fresh stable comparison | 58/95 | 26/95 | 32 |
+
+All 38 baseline exact cases remain matched under both Monk contracts. The seven
+required common-syntax gains and three additional stable-directory gains are
+present. Babelfish has no directory-contract selector; its rows are fresh
+independent reruns in the two comparison scopes with empty CDPATH. Its binary
+SHA256 and Homebrew version receipt are recorded; `--version` is unsupported.
+
+After build jobs became idle, each baseline/candidate fixture received three
+warmups and twenty serial samples, alternating baseline/candidate order. Group
+values are medians of the per-sample summed fixture times.
+
+| Cohort | Baseline median | Native median | Speedup |
+|---|---:|---:|---:|
+| Original common 16 | 168.003 ms | 63.130 ms | 2.66× |
+| Additional arithmetic 3 | 989.049 ms | 151.680 ms | 6.52× |
+
+Both performance gates pass: arithmetic exceeds 2× speedup and the common 16
+have no regression. A separate serial Babelfish follow-up, also using three
+warmups and twenty samples, measures 24.523 ms for the common-16 aggregate.
+Babelfish is faster on that shared subset; it is a separate measurement pass,
+not part of the alternating acceptance comparison.
+
+Initial observations before the warmups are retained separately for every
+fixture. Their group totals are 168.738/63.752 ms for common 16 and
+991.231/153.032 ms for arithmetic 3 (baseline/native). These follow preliminary
+coverage executions and do not represent cold filesystem caches.
+
+Large-exact installed Fish falls from 1,641,887 to 170,987 bytes, **10.414%** of
+baseline, passing the <=25% gate. Native binary bytes are separate: the helper
+is 1,980,416 bytes. A genuinely published managed large-exact bundle occupies
+2,151,912 logical file bytes: 171,172 Fish bytes including its loader, 1,980,416
+native bytes, and 324 ownership/manifest bytes. This excludes filesystem block
+allocation; native members use mode 0700. The managed entry matches Bash.
+
+Actual `strace` observations over common 16 plus arithmetic 3, collected
+separately from timings through an approved tracing escalation, record:
+
+| Observed events | Baseline | Native candidate |
+|---|---:|---:|
+| Child process creations, excluding threads and entry shells | 177 | 128 |
+| Successful exec events, including 19 entry Fish shells | 196 | 147 |
+| Python execs | 176 | 0 |
+| Native helper execs, including ABI validation | 0 | 127 |
+
+Both also execute one `sh`. All traced streams and statuses match untraced
+observations. These are measured process events. The separately reported
+`translationStatistics` counts structural helper definitions/references and
+native operation call sites; those static sites are not execution counts.
+Owned child programs remain structural subtrees until literal rendering,
+including when nested definitions are copied. Simple literal output has zero
+helper definitions, helper references and native call sites. The old regex
+helper-byte estimate is unavailable.
+
+`monk-bakeoff --runtime FILE --directory-contract stable` carries provider,
+contract and cwd through serialized workers. The accepted compiled-source
+manifest is `7bb370a18da2c3f90a3abe190b423cd4cb9ee35e7ad3f36bb03b5cde53c70043`;
+collector hashes are recorded separately. Native ABI 1 targets
+`bash53-i64-linux64`; linked dependencies and binary digests are in the snapshot.
+The native image SHA256 is
+`71b8a1dbe73e5f8fe006a9411bbde46e90c2cbfdb642af01c574485a04b81e0c`.
+
+Raw generated files, stream bytes, all samples, static reports, traces and
+managed bundle are retained under
+`.superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/`.
+The collectors are `scripts/native-runtime-evidence.py`,
+`scripts/babelfish-runtime-evidence.py` and `scripts/trace-runtime-evidence.py`.
+
+### Replaying the frozen experiment
+
+Run from the repository root with the retained local artifacts restored. These
+commands require `monk-baseline`, the `candidate-accepted` binaries, the pinned
+Bash/Fish bootstrap, `evidence/frozen-arithmetic.json`, and its three referenced
+`arithmetic-*.bash` inputs at their recorded paths. They also require the
+unchanged original fixture files and `docs/evidence/bakeoff-2026-09-09.json`.
+The local baseline binary, baseline source archive and experiment inputs are
+**not packaged binaries or fixtures supplied by a normal source install**.
+Restore them from the retained experiment to reproduce the recorded identities.
+A rebuild of `baseline-source.tar.gz` is a newly identified baseline; never
+substitute the current translator for the baseline.
+
+Check the executable and collector hashes against the evidence snapshot before
+running. The exact collector copies and hashes are retained in
+`evidence/frozen-collectors/`. The commands below use the corresponding scripts
+in this checkout. Use the recorded repository cwd for an exact replay; a
+relocated experiment needs its own provenance. The collectors check input and
+baseline hashes and refuse to overwrite their output directories.
 
 ```bash
-cabal run monk-bakeoff -- --no-benchmark
-cabal run monk-bakeoff -- --hyperfine-runs 10 --hyperfine-warmup 1
+task_root=.superpowers/sdd/2026-09-10-native-runtime-coverage
+runtime_tools=.superpowers/sdd/2026-09-09-principled-translator/runtime-final-bootstrap/bin
+baseline_monk="$task_root/monk-baseline"
+candidate_monk="$task_root/candidate-accepted/monk"
+candidate_runtime="$task_root/candidate-accepted/monk-runtime"
+babelfish_binary=/home/linuxbrew/.linuxbrew/bin/babelfish
+candidate_fingerprint=7bb370a18da2c3f90a3abe190b423cd4cb9ee35e7ad3f36bb03b5cde53c70043
+
+# A fresh directory preserves every previous measurement.
+replay_dir=$(mktemp -d "$task_root/evidence/replay-XXXXXXXX")
+cp "$task_root/evidence/frozen-arithmetic.json" "$replay_dir/"
+
+# Freeze baseline outputs and the original 95 plus three extra arithmetic inputs.
+python3 scripts/native-runtime-evidence.py freeze \
+  --out "$replay_dir" --baseline "$baseline_monk" \
+  --bash "$runtime_tools/bash" --fish "$runtime_tools/fish"
+
+# Wait until build jobs are idle. This collects both coverage contracts,
+# separate initial observations, three warmups and twenty alternating samples.
+python3 scripts/native-runtime-evidence.py measure \
+  --out "$replay_dir" --baseline "$baseline_monk" \
+  --candidate "$candidate_monk" --runtime "$candidate_runtime" \
+  --bash "$runtime_tools/bash" --fish "$runtime_tools/fish" \
+  --source-fingerprint "$candidate_fingerprint"
+
+# Run only after the preceding command finishes: fresh Babelfish comparisons
+# in both scopes, with its common-16 timing collected in a separate serial pass.
+python3 scripts/babelfish-runtime-evidence.py \
+  --out "$replay_dir" --babelfish "$babelfish_binary" \
+  --bash "$runtime_tools/bash" --fish "$runtime_tools/fish" \
+  --time-common16 --run-name babelfish-final
+
+# Untimed tracing follows the performance runs; these are observed syscalls.
+python3 scripts/trace-runtime-evidence.py \
+  --out "$replay_dir" --fish "$runtime_tools/fish" --variant baseline
+python3 scripts/trace-runtime-evidence.py \
+  --out "$replay_dir" --fish "$runtime_tools/fish" --variant candidate \
+  --candidate-dir "$replay_dir/measurement"
 ```
 
-Translation timing is written to `hyperfine-all.md/json` and `hyperfine-benchmark.md/json`. Runtime timing is written to `hyperfine-runtime-all.md/json` and `hyperfine-runtime-benchmark.md/json` when the corresponding suite has fixtures.
+The fingerprint above describes the accepted compiled inputs. Use a newly
+verified fingerprint for any changed candidate. Babelfish's recorded identity
+comes from its executable digest and Homebrew receipt, not an unsupported
+`--version` flag. Tracing requires permission to trace child processes: the
+recorded sandbox attempt was denied, and the successful run used an approved
+tool escalation. A denied trace remains unavailable evidence; static call-site
+counts cannot replace it.
 
-## Bake-off results (2026-04-16)
+The replay writes `baseline-cohort.json`, `measurement/report.json`,
+`babelfish-final/report.json` and `process-traces-{baseline,candidate}/report.json`
+under the new directory, along with generated files and raw process traces.
+Runtime timing assertions independently check stdout, stderr and exit status on
+every warmup and measured run. To repeat the experiment, start another fresh
+replay directory rather than overwriting one of these reports.
 
-This section is a dated snapshot from the run below; fixture counts may differ from the current test inventory.
-
-Environment:
-
-- Monk: `monk-bakeoff` built from the current local tree
-- Babelfish: 1.2.1
-- Fish: 4.6.0
-- Hyperfine: 1.20.0 (runs=10, warmup=1)
-- Host: `darwin/aarch64`
-- Report output: `/private/tmp/monk-bakeoff-architecture-full-final`
-
-Summary (corpus + benchmarks + integration + golden + real-world fixtures):
-
-- Total fixtures: 62
-- Skipped by metadata: 4 (`test/fixtures/integration/procsub-output.bash`, `procsub-output-pipeline.bash`, and `procsub-output-variable.bash` are Linux-only; `test/fixtures/realworld/taoc.bash` requires `tac`)
-- Monk translation success: 58/58 non-skipped fixtures
-- Babelfish translation success: 35/58 non-skipped fixtures
-- Runtime diffs where both translated and ran: 13/35
-
-Coverage breakdown by fixture group:
-
-- Benchmark: Monk 3/3, Babelfish 1/3
-- Corpus: Monk 2/2, Babelfish 2/2
-- Golden: Monk 9/9, Babelfish 8/9
-- Integration: Monk 31/31 non-skipped, Babelfish 20/31 non-skipped
-- Real-world: Monk 13/13 non-skipped, Babelfish 4/13 non-skipped
-
-Babelfish translation failures (23):
-
-- `benchmark/fixtures/large.bash`, `benchmark/fixtures/medium.bash`, `test/fixtures/realworld/pyramid-left.bash`, `test/fixtures/realworld/pyramid-right.bash`, `test/fixtures/realworld/echo-args.bash`, and `test/fixtures/realworld/argparse-mini.bash`: C-style loops or postfix arithmetic remain a recurring failure mode.
-- `test/fixtures/integration/background-fail-wait.bash`, `background-jobs.bash`, `background-local-scope.bash`, `background-pipefail.bash`, and `background-success-wait.bash`: background jobs and translated `wait` remain outside Babelfish's working surface here.
-- `test/fixtures/integration/param-expansion-args.bash`, `param-expansion-case.bash`, and `param-expansion-redirection.bash`: side-effecting parameter expansion still fails.
-- `test/fixtures/integration/read-flags.bash`, `read-delimiter-null-array.bash`, and `test/fixtures/golden/extglob-basic.bash`: `read` flag handling, the newer null-delimited read surface, and extglob remain unsupported in practice on this corpus.
-- `test/fixtures/realworld/a2l.bash`, `coat.bash`, `envfile-preview.bash`, `path-filter.bash`, and `neofetch.bash`: real-world readonly/parameter-expansion-heavy scripts still fail to translate.
-- `test/fixtures/integration/arith-short-circuit.bash`: still fails translation outright.
-
-Runtime diffs where both translated:
-
-- `errexit-basic`, `errexit-andor`, and `errexit-conditionals`
-- `pipefail-basic` and `pipefail-toggle`
-- `read-delimiter`, `read-delimiter-flags`, `read-delimiter-ifs`, and `read-delimiter-null-vars`
-- `source-recursive`
-- `neofetch-mini`
-- `semver-normalize`
-- `version-compare`
-
-Notes:
-
-- These are Monk-vs-Babelfish diffs, not automatically Monk-vs-Bash failures.
-- Representative spot checks against Bash still favor Monk on the previously investigated fixtures `errexit-basic`, `pipefail-basic`, `read-delimiter`, `source-recursive`, `version-compare`, and `neofetch-mini`.
-- The new full run adds `semver-normalize` to the Monk-vs-Babelfish runtime-diff set; that fixture should get a direct Bash spot check before drawing stronger parity conclusions from the bake-off alone.
-- In those spot checks, Babelfish typically emitted invalid Fish (`set -e`, `set -o pipefail`, `read -rd:`, `test ... ==`) or failed to preserve behavior, while Monk matched the Bash fixture.
-- Monk still needs caveats of its own: the current audit still treats `set -e` / `pipefail` as best-effort overall, with remaining compound-list edge cases outside the focused fixtures.
-- Monk emitted 57 warnings and 85 notes across the full run, and `test/fixtures/realworld/neofetch.bash` alone still accounts for 31 of those warnings. Outside full `neofetch`, Monk emitted 26 warnings across the whole corpus.
-
-Performance (hyperfine translation batches):
-
-- All fixtures: Monk `1.330 ± 0.011 s`, Babelfish `0.288 ± 0.011 s`
-- Benchmark fixtures: Monk `0.032 ± 0.002 s`, Babelfish `0.041 ± 0.004 s`
-- Throughput still favors Babelfish on the full corpus, but coverage matters more than raw speed because Babelfish fails translation on much of the difficult surface.
-
-## Where Monk is currently stronger
-
-- **Broader semantic coverage** on the current corpus, especially on integration and real-world fixtures where Babelfish often fails to translate at all
-- **Diagnostics** via stable codes, phases, severity, review risk, declared runtime requirements, and `--strict`, which makes approximation visible instead of silent
-- **Focused runtime evidence** for side-effecting expansions, translated background jobs / `wait`, generalized covered `read -d`, and recursive literal `source`
-- **Stronger parity on the current mismatches**: the latest spot checks against Bash favored Monk on the major runtime-diff fixtures
-- **Better testing depth** through property, golden, integration, and bake-off coverage tied back to the translator audit
-
-## Where Monk is currently weaker / tradeoffs
-
-- **Performance**: translation throughput is much slower than babelfish in the bake-off.
-- **Verbosity**: output is more scaffolding-heavy (`string join`, `begin` blocks) to preserve list and expansion semantics.
-- **Errexit/pipefail emulation**: still best-effort overall, especially around bash exceptions, compound lists, and subtle command-substitution behavior.
-- **Large warning-heavy scripts**: translation success does not automatically mean drop-in parity; full `neofetch` remains the clearest example.
-- **Semantic gaps remain**: word splitting, subshell isolation, non-literal `source`, option-heavy `trap`, and fish-specific behaviors still require manual review.
-
-## Where babelfish is stronger
-
-- **Simplicity**: quick to run on small scripts with low setup cost
-- **Readable output**: often shorter and easier to edit by hand than Monk's semantic scaffolding
-- **Throughput on the subset it handles**: still materially faster on the full-corpus translation benchmark
-
-## Open questions
-
-- How much further should Monk push `set -e` / `pipefail` fidelity beyond the current focused fixtures?
-- Should Monk keep reducing the residual warning-driven `read` fallback surface, or is the current helper-backed covered slice enough?
-- Are non-literal `source`, option-heavy `trap`, and broader `>(...)` coverage worth the extra implementation complexity?
-- Are there external corpora where Babelfish still preserves semantics better than Monk, or is its remaining value mostly simplicity and speed?
-
----
-
-If you run the bake-off, please capture results in this document or link a separate report.
+Two earlier candidate observations are explicitly superseded and excluded from
+these figures. Documentation/evidence additions follow the compiled-source
+freeze; no commit or publication is implied. Broader release validation remains
+in the [verification record](design/native-runtime-verification.md).

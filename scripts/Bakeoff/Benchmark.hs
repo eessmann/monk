@@ -24,7 +24,9 @@ import System.Process (proc)
 makeBenchmarkPlan :: BakeoffConfig -> [(FixtureSpec, FixtureArtifacts, TranslationReport)] -> ResolvedTools -> BenchmarkPlan
 makeBenchmarkPlan cfg fixtures tools =
   MkBenchmarkPlan
-    { benchmarkAllFixtures = map (specPath . first3) available,
+    { benchmarkCwd = bakeoffCwd cfg,
+      benchmarkTranslationSettings = bakeoffTranslationSettings cfg,
+      benchmarkAllFixtures = map (specPath . first3) available,
       benchmarkFixtures = map (specPath . first3) benchmarkOnly,
       benchmarkAllRuntime = map runtimeEntry runtimeAvailable,
       benchmarkRuntimeFixtures = map runtimeEntry runtimeBenchmarkOnly,

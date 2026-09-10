@@ -31,6 +31,8 @@ prettyFishCommandWith prettyStmt = \case
   Command txt args ->
     let argsDoc = hsep (map prettyExprOrRedirect args)
      in if null args then pretty txt else pretty txt <+> argsDoc
+  CommandExpr executable args ->
+    hsep (prettyExpr executable : map prettyExprOrRedirect args)
   Set flags var expr ->
     let parts = ["set"] ++ map prettySetFlag flags ++ [pretty var]
      in case expr of
@@ -150,4 +152,5 @@ prettyFishCommandWith prettyStmt = \case
       FuncWraps cmd -> "--wraps" <+> pretty cmd
       FuncHelp -> "--help"
       FuncInheritVariable -> "--inherit-variable"
+      FuncCaptureVariable var -> "--inherit-variable" <+> escapeFishString var
       FuncUnknownFlag txt -> pretty txt

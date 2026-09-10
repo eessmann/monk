@@ -105,7 +105,7 @@ unitPrettyTests =
             conj = jobConjunction Nothing job1 [orElse job2]
             fishScript = script [stmt (job conj)]
             actual = renderDsl fishScript
-            expected = "false \nor echo 'ok'"
+            expected = "false\nor echo 'ok'"
         actual @?= expected,
       H.testCase "Begin block" $ do
         let body = NE.fromList [stmt (command "echo" [arg (str "A")])]

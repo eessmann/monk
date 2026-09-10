@@ -1,165 +1,96 @@
-{-# LANGUAGE DerivingStrategies #-}
-{-# LANGUAGE OverloadedStrings #-}
-
-module Property.Translation
-  ( propertyTranslationTests,
-  )
-where
+module Property.Translation (propertyTranslationTests) where
 
 import Data.Text qualified as T
+import Monk.Translation
+import ShellSupport
 import Test.QuickCheck.Monadic qualified as QCM
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck as QC
-import TestSupport
 
+-- These properties exercise semantic admission and execution. Private renderer
+-- spellings and unsupported legacy lowering are not translation contracts.
 propertyTranslationTests :: TestTree
 propertyTranslationTests =
   testGroup
     "Translation properties"
-    [ QC.testProperty "Translate array index uses 1-based indexing" $
-        QC.forAll (QC.chooseInt (0, 5)) $ \n ->
-          QCM.monadicIO $ do
-            let script = "echo ${arr[" <> T.pack (show n) <> "]}"
-                expected = "$arr[" <> T.pack (show (n + 1)) <> "]"
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf expected out),
-      QC.testProperty "Translate array assignment uses 1-based indexing" $
-        QC.forAll (QC.chooseInt (0, 5)) $ \n ->
-          QCM.monadicIO $ do
-            let script = "arr[" <> T.pack (show n) <> "]=foo"
-                expected = "arr[" <> T.pack (show (n + 1)) <> "]"
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf expected out),
-      QC.testProperty "Substring expansion uses 1-based start" $
-        QC.forAll (QC.chooseInt (0, 5)) $ \n ->
-          QCM.monadicIO $ do
-            let script = "echo ${var:" <> T.pack (show n) <> ":2}"
-                expected = "'--start' " <> T.pack (show (n + 1))
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf expected out),
-      QC.testProperty "Case modification uses string upper/lower" $
-        QC.forAll QC.arbitrary $ \upper ->
-          QCM.monadicIO $ do
-            let script = if upper then "echo ${var^^}" else "echo ${var,,}"
-                expected = if upper then "string upper" else "string lower"
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf expected out),
-      QC.testProperty "Double bracket equality uses string match -q" $
-        QC.forAll genSimpleWord $ \pat ->
-          QCM.monadicIO $ do
-            let script = "if [[ $x == " <> pat <> " ]]; then echo ok; fi"
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf "string 'match' '-q' '--'" out),
-      QC.testProperty "Arithmetic command emits math with test" $
-        QC.forAll (QC.chooseInt (0, 5)) $ \n ->
-          QCM.monadicIO $ do
-            let script = "((" <> T.pack (show n) <> "))"
-            out <- QCM.run (translateScript script)
-            QCM.assert (T.isInfixOf "math" out && T.isInfixOf "test" out && T.isInfixOf "-ne" out),
-      QC.testProperty "Double bracket boolean trees preserve match/not counts" $
-        QC.forAll genCond $ \cond ->
-          QCM.monadicIO $ do
-            let script = "if [[ " <> renderCond cond <> " ]]; then echo ok; fi"
-                (eqCount, regexCount, notCount) = condCounts cond
-            outMaybe <- QCM.run (translateScriptMaybe script)
-            case outMaybe of
-              Nothing -> QCM.pre False
-              Just out -> do
-                let matchQ = T.count "string 'match' '-q' '--'" out
-                    matchQR = T.count "string 'match' '-qr' '--'" out
-                    nots = T.count "not " out
-                QCM.assert (matchQ == eqCount && matchQR == regexCount && nots == notCount)
+    [ rejectedProperty "array index requires an array storage plan" $ do
+        index <- QC.chooseInt (0, 20)
+        pure ("printf '%s\\n' \"${arr[" <> show index <> "]}\""),
+      rejectedProperty "array assignment requires an array storage plan" $ do
+        index <- QC.chooseInt (0, 20)
+        pure ("arr[" <> show index <> "]=foo"),
+      rejectedProperty "substring modifier remains an explicit exclusion" $ do
+        start <- QC.chooseInt (0, 20)
+        pure ("x=abcdef; printf '%s\\n' \"${x:" <> show start <> ":2}\""),
+      rejectedProperty "case modifiers remain an explicit exclusion" $ do
+        modifier <- QC.elements ["^^", ",,", "^", ","]
+        pure ("x=AbCd; printf '%s\\n' \"${x" <> modifier <> "}\""),
+      QC.testProperty "compound double-bracket syntax preserves both branches" $
+        QC.forAll (QC.elements ["&&", "||"]) $ \operator ->
+          exactProperty ("if [[ x = x " <> operator <> " y = z ]]; then printf yes; else printf no; fi"),
+      rejectedProperty "regular expression condition remains explicitly excluded" $ do
+        patternText <- QC.elements ["^foo", "bar[0-9]+", "^baz$", "qux.*"]
+        pure ("[[ foo =~ " <> patternText <> " ]]"),
+      QC.testProperty "admitted pattern equality preserves literal and wildcard meaning" $
+        QC.forAllShrink genPatternCase shrinkPatternCase $ \(subject, patternText, quoted) ->
+          exactProperty
+            ( "if [[ "
+                <> quote subject
+                <> " = "
+                <> (if quoted then quote patternText else patternText)
+                <> " ]]; then printf 'yes\\n'; else printf 'no\\n'; fi"
+            ),
+      QC.testProperty "integer command preserves its zero and nonzero status" $
+        QC.forAllShrink (QC.chooseInt (-100, 100)) QC.shrink $ \number ->
+          exactProperty ("((" <> show number <> ")); printf '%s\\n' \"$?\"")
     ]
 
--- Generators for boolean [[ ... ]] shapes ------------------------------------
-
-data Cond
-  = CAtom Atom
-  | CNot Cond
-  | CAnd Cond Cond
-  | COr Cond Cond
-  | CParens Cond
-  deriving stock (Eq, Show)
-
-data Atom
-  = AtomEq Text Text
-  | AtomRegex Text Text
-  deriving stock (Eq, Show)
-
-genVarName :: QC.Gen Text
-genVarName = QC.elements ["x", "y", "z", "foo"]
-
-genSimpleWord :: QC.Gen Text
-genSimpleWord =
-  let chars = ['a' .. 'z'] <> ['A' .. 'Z'] <> ['0' .. '9'] <> ['*', '_']
-   in T.pack <$> QC.listOf1 (QC.elements chars)
-
-genGlobPattern :: QC.Gen Text
-genGlobPattern = do
-  base <- genSimpleWord
-  QC.frequency
-    [ (3, pure base),
-      (1, pure (base <> "*")),
-      (1, pure ("*" <> base))
-    ]
-
-genRegexPattern :: QC.Gen Text
-genRegexPattern =
-  QC.elements
-    [ "^foo",
-      "bar[0-9]+",
-      "^baz$",
-      "qux.*"
-    ]
-
-genAtom :: QC.Gen Atom
-genAtom =
-  QC.frequency
-    [ (3, AtomEq <$> genVarName <*> genGlobPattern),
-      (2, AtomRegex <$> genVarName <*> genRegexPattern)
-    ]
-
-genCond :: QC.Gen Cond
-genCond = QC.sized go
+rejectedProperty :: String -> QC.Gen Text -> TestTree
+rejectedProperty name generator = QC.testProperty name $ QC.forAll generator $ \source -> QC.ioProperty $ do
+  result <- translateBashScript strictConfig "generated-exclusion.bash" source
+  pure $ case result of
+    Left failure -> QC.counterexample (show failure) (any semanticError (failureDiagnostics failure))
+    Right translated -> QC.counterexample ("excluded syntax produced executable output:\n" <> toString (renderTranslation translated)) False
   where
-    go 0 = CAtom <$> genAtom
-    go n =
-      QC.frequency
-        [ (4, CAtom <$> genAtom),
-          (2, CNot <$> go (n - 1)),
-          (2, CParens <$> go (n - 1)),
-          (2, CAnd <$> go (n `div` 2) <*> go (n `div` 2)),
-          (2, COr <$> go (n `div` 2) <*> go (n `div` 2))
-        ]
+    semanticError diagnostic =
+      diagnosticSeverity diagnostic == DiagnosticError
+        && diagnosticPhase diagnostic == PhaseTranslate
+        && isJust (diagnosticRange diagnostic)
+        && T.isPrefixOf "monk.semantic." (diagnosticCodeText (diagnosticCode diagnostic))
 
-renderCond :: Cond -> Text
-renderCond = \case
-  CAtom atom -> renderAtom atom
-  CNot c -> "! " <> wrap c
-  CAnd a b -> wrap a <> " && " <> wrap b
-  COr a b -> wrap a <> " || " <> wrap b
-  CParens c -> "( " <> renderCond c <> " )"
-  where
-    renderAtom = \case
-      AtomEq var pat -> "$" <> var <> " == " <> pat
-      AtomRegex var pat -> "$" <> var <> " =~ " <> pat
+exactProperty :: Text -> QC.Property
+exactProperty source = QCM.monadicIO $ do
+  QCM.monitor (QC.counterexample ("source:\n" <> toString source))
+  result <- QCM.run (translateBashScript strictConfig "generated-core.bash" source)
+  case result of
+    Left failure -> do
+      QCM.monitor (QC.counterexample ("ADMISSION_REGRESSION: " <> show failure))
+      QCM.assert False
+    Right translated -> do
+      readiness <- QCM.run shouldRunIntegration
+      case readiness of
+        Left reason -> QCM.monitor (QC.label ("SKIPPED runtime: " <> reason))
+        Right () -> do
+          environment <- QCM.run prepareEnv
+          bash <- QCM.run (runShellWithMode ShellRunExec ShellBash environment source [] "")
+          fish <- QCM.run (runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) [] "")
+          let observation value = (rrExit value, rrStdout value, rrStderr value)
+          QCM.monitor
+            ( QC.counterexample
+                ( (if null (translationDiagnostics translated) then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH")
+                    <> "\nBash: "
+                    <> show (observation bash)
+                    <> "\nFish: "
+                    <> show (observation fish)
+                )
+            )
+          QCM.assert (observation bash == observation fish)
 
-    wrap c =
-      case c of
-        CAtom {} -> renderCond c
-        CNot {} -> renderCond c
-        CParens {} -> renderCond c
-        _ -> "( " <> renderCond c <> " )"
+genPatternCase :: QC.Gen (Text, Text, Bool)
+genPatternCase = (,,) <$> QC.elements ["", "x", "abc", "a*c", "two words", "é"] <*> QC.elements ["*", "?", "a*", "a?c", "abc", "??"] <*> QC.arbitrary
 
-condCounts :: Cond -> (Int, Int, Int)
-condCounts = \case
-  CAtom (AtomEq _ _) -> (1, 0, 0)
-  CAtom (AtomRegex _ _) -> (0, 1, 0)
-  CNot c ->
-    let (eqC, reC, notC) = condCounts c
-     in (eqC, reC, notC + 1)
-  CAnd a b -> sumCounts (condCounts a) (condCounts b)
-  COr a b -> sumCounts (condCounts a) (condCounts b)
-  CParens c -> condCounts c
-  where
-    sumCounts (a1, b1, c1) (a2, b2, c2) = (a1 + a2, b1 + b2, c1 + c2)
+shrinkPatternCase :: (Text, Text, Bool) -> [(Text, Text, Bool)]
+shrinkPatternCase (subject, patternText, quoted) = [("", patternText, quoted) | not (T.null subject)]
+
+quote :: Text -> Text
+quote value = "'" <> T.replace "'" "'\\''" value <> "'"

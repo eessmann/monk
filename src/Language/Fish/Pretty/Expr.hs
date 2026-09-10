@@ -13,7 +13,9 @@ where
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.AST
+import Language.Fish.DSL.Internal (Script (..))
 import Prettyprinter
+import Prettyprinter.Render.Text (renderStrict)
 
 prettyFishExprWith :: forall ann t. (FishStatement -> Doc ann) -> FishExpr t -> Doc ann
 prettyFishExprWith prettyStmt = go
@@ -21,8 +23,11 @@ prettyFishExprWith prettyStmt = go
     go :: forall t1. FishExpr t1 -> Doc ann
     go = \case
       ExprLiteral txt -> escapeFishString txt
+      ExprEmbeddedScript (MkScript statements) ->
+        escapeFishString (renderStrict (layoutPretty defaultLayoutOptions (vsep (map prettyStmt (filter nonemptyStatement statements)))))
       ExprNumLiteral i -> pretty i
       ExprVariable varRef -> prettyVarRef varRef
+      ExprQuotedVariable varRef -> "\"" <> prettyVarRef varRef <> "\""
       ExprSpecialVar sv -> prettySpecialVar sv
       ExprStringConcat e1 e2 -> go e1 <> go e2
       ExprStringOp op e -> parens (prettyStringOp op <+> go e)
@@ -48,11 +53,17 @@ prettyFishExprWith prettyStmt = go
         parens ("math" <+> "--scale" <+> "0" <+> hsep (map go (NE.toList args)))
       ExprCommandSubst stmts ->
         "(" <> nest 2 (vsep (map prettyStmt (NE.toList stmts))) <> ")"
+      ExprQuotedCommandSubst stmts ->
+        "\"$(" <> nest 2 (vsep (map prettyStmt (NE.toList stmts))) <> ")\""
       ExprListLiteral [] -> mempty
       ExprListLiteral xs -> hsep (map go xs)
       ExprListConcat a b -> go a <+> go b
       ExprGlob g -> prettyGlob g
       ExprProcessSubst stmts -> prettyProcessSubst stmts
+
+    nonemptyStatement EmptyStmt = False
+    nonemptyStatement (StmtList []) = False
+    nonemptyStatement _ = True
 
     prettyVarRef :: forall t1. FishVarRef t1 -> Doc ann
     prettyVarRef = \case
@@ -117,6 +128,10 @@ prettyFishExprWith prettyStmt = go
 -- Escapes relevant characters inside double quotes.
 escapeFishString :: Text -> Doc ann
 escapeFishString s
+  -- Literal line breaks in a Doc acquire layout indentation inside a block.
+  -- Fish's unquoted escaped newline joins adjacent quoted fragments into the
+  -- same word without exposing its contents to layout or expansion.
+  | T.any (== '\n') s = hcat (punctuate "\\n" (map escapeFishString (T.splitOn "\n" s)))
   | T.any (`elem` ("\\\\'" :: String)) s = doubleQuoted s
   | otherwise = singleQuoted s
   where

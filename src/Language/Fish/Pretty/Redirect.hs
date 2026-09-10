@@ -82,4 +82,5 @@ prettySetFlag = \case
   SetPrepend -> "--prepend"
   SetErase -> "--erase"
   SetPath -> "--path"
+  SetUnpath -> "--unpath"
   SetQuery -> "--query"

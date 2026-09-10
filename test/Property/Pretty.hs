@@ -9,6 +9,8 @@ import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Gen
 import Monk.AST
+import ShellSupport
+import Test.QuickCheck.Monadic qualified as QCM
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck qualified as QC
 import TestSupport
@@ -17,12 +19,18 @@ propertyPrettyTests :: TestTree
 propertyPrettyTests =
   testGroup
     "Pretty properties"
-    [ QC.testProperty "Echo literals choose a safe quote style" $
-        QC.forAll genTextNoQuote $ \t ->
-          let out = renderDsl (script [stmt (command "echo" [arg (str t)])])
-           in if "\\" `T.isInfixOf` t
-                then T.isPrefixOf "echo \"" out
-                else T.isInfixOf ("'" <> t <> "'") out,
+    [ QC.testProperty "Literal rendering preserves the value through Fish parsing" $
+        QC.withMaxSuccess 50 $
+          QC.forAllShrink genShellScalar (map T.pack . QC.shrink . T.unpack) $ \value -> QCM.monadicIO $ do
+            readiness <- QCM.run shouldRunIntegration
+            case readiness of
+              Left reason -> QCM.monitor (QC.label ("SKIPPED: " <> reason)) >> QCM.assert True
+              Right () -> do
+                environment <- QCM.run prepareEnv
+                let output = renderDsl (script [stmt (command "printf" [arg (str "%s"), arg (str value)])])
+                result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment output [] "")
+                QCM.monitor (QC.counterexample ("rendered: " <> toString output))
+                QCM.assert (rrStdout result == value && T.null (rrStderr result)),
       QC.testProperty "Pipeline renders N pipes for N continuations" $ \(QC.NonNegative n) ->
         let stages = NE.fromList (replicate (n + 1) (stage (command "true" [])))
             out = renderDsl (script [stmt (pipeline stages)])
@@ -73,3 +81,8 @@ propertyPrettyTests =
 
 renderDsl :: Script -> Text
 renderDsl = renderScript
+
+-- An operating-system argument cannot contain NUL. Include quotes, controls,
+-- whitespace and UTF-8 explicitly while staying inside that scalar grammar.
+genShellScalar :: QC.Gen Text
+genShellScalar = T.pack <$> QC.listOf (QC.elements ([' ' .. '~'] <> "\t\r\néλ😀"))

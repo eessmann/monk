@@ -82,17 +82,18 @@ realWorldTests =
   testGroup "Real-world fixtures (manual fish baseline only)" (map realWorldTest realWorldFixtures)
 
 realWorldTest :: RealWorldFixture -> TestTree
-realWorldTest MkRealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.testCase rfName $ do
+realWorldTest MkRealWorldFixture {rfName, rfBashPath, rfFishPath, rfSkip} = H.testCaseSteps rfName $ \step -> do
   case rfSkip of
-    Just _reason -> pure ()
+    Just reason -> step ("skipped manual baseline: " <> toString reason)
     Nothing -> do
       runnable <- shouldRunIntegration
       case runnable of
-        Left _reason -> pure ()
+        Left reason -> step ("skipped manual baseline: " <> reason)
         Right () -> do
           bashPath <- PathIO.resolveFile' rfBashPath
           prereqs <- loadFixturePrereqs bashPath
           prereqOk <- and <$> mapM (fmap isJust . findExecutable . toString) prereqs
+          unless prereqOk (step ("skipped manual baseline: missing prerequisites from " <> show prereqs))
           when prereqOk $ do
             bashSrc <- TIO.readFile rfBashPath
             fishSrc <- TIO.readFile rfFishPath

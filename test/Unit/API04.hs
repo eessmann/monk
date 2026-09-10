@@ -1,34 +1,9 @@
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
+module Unit.API04 (unitApi04Tests) where
 
-module Unit.API04
-  ( unitApi04Tests,
-  )
-where
-
-import Data.List.NonEmpty qualified as NE
+import Data.Set qualified as Set
 import Data.Text qualified as T
-import Monk.Diagnostics (renderDiagnostic, reviewRisk)
+import Monk.Diagnostics (renderDiagnostic, renderRuntimeRequirement, reviewRisk)
 import Monk.Translation
-  ( Diagnostic (..),
-    DiagnosticCode (..),
-    DiagnosticPhase (..),
-    DiagnosticSeverity (..),
-    RequirementUse (..),
-    ReviewRisk (..),
-    RuntimeProgram (..),
-    RuntimeRequirement (..),
-    TranslationFailure (..),
-    TranslationResult,
-    defaultConfig,
-    parseBashScript,
-    renderTranslation,
-    strictConfig,
-    translateBashScript,
-    translateParseResult,
-    translationDiagnostics,
-    translationRuntimeRequirements,
-  )
 import ShellCheck.AST qualified as Bash
 import ShellCheck.Interface (ParseResult (..))
 import Test.Tasty (TestTree, testGroup)
@@ -37,159 +12,90 @@ import Test.Tasty.HUnit as H
 unitApi04Tests :: TestTree
 unitApi04Tests =
   testGroup
-    "Monk 0.4 API"
+    "Monk translation product API"
     [ H.testCase "diagnostics render stable codes and aggregate review risk" $ do
-        let diagnostic =
-              MkDiagnostic
-                { diagnosticCode = MkDiagnosticCode "monk.read",
-                  diagnosticPhase = PhaseTranslate,
-                  diagnosticSeverity = DiagnosticWarning,
-                  diagnosticRisk = Review,
-                  diagnosticMessage = "read fallback requires review",
-                  diagnosticRange = Nothing
-                }
-        renderDiagnostic diagnostic @?= "warning[monk.read][review]: read fallback requires review"
+        let diagnostic = MkDiagnostic (MkDiagnosticCode "monk.example") PhaseOutput DiagnosticWarning Review "review required" Nothing
+        renderDiagnostic diagnostic @?= "warning[monk.example][review]: review required"
         reviewRisk [diagnostic] @?= Review
         reviewRisk [diagnostic {diagnosticRisk = Unsafe}] @?= Unsafe,
-      H.testCase "exact delimiter read declares its Python runtime" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "read -d : left right"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            translationDiagnostics translation @?= []
-            H.assertBool
-              "missing python3 runtime requirement"
-              (RequiresCommand "python3" `elem` requiredPrograms translation),
+      H.testCase "an exact primitive declares its bounded native runtime" $ do
+        translated <- accepted strictConfig "x=value; echo \"$x\""
+        H.assertBool "missing native operation requirement" (RequiresNativeRuntime 1 Bash53Signed64Fish46 (Set.singleton NativeEcho) `elem` programs translated),
       H.testCase "deduplicated requirements retain every operation and range" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "read -d : left right\nread -d : child rest"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation ->
-            case find ((== RequiresCommand "python3") . requirementProgram) (translationRuntimeRequirements translation) of
-              Nothing -> H.assertFailure "missing python3 runtime requirement"
-              Just requirement -> do
-                let uses = toList (requirementUses requirement)
-                length uses @?= 2
-                H.assertBool "requirement reason is generic" (all ((== "perform exact delimiter read") . requirementReason) uses)
-                H.assertBool "requirement use lost its source range" (all (isJust . requirementRange) uses),
-      H.testCase "exact delimiter read uses one Python process and no nested Fish" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "read -d : left right"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            let rendered = renderTranslation translation
-            T.count "python3" rendered @?= 1
-            H.assertBool "legacy assignment helper is still emitted" (not ("__monk_read_assign" `T.isInfixOf` rendered))
-            H.assertBool "nested Fish status restoration is still emitted" (not ("fish '--no-config'" `T.isInfixOf` rendered))
-            H.assertBool "generated status-return function is missing" ("__monk_return_status" `T.isInfixOf` rendered),
-      H.testCase "standalone negation lowers through Fish not" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "! false"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            renderTranslation translation @?= "not false"
-            translationDiagnostics translation @?= [],
-      H.testCase "compound commands retain status in conjunctions and conditions" $ do
-        translations <-
-          mapM
-            (translateBashScript defaultConfig "spec.sh")
-            [ "case x in x) false ;; esac && echo bad",
-              "if case x in x) false ;; esac; then echo bad; else echo ok; fi",
-              "for x in one; do false; done && echo bad",
-              "while false; do true; done && echo ok",
-              "select x in one; do break; done && echo ok",
-              "f() { false; } && echo defined",
-              "{ false; } & echo launched"
-            ]
-        forM_ translations $ \case
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            H.assertBool
-              "compound status emitted an unsupported diagnostic"
-              (MkDiagnosticCode "monk.unsupported" `notElem` map diagnosticCode (translationDiagnostics translation))
-            H.assertBool "compound command rendered no output" (not (T.null (renderTranslation translation))),
-      H.testCase "errexit guards only the final AND-OR operand" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "set -e\nfalse && echo no"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation ->
-            T.count "status 'is-command-substitution'" (renderTranslation translation) @?= 1,
-      H.testCase "parameter-operator path separators stay literal" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "X=${X:-${HOME}/.config}"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            let rendered = renderTranslation translation
-            H.assertBool "path separator was rendered as an invalid Fish variable" (not ("$/" `T.isInfixOf` rendered))
-            H.assertBool
-              "literal path suffix is missing"
-              ("(string join ' ' -- '/' ; or printf '')'.config'" `T.isInfixOf` rendered),
-      H.testCase "here-strings have dedicated diagnostics and strict rejection" $ do
-        normal <- translateBashScript defaultConfig "spec.sh" "cat <<< value"
-        strictResult <- translateBashScript strictConfig "spec.sh" "cat <<< value"
-        case normal of
-          Left failure -> H.assertFailure (show failure)
-          Right translation ->
-            H.assertBool
-              "missing stable here-string diagnostic"
-              (MkDiagnosticCode "monk.here-string" `elem` map diagnosticCode (translationDiagnostics translation))
-        case strictResult of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "strict mode accepted a best-effort here-string",
-      H.testCase "extglob compatibility fallback declares Bash and is unsafe" $ do
-        result <- translateBashScript defaultConfig "spec.sh" "echo +([ab])"
-        strictResult <- translateBashScript strictConfig "spec.sh" "echo +([ab])"
-        case result of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            H.assertBool
-              "missing bash runtime requirement"
-              (RequiresCommand "bash" `elem` requiredPrograms translation)
-            reviewRisk (translationDiagnostics translation) @?= Unsafe
-        case strictResult of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "strict mode accepted a Bash extglob fallback",
-      H.testCase "unsupported standalone statements fail closed or reject" $ do
-        normal <- translateBashScript defaultConfig "spec.sh" "coproc echo hi"
-        strictResult <- translateBashScript strictConfig "spec.sh" "coproc echo hi"
-        case normal of
-          Left failure -> H.assertFailure (show failure)
-          Right translation -> do
-            renderTranslation translation @?= "#Unsupported: Coprocess (coproc)\nfalse"
-            map diagnosticCode (translationDiagnostics translation) @?= [MkDiagnosticCode "monk.unsupported"]
-        case strictResult of
-          Left _ -> pure ()
-          Right _ -> H.assertFailure "strict mode accepted an unsupported standalone statement",
-      H.testCase "source expansion wrappers are defensively unwrapped" $ do
-        originalParsed <- parseBashScript "spec.sh" "echo original"
-        includedParsed <- parseBashScript "child.sh" "echo included"
-        case (prRoot originalParsed, prRoot includedParsed, translateParseResult defaultConfig originalParsed) of
-          (Just originalRoot, Just includedRoot, Right originalTranslation) -> do
-            let includeOnly = originalParsed {prRoot = Just (Bash.T_Include (Bash.Id 9001) includedRoot)}
-                sourceWrapped =
-                  originalParsed
-                    { prRoot =
-                        Just
-                          ( Bash.T_SourceCommand
-                              (Bash.Id 9002)
-                              originalRoot
-                              (Bash.T_Include (Bash.Id 9003) includedRoot)
-                          )
-                    }
-            case translateParseResult defaultConfig includeOnly of
-              Left failure -> H.assertFailure (show failure)
-              Right translation -> renderTranslation translation @?= "echo 'included'"
-            case translateParseResult defaultConfig sourceWrapped of
-              Left failure -> H.assertFailure (show failure)
-              Right translation -> renderTranslation translation @?= renderTranslation originalTranslation
-          other -> H.assertFailure ("unable to construct source-wrapper fixture: " <> show other),
-      H.testCase "translation failures contain at least one diagnostic" $ do
-        result <- translateBashScript defaultConfig "broken.sh" "if"
-        case result of
-          Left failure -> H.assertBool "empty translation failure" (not (null (NE.toList (failureDiagnostics failure))))
-          Right _ -> H.assertFailure "expected invalid Bash to fail"
+        translated <- accepted strictConfig "x=one; echo \"$x\"\necho \"$x\""
+        H.assertBool "missing native provider pathname capability producer" (RequiresFishFeature NulDelimitedCapture `elem` programs translated)
+        case find ((== RequiresNativeRuntime 1 Bash53Signed64Fish46 (Set.singleton NativeEcho)) . requirementProgram) (translationRuntimeRequirements translated) of
+          Nothing -> H.assertFailure "missing native operation requirement"
+          Just requirement -> do
+            let uses = toList (requirementUses requirement)
+            length uses @?= 2
+            H.assertBool "operation reason is missing" (not (any (T.null . requirementReason) uses))
+            H.assertBool "operation lost its original source range" (all (isJust . requirementRange) uses)
+            H.assertBool "two source occurrences collapsed into one" (length (Set.fromList (map requirementRange uses)) == 2),
+      H.testCase "every materialized capability is supported by the selected profile" $ do
+        translated <- accepted strictConfig "f() { local x=one; printf '%s\\n' \"$x\"; }; f"
+        H.assertBool "missing base Fish capability" (RequiresFishFeature Fish46 `elem` programs translated)
+        H.assertBool "missing scope-sharing capability producer" (RequiresFishFeature FunctionScopeSharing `elem` programs translated)
+        forM_ (programs translated) $ \case
+          RequiresFishFeature feature -> H.assertBool "unsupported materialization capability" (profileSupportsFishFeature Bash53Signed64Fish46 feature)
+          RequiresCommand _ -> pure ()
+          RequiresNativeRuntime abi profile _ -> do
+            abi @?= 1
+            profile @?= Bash53Signed64Fish46
+          RequiresPlatformCapability capability -> H.assertBool "unsupported platform capability" (profileSupportsPlatformCapability Bash53Signed64Fish46 capability),
+      H.testCase "NUL capture capability has an actual materialized producer" $ do
+        translated <- accepted strictConfig "printf '<%s>\\n' \"$(printf 'x\\n')\""
+        H.assertBool "capture capability missing" (RequiresFishFeature NulDelimitedCapture `elem` programs translated),
+      H.testCase "owned child transport declares its descriptor platform contract" $ do
+        translated <- accepted strictConfig "x=\"$(printf child)\""
+        H.assertBool "missing typed platform producer" (RequiresPlatformCapability Linux64DescriptorFilesystem `elem` programs translated)
+        H.assertBool "missing descriptor platform requirement" (any (T.isInfixOf "platform:linux-64-descriptor-filesystem" . renderRuntimeRequirement) (translationRuntimeRequirements translated)),
+      H.testCase "normal and strict defaults reject unsupported semantics without a script" $
+        forM_ [defaultConfig, strictConfig] $
+          \config -> forM_ ["coproc echo hi", "eval 'echo unsafe'", "echo +([ab])"] $ \source -> assertRejected config source,
+      H.testCase "readonly approximation is never selected implicitly" $
+        forM_ [defaultConfig, strictConfig] $
+          \config -> assertRejected config "readonly x=one; x=two; printf '%s\\n' \"$x\"",
+      H.testCase "selected readonly approximation records the affected occurrence" $ do
+        translated <- accepted (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "readonly x=one; x=two; printf '%s\\n' \"$x\""
+        let diagnostics = filter ((== MkDiagnosticCode "monk.approximation.readonly-unchecked") . diagnosticCode) (translationDiagnostics translated)
+        length diagnostics @?= 1
+        map diagnosticSeverity diagnostics @?= [DiagnosticWarning]
+        map diagnosticRisk diagnostics @?= [Review]
+        H.assertBool "approximation lost its source occurrence" (all (isJust . diagnosticRange) diagnostics),
+      H.testCase "readonly opt-in does not change multiple-operand evaluation order" $
+        assertRejected (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "x=outer; readonly x=inner y=\"$x\"",
+      H.testCase "an approximation selection does not permit unrelated eval" $
+        assertRejected (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "eval 'echo unsafe'",
+      H.testCase "syntax-only arithmetic cannot claim original spelling evidence" $ do
+        parsed <- parseBashScript "spec.bash" "printf '%s\\n' \"$((1/0))\""
+        case translateParseResult strictConfig parsed of
+          Left failure -> H.assertBool "wrong rejection" (MkDiagnosticCode "monk.semantic.arithmetic-source" `elem` map diagnosticCode (toList (failureDiagnostics failure)))
+          Right _ -> H.assertFailure "syntax-only input fabricated arithmetic source evidence",
+      H.testCase "parser inclusion metadata cannot create a certified source dependency" $ do
+        parsed <- parseBashScript "spec.bash" "echo original"
+        case prRoot parsed of
+          Nothing -> H.assertFailure "positive parser control failed"
+          Just root -> forM_ [Bash.T_Include (Bash.Id 9001) root, Bash.T_SourceCommand (Bash.Id 9002) root (Bash.T_Include (Bash.Id 9003) root)] $ \wrapped ->
+            case translateParseResult strictConfig parsed {prRoot = Just wrapped} of
+              Left _ -> pure ()
+              Right _ -> H.assertFailure "parser source metadata bypassed owned source discovery",
+      H.testCase "translation failures contain at least one diagnostic" $ assertRejected strictConfig "if"
     ]
 
-requiredPrograms :: TranslationResult -> [RuntimeProgram]
-requiredPrograms translation =
-  map requirementProgram (translationRuntimeRequirements translation)
+accepted :: TranslateConfig -> Text -> IO TranslationResult
+accepted config source = do
+  result <- translateBashScript config "spec.bash" source
+  case result of
+    Right translation -> pure translation
+    Left failure -> H.assertFailure (show failure) >> fail "unreachable"
+
+assertRejected :: TranslateConfig -> Text -> H.Assertion
+assertRejected config source = do
+  result <- translateBashScript config "spec.bash" source
+  case result of
+    Left failure -> H.assertBool "empty diagnostic failure" (not (null (failureDiagnostics failure)))
+    Right translation -> H.assertFailure ("unsupported input produced executable output: " <> toString (renderTranslation translation))
+
+programs :: TranslationResult -> [RuntimeProgram]
+programs = map requirementProgram . translationRuntimeRequirements

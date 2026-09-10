@@ -8,15 +8,14 @@ where
 import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
+import FixtureAdmission
 import FixtureSupport
   ( loadFixtureArgs,
-    loadFixtureMode,
     loadFixturePlatforms,
     loadFixturePrereqs,
     loadFixtureRecursive,
     loadFixtureStdin,
   )
-import Monk.Diagnostics (renderDiagnostic)
 import Monk.Output
   ( OutputTarget (OutputStdout),
     planCombinedOutputBundle,
@@ -24,27 +23,29 @@ import Monk.Output
   )
 import Monk.Source
   ( SourceGraphFailure (..),
+    sourceGraphDiagnostics,
     translateSourceGraph,
   )
 import Monk.Translation
-  ( TranslationFailure (..),
-    defaultConfig,
-    parseBashScript,
+  ( Diagnostic (..),
+    DiagnosticCode (..),
+    TranslationFailure (..),
     renderTranslation,
-    translateParseResult,
+    strictConfig,
+    translateBashScript,
+    translationDiagnostics,
   )
 import Path (Abs, File, Path, toFilePath)
 import Path.IO qualified as PathIO
 import ShellSupport
   ( RunResult (..),
     Shell (..),
-    diffEnv,
+    ShellRunMode (ShellRunExec),
     prepareEnv,
-    runShell,
     runShellWithMode,
     shouldRunIntegration,
   )
-import System.Directory (canonicalizePath, findExecutable)
+import System.Directory (findExecutable)
 import System.Info qualified as SysInfo
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit as H
@@ -128,38 +129,38 @@ data IntegrationFixture = MkIntegrationFixture
 
 integrationTest :: IntegrationFixture -> TestTree
 integrationTest MkIntegrationFixture {ifName, ifPath} = H.testCaseSteps ifName $ \step -> do
-  runnable <- shouldRunIntegration
-  case runnable of
-    Left reason -> step ("skipped: " <> reason)
-    Right () -> do
-      fixturePath <- PathIO.resolveFile' ifPath
-      platforms <- loadFixturePlatforms fixturePath
-      missingPrereqs <- fixtureMissingPrereqs fixturePath
-      case fixturePlatformSkipReason (toText SysInfo.os) platforms of
-        Just reason -> step (toString reason)
-        Nothing
-          | not (null missingPrereqs) ->
-              step ("skipped: missing prerequisites: " <> toString (T.intercalate ", " missingPrereqs))
-          | otherwise -> do
-              bashSrc <- TIO.readFile ifPath
-              translation <- translateScriptText fixturePath bashSrc
+  policy <- loadFixtureAdmission ifPath
+  fixturePath <- PathIO.resolveFile' ifPath
+  bashSrc <- TIO.readFile ifPath
+  translation <- translateScriptText fixturePath bashSrc
+  case (policy, translation) of
+    (RejectedFixture prefix rationale, Left diagnostics) ->
+      H.assertBool
+        (toString rationale <> "\n" <> show diagnostics)
+        (any (T.isPrefixOf prefix . diagnosticCodeText . diagnosticCode) diagnostics)
+    (RejectedFixture _ rationale, Right _) -> H.assertFailure ("excluded fixture produced executable output: " <> toString rationale)
+    (ExactFixture, Left diagnostics) -> H.assertFailure ("mandatory fixture admission failed: " <> show diagnostics)
+    (ExactFixture, Right (fishSrc, diagnostics)) -> do
+      runnable <- shouldRunIntegration
+      case runnable of
+        Left reason -> step ("skipped runtime comparison: " <> reason)
+        Right () -> do
+          platforms <- loadFixturePlatforms fixturePath
+          missingPrereqs <- fixtureMissingPrereqs fixturePath
+          case fixturePlatformSkipReason (toText SysInfo.os) platforms of
+            Just reason -> step (toString reason)
+            Nothing | not (null missingPrereqs) -> step ("skipped: missing prerequisites: " <> toString (T.intercalate ", " missingPrereqs))
+            Nothing -> do
               args <- loadFixtureArgs fixturePath
-              runMode <- loadFixtureMode fixturePath
               stdinInput <- loadFixtureStdin fixturePath
-              case translation of
-                Left err -> H.assertFailure err
-                Right fishSrc -> do
-                  baseEnv <- prepareEnv
-                  baseBash <- runShell ShellBash baseEnv ""
-                  baseFish <- runShell ShellFish baseEnv ""
-                  bashRes <- runShellWithMode runMode ShellBash baseEnv bashSrc args stdinInput
-                  fishRes <- runShellWithMode runMode ShellFish baseEnv fishSrc args stdinInput
-                  let bashDelta = diffEnv (rrEnv baseBash) (rrEnv bashRes)
-                      fishDelta = diffEnv (rrEnv baseFish) (rrEnv fishRes)
-                  rrExit bashRes @?= rrExit fishRes
-                  rrStdout bashRes @?= rrStdout fishRes
-                  rrStderr bashRes @?= rrStderr fishRes
-                  bashDelta @?= fishDelta
+              baseEnv <- prepareEnv
+              bashRes <- runShellWithMode ShellRunExec ShellBash baseEnv bashSrc args stdinInput
+              fishRes <- runShellWithMode ShellRunExec ShellFish baseEnv fishSrc args stdinInput
+              let observation value = (rrExit value, rrStdout value, rrStderr value)
+              H.assertEqual
+                (if null diagnostics then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH")
+                (observation bashRes)
+                (observation fishRes)
 
 fixtureMissingPrereqs :: Path Abs File -> IO [Text]
 fixtureMissingPrereqs path = do
@@ -180,35 +181,26 @@ fixturePlatformSkipReason currentPlatform mPlatforms =
                 <> T.intercalate ", " platforms
             )
 
-translateScriptText :: Path Abs File -> Text -> IO (Either String Text)
+translateScriptText :: Path Abs File -> Text -> IO (Either [Diagnostic] (Text, [Diagnostic]))
 translateScriptText path script = do
   recursive <- loadFixtureRecursive path
   if recursive
     then translateScriptTextRecursive path
     else do
-      parseResult <- parseBashScript (toFilePath path) script
-      case translateParseResult defaultConfig parseResult of
-        Left err -> pure (Left ("translateParseResult failed: " <> show err))
-        Right translation -> pure (Right (renderTranslation translation))
+      result <- translateBashScript strictConfig (toFilePath path) script
+      pure $ case result of
+        Left failure -> Left (toList (failureDiagnostics failure))
+        Right translation -> Right (renderTranslation translation, translationDiagnostics translation)
 
-translateScriptTextRecursive :: Path Abs File -> IO (Either String Text)
+translateScriptTextRecursive :: Path Abs File -> IO (Either [Diagnostic] (Text, [Diagnostic]))
 translateScriptTextRecursive path = do
-  rootPath <- canonicalizePath (toFilePath path)
-  graphE <- translateSourceGraph defaultConfig True rootPath
+  graphE <- translateSourceGraph strictConfig True (toFilePath path)
   case graphE of
-    Left err -> pure (Left (renderSourceGraphFailure err))
+    Left (MkSourceGraphFailure _ failure) -> pure (Left (toList (failureDiagnostics failure)))
     Right graph -> do
-      planned <- planCombinedOutputBundle OutputStdout rootPath graph
-      pure $
-        case planned of
-          Left diagnostic -> Left (toString (renderDiagnostic diagnostic))
-          Right bundle ->
-            maybe
-              (Left "combined output bundle did not contain stdout")
-              Right
-              (L.lookup OutputStdout (renderOutputBundle bundle))
-
-renderSourceGraphFailure :: SourceGraphFailure -> String
-renderSourceGraphFailure = \case
-  SourceGraphFailure _ failure ->
-    toString (T.unlines (map renderDiagnostic (toList (failureDiagnostics failure))))
+      planned <- planCombinedOutputBundle OutputStdout graph
+      case planned of
+        Left diagnostic -> pure (Left [diagnostic])
+        Right bundle -> case L.lookup OutputStdout (renderOutputBundle bundle) of
+          Nothing -> H.assertFailure "combined output bundle did not contain stdout" >> pure (Right ("", []))
+          Just rendered -> pure (Right (rendered, sourceGraphDiagnostics graph))

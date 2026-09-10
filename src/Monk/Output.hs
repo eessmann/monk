@@ -1,347 +1,263 @@
 {-# LANGUAGE LambdaCase #-}
 
--- | Typed planning for stdout, combined recursive output, and separate files.
--- Rendering is deliberately separate from filesystem writes.
+-- | Opaque publication products. Planning owns bytes and destination together;
+-- rendering and filesystem publication remain separate operations.
 module Monk.Output
   ( OutputTarget (..),
-    GeneratedFile (..),
-    OutputBundle (..),
+    GeneratedFile,
+    generatedTarget,
+    generatedScript,
+    generatedDiagnostics,
+    generatedRuntimeRequirements,
+    generatedStatistics,
+    OutputBundle,
+    bundleUserFiles,
+    NativeRuntimeImage,
+    NativeRuntimeArtifact,
+    bundleRuntimeArtifacts,
+    runtimeArtifactTarget,
+    runtimeArtifactImage,
+    runtimeArtifactMode,
+    nativeImageBytes,
+    nativeImageDigest,
+    nativeImageOperations,
+    nativeImageABI,
+    nativeImageProfile,
+    OutputFailure,
+    OutputFailureKind (..),
+    OutputObservedEntry (..),
+    outputFailureKind,
+    outputFailureDiagnostic,
+    outputFailureObservedEntry,
+    OutputReceipt,
+    outputReceiptDestination,
+    outputReceiptGeneration,
+    outputReceiptWarnings,
     planCombinedOutputBundle,
     planSeparateOutputBundle,
+    planManagedOutputBundle,
     renderOutputBundle,
+    publishOutputBundle,
   )
 where
 
-import Data.List qualified as L
+import Control.Exception (IOException, try)
 import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as M
-import Data.Text qualified as T
-import Data.Typeable (cast)
+import Data.Set qualified as S
+import GHC.Show qualified as GHC
+import Language.Bash.Plan qualified as P
 import Language.Fish.DSL (Script, renderScript)
-import Language.Fish.DSL.Internal
-  ( CaseItem (..),
-    ExprOrRedirect (..),
-    FishCommand (..),
-    FishExpr (ExprFileRelative, ExprListLiteral, ExprLiteral),
-    FishFunction (..),
-    FishJobConjCont (..),
-    FishJobConjunction (..),
-    FishJobList (..),
-    FishJobPipeline (..),
-    FishStatement (..),
-    FishType (TList, TStr),
-    JobPipeCont (..),
-    Script (MkScript),
-  )
-import Monk.Source
-  ( SourceGraph (..),
-    Translation (..),
-    inlineSourceGraph,
-    rewriteSources,
-  )
-import Monk.Translation
-  ( Diagnostic (..),
-    DiagnosticCode (..),
-    DiagnosticPhase (PhaseSource),
-    DiagnosticSeverity (DiagnosticError),
-    ReviewRisk (Unsafe),
-    RuntimeRequirement (..),
-  )
+import Language.Fish.Translator.Plan (compileBundleLoader, compileSourceBundle, plannedBundleEntry, plannedBundleModuleStatistics, plannedBundleModules, plannedDiagnostics, plannedRequirements, plannedScript, plannedStatistics)
+import Monk.Output.Publication qualified as Publication
+import Monk.Output.Runtime
+import Monk.Source (SourceGraph, sourceGraphDiagnostics, sourceGraphRuntimeRequirements)
+import Monk.Source.Product (graphParseDiagnostics, graphPlan, graphTranslation)
+import Monk.Translation.Types
+import System.Directory (makeAbsolute)
 import System.FilePath qualified as FP
 
-data OutputTarget
-  = OutputStdout
-  | OutputPath FilePath
+data OutputTarget = OutputStdout | OutputPath FilePath
   deriving stock (Show, Eq, Ord)
 
-data GeneratedFile = MkGeneratedFile
-  { generatedTarget :: OutputTarget,
-    generatedScript :: Script,
-    generatedDiagnostics :: [Diagnostic],
-    generatedRuntimeRequirements :: [RuntimeRequirement]
-  }
+data GeneratedFile = MkGeneratedFile OutputTarget Script [Diagnostic] [RuntimeRequirement] TranslationStatistics
   deriving stock (Show, Eq)
 
-data OutputBundle = MkOutputBundle
-  { bundleUserFiles :: NonEmpty GeneratedFile,
-    bundleRuntimeFile :: Maybe GeneratedFile
-  }
+data NativeRuntimeArtifact = MkNativeRuntimeArtifact OutputTarget NativeRuntimeImage
   deriving stock (Show, Eq)
 
-planCombinedOutputBundle ::
-  OutputTarget ->
-  FilePath ->
-  SourceGraph ->
-  IO (Either Diagnostic OutputBundle)
-planCombinedOutputBundle target rootPath graph =
-  case M.lookup rootPath (sgTranslations graph) of
-    Nothing -> pure (Left (missingRootDiagnostic rootPath))
-    Just _ -> do
-      (script, inlineDiagnostics) <- inlineSourceGraph graph rootPath
-      let translations = orderedTranslations graph
-          generated =
-            MkGeneratedFile
-              { generatedTarget = target,
-                generatedScript = dedupeGeneratedRuntime script,
-                generatedDiagnostics = concatMap trDiagnostics translations <> inlineDiagnostics,
-                generatedRuntimeRequirements = mergeRuntimeRequirements (concatMap trRuntimeRequirements translations)
-              }
-      pure (Right (MkOutputBundle (generated :| []) Nothing))
+data OutputBundle = MkOutputBundle (NonEmpty GeneratedFile) [NativeRuntimeArtifact] (Maybe Publication.PublicationPlan)
 
-planSeparateOutputBundle ::
-  FilePath ->
-  FilePath ->
-  SourceGraph ->
-  Either Diagnostic OutputBundle
-planSeparateOutputBundle rootOutput rootPath graph = do
-  unless (M.member rootPath translations) (Left (missingRootDiagnostic rootPath))
-  userFiles <- maybe (Left (missingRootDiagnostic rootPath)) Right (NE.nonEmpty plannedUserFiles)
-  case duplicateOutputTarget (toList userFiles <> maybeToList runtimeFile) of
-    Just target -> Left (duplicateOutputDiagnostic target)
-    Nothing -> pure ()
-  pure
-    MkOutputBundle
-      { bundleUserFiles = userFiles,
-        bundleRuntimeFile = runtimeFile
-      }
-  where
-    translations = relocateTranslations rootOutput rootPath graph
-    runtimePath = FP.combine (FP.takeDirectory rootOutput) "_monk_runtime.fish"
-    prepared =
-      [ (sourcePath, translation, splitRuntime (anchorRelativeSources (rewriteSources translations translation)))
-      | sourcePath <- sgOrder graph,
-        Just translation <- [M.lookup sourcePath translations]
-      ]
-    runtimeStatements = L.nub (concatMap (fst . third) prepared)
-    runtimeRequirements = mergeRuntimeRequirements (concatMap (\(_, translation, _) -> trRuntimeRequirements translation) prepared)
-    runtimeFile
-      | null runtimeStatements = Nothing
-      | otherwise =
-          Just
-            MkGeneratedFile
-              { generatedTarget = OutputPath runtimePath,
-                generatedScript = MkScript runtimeStatements,
-                generatedDiagnostics = [],
-                generatedRuntimeRequirements = runtimeRequirements
-              }
-    plannedUserFiles = map makeUserFile prepared
-    makeUserFile (_, translation, (runtimePrefix, userStatements)) =
-      let outputPath = trPath translation
-          runtimeSource =
-            [ Stmt (Source (ExprFileRelative (toText (relativePath (FP.takeDirectory outputPath) runtimePath))))
-            | not (null runtimePrefix)
-            ]
-       in MkGeneratedFile
-            { generatedTarget = OutputPath outputPath,
-              generatedScript = MkScript (runtimeSource <> userStatements),
-              generatedDiagnostics = trDiagnostics translation,
-              generatedRuntimeRequirements = trRuntimeRequirements translation
-            }
+instance GHC.Show OutputBundle where
+  show (MkOutputBundle files runtime _) = "OutputBundle " <> show files <> " " <> show runtime
+
+data OutputFailure = MkOutputFailure OutputFailureKind Diagnostic (Maybe OutputObservedEntry)
+  deriving stock (Show, Eq)
+
+data OutputFailureKind
+  = OutputNoFilesystemPublication
+  | OutputInvalidPublicationPlan
+  | OutputOwnershipMismatch
+  | OutputSymlinkConflict
+  | OutputGenerationCollision
+  | OutputPublicationIOFailure
+  | OutputInjectedPublicationFailure
+  deriving stock (Show, Eq, Ord)
+
+data OutputObservedEntry
+  = OutputEntryMissing
+  | OutputEntryMatchesPlanned
+  | OutputEntryDiffers
+  | OutputEntryUnreadable
+  deriving stock (Show, Eq, Ord)
+
+data OutputReceipt = MkOutputReceipt FilePath (Maybe FilePath) [Text]
+  deriving stock (Show, Eq)
+
+generatedTarget :: GeneratedFile -> OutputTarget
+generatedTarget (MkGeneratedFile target _ _ _ _) = target
+
+generatedScript :: GeneratedFile -> Script
+generatedScript (MkGeneratedFile _ script _ _ _) = script
+
+generatedDiagnostics :: GeneratedFile -> [Diagnostic]
+generatedDiagnostics (MkGeneratedFile _ _ diagnostics _ _) = diagnostics
+
+generatedRuntimeRequirements :: GeneratedFile -> [RuntimeRequirement]
+generatedRuntimeRequirements (MkGeneratedFile _ _ _ requirements _) = requirements
+
+generatedStatistics :: GeneratedFile -> TranslationStatistics
+generatedStatistics (MkGeneratedFile _ _ _ _ statistics) = statistics
+
+bundleUserFiles :: OutputBundle -> NonEmpty GeneratedFile
+bundleUserFiles (MkOutputBundle files _ _) = files
+
+bundleRuntimeArtifacts :: OutputBundle -> [NativeRuntimeArtifact]
+bundleRuntimeArtifacts (MkOutputBundle _ runtime _) = runtime
+
+runtimeArtifactTarget :: NativeRuntimeArtifact -> OutputTarget
+runtimeArtifactTarget (MkNativeRuntimeArtifact target _) = target
+
+runtimeArtifactImage :: NativeRuntimeArtifact -> NativeRuntimeImage
+runtimeArtifactImage (MkNativeRuntimeArtifact _ image) = image
+
+-- | The private executable mode included in managed generation identity.
+runtimeArtifactMode :: NativeRuntimeArtifact -> Word32
+runtimeArtifactMode _ = 0o700
+
+outputFailureKind :: OutputFailure -> OutputFailureKind
+outputFailureKind (MkOutputFailure kind _ _) = kind
+
+outputFailureDiagnostic :: OutputFailure -> Diagnostic
+outputFailureDiagnostic (MkOutputFailure _ diagnostic _) = diagnostic
+
+outputFailureObservedEntry :: OutputFailure -> Maybe OutputObservedEntry
+outputFailureObservedEntry (MkOutputFailure _ _ observed) = observed
+
+outputReceiptDestination :: OutputReceipt -> FilePath
+outputReceiptDestination (MkOutputReceipt destination _ _) = destination
+
+outputReceiptGeneration :: OutputReceipt -> Maybe FilePath
+outputReceiptGeneration (MkOutputReceipt _ generation _) = generation
+
+outputReceiptWarnings :: OutputReceipt -> [Text]
+outputReceiptWarnings (MkOutputReceipt _ _ warnings) = warnings
+
+planCombinedOutputBundle :: OutputTarget -> SourceGraph -> IO (Either Diagnostic OutputBundle)
+planCombinedOutputBundle target graph = do
+  resolved <- case target of
+    OutputStdout -> pure (Right OutputStdout)
+    OutputPath path -> fmap OutputPath <$> resolveOutputPath path
+  pure $ do
+    ownedTarget <- resolved
+    let script = plannedScript (graphTranslation graph)
+        file = MkGeneratedFile ownedTarget script (sourceGraphDiagnostics graph) (sourceGraphRuntimeRequirements graph) (plannedStatistics (graphTranslation graph))
+    publication <- case ownedTarget of
+      OutputStdout -> pure Nothing
+      OutputPath path -> Just <$> first publicationPlanningDiagnostic (Publication.planSingleFilePublication path (encodeUtf8 (renderScript script)))
+    pure (MkOutputBundle (file :| []) [] publication)
+
+-- | Own an absolute destination and immutable module layout before publishing.
+-- Resolving the output cwd is independent of source discovery and writes no
+-- files. The private materializer constructs and admits the loader as well as
+-- every member; this layer only selects their immutable generation paths.
+planSeparateOutputBundle :: FilePath -> SourceGraph -> IO (Either Diagnostic OutputBundle)
+planSeparateOutputBundle = planManagedOutputBundle
+
+-- | Capture the selected runtime and rematerialize against its immutable
+-- generation member before constructing any publication product.
+planManagedOutputBundle :: FilePath -> SourceGraph -> IO (Either Diagnostic OutputBundle)
+planManagedOutputBundle destination graph = do
+  absolute <- resolveOutputPath destination
+  let P.SourcePlan cfg statements reserved = graphPlan graph
+      operations = foldMap (\case MkRuntimeRequirement (RequiresNativeRuntime _ _ ops) _ -> ops; _ -> mempty) (sourceGraphRuntimeRequirements graph)
+  imageResult <- if S.null operations then pure (Right Nothing) else fmap Just <$> captureNativeRuntime (translationRuntime cfg) operations
+  pure $ do
+    target <- absolute
+    image <- first (outputDiagnostic "native-runtime") imageResult
+    let runtimeMember = "bin/monk-runtime"
+        rebound = P.SourcePlan (cfg {translationRuntime = RuntimeGeneration runtimeMember}) statements reserved
+    planned <- first NE.head (compileSourceBundle rebound)
+    let entry = plannedBundleEntry planned
+        scriptStatistics = M.insert "entry.fish" (plannedStatistics entry) (plannedBundleModuleStatistics planned)
+        scripts = ("entry.fish", plannedScript entry) : M.toAscList (plannedBundleModules planned)
+        members =
+          [Publication.PublicationMember path Publication.FishSource (encodeUtf8 (renderScript script)) | (path, script) <- scripts]
+            <> [Publication.PublicationMember runtimeMember Publication.NativeExecutable (nativeImageBytes native) | native <- maybeToList image]
+        diagnostics = graphParseDiagnostics graph <> plannedDiagnostics entry
+        requirements = plannedRequirements entry
+    relativeGeneration <- first publicationPlanningDiagnostic (Publication.generationRelativeDirectoryMembers target members)
+    let generation = FP.takeDirectory target FP.</> relativeGeneration
+    loader <- first NE.head (compileBundleLoader (generation FP.</> "entry.fish") planned)
+    publication <- first publicationPlanningDiagnostic (Publication.planManagedPublicationMembers target members (encodeUtf8 (renderScript (plannedScript loader))))
+    files <- forM scripts $ \(path, script) -> do
+      statistics <- maybe (Left (outputDiagnostic "materialization-statistics" "Missing statistics for an owned generated member")) Right (M.lookup path scriptStatistics)
+      pure (MkGeneratedFile (OutputPath (generation FP.</> path)) script diagnostics requirements statistics)
+    let entryFile = MkGeneratedFile (OutputPath target) (plannedScript loader) diagnostics requirements (plannedStatistics loader)
+        runtime = [MkNativeRuntimeArtifact (OutputPath (generation FP.</> runtimeMember)) native | native <- maybeToList image]
+    pure (MkOutputBundle (entryFile :| files) runtime (Just publication))
+
+resolveOutputPath :: FilePath -> IO (Either Diagnostic FilePath)
+resolveOutputPath destination
+  | null destination || '\0' `elem` destination || FP.hasTrailingPathSeparator destination =
+      pure (Left (outputDiagnostic "destination" "Output destination must be a nonempty file path without a trailing separator or NUL"))
+  | otherwise = first (outputDiagnostic "destination" . show) <$> try @IOException (FP.normalise <$> makeAbsolute destination)
 
 renderOutputBundle :: OutputBundle -> [(OutputTarget, Text)]
 renderOutputBundle bundle =
-  map
-    renderFile
-    (toList (bundleUserFiles bundle) <> maybeToList (bundleRuntimeFile bundle))
-  where
-    renderFile generated =
-      (generatedTarget generated, renderScript (generatedScript generated))
+  [ (generatedTarget file, renderScript (generatedScript file))
+  | file <- toList (bundleUserFiles bundle)
+  ]
 
-orderedTranslations :: SourceGraph -> [Translation]
-orderedTranslations graph =
-  mapMaybe (`M.lookup` sgTranslations graph) (sgOrder graph)
+publishOutputBundle :: OutputBundle -> IO (Either OutputFailure OutputReceipt)
+publishOutputBundle (MkOutputBundle _ _ Nothing) =
+  pure
+    ( Left
+        ( MkOutputFailure
+            OutputNoFilesystemPublication
+            (outputDiagnostic "stdout-publication" "Stdout output has no filesystem publication plan")
+            Nothing
+        )
+    )
+publishOutputBundle (MkOutputBundle _ _ (Just plan)) =
+  fmap (bimap publicationFailure publicationReceipt) (Publication.publishPublication plan)
 
-relocateTranslations :: FilePath -> FilePath -> SourceGraph -> M.Map FilePath Translation
-relocateTranslations rootOutput rootPath graph =
-  M.mapWithKey relocate (sgTranslations graph)
-  where
-    sourceRoot = commonAncestorDir (sgOrder graph)
-    outputRoot = FP.takeDirectory rootOutput
-    relocate sourcePath translation
-      | sourcePath == rootPath = translation {trPath = rootOutput}
-      | otherwise =
-          let relativeSource = FP.makeRelative sourceRoot sourcePath
-              outputPath = FP.combine outputRoot (FP.replaceExtension relativeSource "fish")
-           in translation {trPath = outputPath}
+publicationFailure :: Publication.PublicationFailure -> OutputFailure
+publicationFailure failure =
+  MkOutputFailure
+    (publicationFailureKind (Publication.publicationFailureKind failure))
+    ( outputDiagnostic
+        "publication"
+        (Publication.publicationFailureMessage failure <> maybe "" (\observed -> "; observed entry: " <> show observed) (Publication.publicationFailureObservedEntry failure))
+    )
+    (publicationObservedEntry <$> Publication.publicationFailureObservedEntry failure)
 
-commonAncestorDir :: [FilePath] -> FilePath
-commonAncestorDir = \case
-  [] -> "."
-  path : rest ->
-    foldl' sharedDirectory (FP.takeDirectory path) (map FP.takeDirectory rest)
-  where
-    sharedDirectory left right =
-      case map fst (takeWhile (uncurry (==)) (zip (segments left) (segments right))) of
-        [] -> "."
-        common -> FP.joinPath common
-    segments = FP.splitDirectories . FP.normalise
+publicationFailureKind :: Publication.PublicationFailureKind -> OutputFailureKind
+publicationFailureKind = \case
+  Publication.InvalidPublicationPlan -> OutputInvalidPublicationPlan
+  Publication.OwnershipMismatch -> OutputOwnershipMismatch
+  Publication.SymlinkConflict -> OutputSymlinkConflict
+  Publication.GenerationCollision -> OutputGenerationCollision
+  Publication.PublicationIOFailure -> OutputPublicationIOFailure
+  Publication.InjectedPublicationFailure -> OutputInjectedPublicationFailure
 
-relativePath :: FilePath -> FilePath -> FilePath
-relativePath fromDirectory targetPath =
-  case replicate (length fromRest) ".." <> targetRest of
-    [] -> "."
-    parts -> FP.joinPath parts
-  where
-    fromParts = FP.splitDirectories (FP.normalise fromDirectory)
-    targetParts = FP.splitDirectories (FP.normalise targetPath)
-    commonCount = length (takeWhile (uncurry (==)) (zip fromParts targetParts))
-    fromRest = drop commonCount fromParts
-    targetRest = drop commonCount targetParts
+publicationObservedEntry :: Publication.ObservedEntry -> OutputObservedEntry
+publicationObservedEntry = \case
+  Publication.ObservedEntryMissing -> OutputEntryMissing
+  Publication.ObservedEntryMatchesPlanned -> OutputEntryMatchesPlanned
+  Publication.ObservedEntryDiffers -> OutputEntryDiffers
+  Publication.ObservedEntryUnreadable -> OutputEntryUnreadable
 
-anchorRelativeSources :: Script -> Script
-anchorRelativeSources (MkScript statements) =
-  MkScript (map anchorStatement statements)
+publicationReceipt :: Publication.PublicationReceipt -> OutputReceipt
+publicationReceipt receipt =
+  MkOutputReceipt
+    (Publication.publicationReceiptDestination receipt)
+    (Publication.publicationReceiptGeneration receipt)
+    (Publication.publicationReceiptWarnings receipt)
 
-anchorStatement :: FishStatement -> FishStatement
-anchorStatement = \case
-  Stmt command -> Stmt (anchorCommand command)
-  StmtList statements -> StmtList (map anchorStatement statements)
-  other -> other
+publicationPlanningDiagnostic :: Publication.PublicationFailure -> Diagnostic
+publicationPlanningDiagnostic failure =
+  outputDiagnostic "publication" (Publication.publicationFailureMessage failure)
 
-anchorCommand :: FishCommand t -> FishCommand t
-anchorCommand = \case
-  Command name args
-    | name == "source" || name == "." -> Command name (anchorSourceArgs args)
-  Source expr -> Source (anchorSourceExpr expr)
-  Begin body suffix -> Begin (NE.map anchorStatement body) suffix
-  If condition thenBody elseBody suffix ->
-    If
-      (anchorJobList condition)
-      (NE.map anchorStatement thenBody)
-      (map anchorStatement elseBody)
-      suffix
-  While condition body suffix ->
-    While (anchorJobList condition) (NE.map anchorStatement body) suffix
-  For name values body suffix ->
-    For name values (NE.map anchorStatement body) suffix
-  Switch expr cases suffix ->
-    Switch expr (NE.map anchorCaseItem cases) suffix
-  Function fishFunction ->
-    Function fishFunction {funcBody = NE.map anchorStatement (funcBody fishFunction)}
-  Pipeline pipeline -> Pipeline (anchorPipeline pipeline)
-  JobConj conjunction -> JobConj (anchorConjunction conjunction)
-  Semicolon left right -> Semicolon (anchorCommand left) (anchorCommand right)
-  Not command -> Not (anchorCommand command)
-  Background command -> Background (anchorCommand command)
-  Decorated decoration command -> Decorated decoration (anchorCommand command)
-  other -> other
-
-anchorSourceExpr :: FishExpr TStr -> FishExpr TStr
-anchorSourceExpr = \case
-  ExprLiteral path
-    | FP.isRelative (toString path) -> ExprFileRelative path
-  other -> other
-
-anchorSourceArgs :: [ExprOrRedirect] -> [ExprOrRedirect]
-anchorSourceArgs = \case
-  ExprVal expr : rest ->
-    case cast expr of
-      Just stringExpr -> ExprVal (anchorSourceExpr stringExpr) : rest
-      Nothing ->
-        case cast expr of
-          Just listExpr -> ExprVal (anchorSourceListExpr listExpr) : rest
-          Nothing -> ExprVal expr : rest
-  other -> other
-
-anchorSourceListExpr :: FishExpr (TList TStr) -> FishExpr (TList TStr)
-anchorSourceListExpr = \case
-  ExprListLiteral [expr] -> ExprListLiteral [anchorSourceExpr expr]
-  other -> other
-
-anchorCaseItem :: CaseItem -> CaseItem
-anchorCaseItem (MkCaseItem patterns body) =
-  MkCaseItem patterns (NE.map anchorStatement body)
-
-anchorJobList :: FishJobList -> FishJobList
-anchorJobList (MkFishJobList conjunctions) =
-  MkFishJobList (NE.map anchorConjunction conjunctions)
-
-anchorConjunction :: FishJobConjunction -> FishJobConjunction
-anchorConjunction conjunction =
-  conjunction
-    { jcJob = anchorPipeline (jcJob conjunction),
-      jcContinuations = map anchorContinuation (jcContinuations conjunction)
-    }
-
-anchorContinuation :: FishJobConjCont -> FishJobConjCont
-anchorContinuation = \case
-  JCAnd pipeline -> JCAnd (anchorPipeline pipeline)
-  JCOr pipeline -> JCOr (anchorPipeline pipeline)
-
-anchorPipeline :: FishJobPipeline -> FishJobPipeline
-anchorPipeline pipeline =
-  pipeline
-    { jpStatement = anchorStatement (jpStatement pipeline),
-      jpCont = map anchorPipeContinuation (jpCont pipeline)
-    }
-  where
-    anchorPipeContinuation continuation =
-      continuation {jpcStatement = anchorStatement (jpcStatement continuation)}
-
-splitRuntime :: Script -> ([FishStatement], [FishStatement])
-splitRuntime (MkScript statements) = span isGeneratedRuntimeStatement statements
-
-isGeneratedRuntimeStatement :: FishStatement -> Bool
-isGeneratedRuntimeStatement = \case
-  Stmt (Function fishFunction) -> "__monk_" `T.isPrefixOf` funcName fishFunction
-  Stmt (Set _ name _) -> "__monk_" `T.isPrefixOf` name
-  _ -> False
-
-dedupeGeneratedRuntime :: Script -> Script
-dedupeGeneratedRuntime (MkScript statements) = MkScript (go [] statements)
-  where
-    go _ [] = []
-    go seen (statement : rest)
-      | isGeneratedRuntimeStatement statement && statement `elem` seen = go seen rest
-      | isGeneratedRuntimeStatement statement = statement : go (seen <> [statement]) rest
-      | otherwise = statement : go seen rest
-
-mergeRuntimeRequirements :: [RuntimeRequirement] -> [RuntimeRequirement]
-mergeRuntimeRequirements requirements =
-  map (uncurry MkRuntimeRequirement) (M.toAscList merged)
-  where
-    merged = foldl' insertRequirement mempty requirements
-    insertRequirement acc requirement =
-      M.insertWith
-        mergeUses
-        (requirementProgram requirement)
-        (requirementUses requirement)
-        acc
-    mergeUses new existing =
-      fromMaybe existing (NE.nonEmpty (L.nub (toList existing <> toList new)))
-
-missingRootDiagnostic :: FilePath -> Diagnostic
-missingRootDiagnostic path =
-  MkDiagnostic
-    { diagnosticCode = MkDiagnosticCode "monk.output.missing-root",
-      diagnosticPhase = PhaseSource,
-      diagnosticSeverity = DiagnosticError,
-      diagnosticRisk = Unsafe,
-      diagnosticMessage = "No translated source was found for output root: " <> toText path,
-      diagnosticRange = Nothing
-    }
-
-duplicateOutputTarget :: [GeneratedFile] -> Maybe OutputTarget
-duplicateOutputTarget files =
-  listToMaybe
-    [ target
-    | target : _ : _ <- L.group (L.sort (map generatedTarget files))
-    ]
-
-duplicateOutputDiagnostic :: OutputTarget -> Diagnostic
-duplicateOutputDiagnostic target =
-  MkDiagnostic
-    { diagnosticCode = MkDiagnosticCode "monk.output.duplicate-target",
-      diagnosticPhase = PhaseSource,
-      diagnosticSeverity = DiagnosticError,
-      diagnosticRisk = Unsafe,
-      diagnosticMessage = "Multiple generated files resolve to the same output target: " <> renderTarget target,
-      diagnosticRange = Nothing
-    }
-  where
-    renderTarget = \case
-      OutputStdout -> "stdout"
-      OutputPath path -> toText path
-
-third :: (a, b, c) -> c
-third (_, _, value) = value
+outputDiagnostic :: Text -> Text -> Diagnostic
+outputDiagnostic code message = MkDiagnostic (MkDiagnosticCode ("monk.output." <> code)) PhaseOutput DiagnosticError Unsafe message Nothing

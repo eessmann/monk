@@ -131,6 +131,8 @@ instance Eq FishStatement where
 data FishCommand (t :: FishType) where
   -- | Basic commands and blocks.
   Command :: Text -> [ExprOrRedirect] -> FishCommand TStatus
+  -- | An already admitted scalar executable capability, never source text.
+  CommandExpr :: FishExpr TStr -> [ExprOrRedirect] -> FishCommand TStatus
   Set :: [SetFlag] -> Text -> FishExpr (TList TStr) -> FishCommand TUnit
   Function :: FishFunction -> FishCommand TUnit
   For ::
@@ -193,6 +195,7 @@ instance (Typeable t) => Eq (FishCommand t) where
 
 eqFishCommandSameType :: FishCommand a -> FishCommand a -> Bool
 eqFishCommandSameType (Command txt1 args1) (Command txt2 args2) = txt1 == txt2 && args1 == args2
+eqFishCommandSameType (CommandExpr head1 args1) (CommandExpr head2 args2) = head1 == head2 && args1 == args2
 eqFishCommandSameType (Set f1 v1 e1) (Set f2 v2 e2) = f1 == f2 && v1 == v2 && eqFishExpr e1 e2
 eqFishCommandSameType (Function f1) (Function f2) = f1 == f2
 eqFishCommandSameType (For v1 l1 b1 r1) (For v2 l2 b2 r2) = v1 == v2 && eqFishExpr l1 l2 && b1 == b2 && r1 == r2
@@ -252,9 +255,13 @@ instance Eq ExprOrRedirect where
 data FishExpr (t :: FishType) where
   -- | Literals.
   ExprLiteral :: Text -> FishExpr TStr
+  -- | Owned child source, quoted as literal transport data only by the renderer.
+  ExprEmbeddedScript :: Script -> FishExpr TStr
   ExprNumLiteral :: Int -> FishExpr TInt
   -- | Variables.
   ExprVariable :: FishVarRef t -> FishExpr t
+  -- | Exactly one quoted field, including an unset or empty scalar.
+  ExprQuotedVariable :: FishVarRef TStr -> FishExpr TStr
   -- | Special variables.
   ExprSpecialVar :: SpecialVarRef t -> FishExpr t
   -- | String operations.
@@ -267,6 +274,8 @@ data FishExpr (t :: FishType) where
   ExprMath :: NonEmpty (FishExpr TStr) -> FishExpr TInt
   -- | Command substitution (fish produces a list of strings).
   ExprCommandSubst :: NonEmpty FishStatement -> FishExpr (TList TStr)
+  -- | Quoted capture retains one field and embedded newlines.
+  ExprQuotedCommandSubst :: NonEmpty FishStatement -> FishExpr TStr
   -- | List operations.
   ExprListLiteral :: [FishExpr TStr] -> FishExpr (TList TStr)
   ExprListConcat :: (Typeable a) => FishExpr (TList a) -> FishExpr (TList a) -> FishExpr (TList a)
@@ -284,14 +293,17 @@ instance (Typeable t) => Eq (FishExpr t) where
 -- | Helper to compare FishExpr when types are known to be equal (a ~ b).
 eqFishExprSameType :: FishExpr a -> FishExpr a -> Bool
 eqFishExprSameType (ExprLiteral t1) (ExprLiteral t2) = t1 == t2
+eqFishExprSameType (ExprEmbeddedScript a) (ExprEmbeddedScript b) = a == b
 eqFishExprSameType (ExprNumLiteral n1) (ExprNumLiteral n2) = n1 == n2
 eqFishExprSameType (ExprVariable v1) (ExprVariable v2) = v1 == v2
+eqFishExprSameType (ExprQuotedVariable v1) (ExprQuotedVariable v2) = v1 == v2
 eqFishExprSameType (ExprStringConcat x1 y1) (ExprStringConcat x2 y2) = x1 == x2 && y1 == y2
 eqFishExprSameType (ExprStringOp o1 a1) (ExprStringOp o2 a2) = o1 == o2 && a1 == a2
 eqFishExprSameType (ExprJoinList a1) (ExprJoinList a2) = eqFishExpr a1 a2
 eqFishExprSameType (ExprFileRelative p1) (ExprFileRelative p2) = p1 == p2
 eqFishExprSameType (ExprMath xs1) (ExprMath xs2) = xs1 == xs2
 eqFishExprSameType (ExprCommandSubst s1) (ExprCommandSubst s2) = s1 == s2
+eqFishExprSameType (ExprQuotedCommandSubst s1) (ExprQuotedCommandSubst s2) = s1 == s2
 eqFishExprSameType (ExprListLiteral s1) (ExprListLiteral s2) = s1 == s2
 eqFishExprSameType (ExprListConcat a1 b1) (ExprListConcat a2 b2) = eqFishExpr a1 a2 && eqFishExpr b1 b2
 eqFishExprSameType (ExprGlob g1) (ExprGlob g2) = g1 == g2
@@ -358,10 +370,15 @@ data VariableAssignment = MkVariableAssignment
   deriving stock (Show, Eq)
 
 -- | Pipeline continuation: @|@ followed by variables and a statement.
-data JobPipeCont = PipeTo
-  { jpcVariables :: [VariableAssignment],
-    jpcStatement :: FishStatement
-  }
+data JobPipeCont
+  = PipeTo
+      { jpcVariables :: [VariableAssignment],
+        jpcStatement :: FishStatement
+      }
+  | PipeErrorTo
+      { jpcVariables :: [VariableAssignment],
+        jpcStatement :: FishStatement
+      }
   deriving stock (Show, Eq)
 
 -- | Pipeline with optional @time@, leading variables, and backgrounding.

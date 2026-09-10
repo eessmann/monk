@@ -39,6 +39,7 @@ data FunctionFlag
   | FuncWraps Text
   | FuncHelp
   | FuncInheritVariable
+  | FuncCaptureVariable Text
   | FuncUnknownFlag Text
   deriving stock (Show, Eq)
 
@@ -53,6 +54,7 @@ data SetFlag
   | SetPrepend
   | SetErase
   | SetPath
+  | SetUnpath
   | SetQuery
   deriving stock (Show, Eq)
 

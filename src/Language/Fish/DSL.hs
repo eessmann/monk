@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -6,7 +7,9 @@
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+#if __GLASGOW_HASKELL__ >= 914
 {-# OPTIONS_GHC -Wno-pattern-namespace-specifier #-}
+#endif
 
 module Language.Fish.DSL
   ( FishType (..),
