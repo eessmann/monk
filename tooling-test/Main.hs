@@ -9,6 +9,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Monk.Tooling.Package (Linkage (..), Target (..), inspectLinkage, packageReport, readTarget, verifyDescription)
+import Monk.Tooling.Process (ProcessResult (..), ProcessSpec (..), runProcess)
 import Monk.Tooling.Summary (compact, summaryReport)
 import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (..))
@@ -86,7 +87,46 @@ main =
           B.readFile output >>= (@?= saved)
           removeFile input
           exists <- doesFileExist output
-          when exists (removeFile output)
+          when exists (removeFile output),
+        testCase "process runner preserves raw streams and nonzero status" $ do
+          result <-
+            runProcess
+              ProcessSpec
+                { executable = "/bin/sh",
+                  arguments = ["-c", "cat; printf '\\377'; printf '\\376' >&2; exit 7"],
+                  workingDirectory = Nothing,
+                  environment = Nothing,
+                  stdinBytes = B.pack [0, 255],
+                  timeoutMicros = 5000000
+                }
+          processExit result @?= ExitFailure 7
+          processStdout result @?= B.pack [0, 255, 255]
+          processStderr result @?= B.pack [254]
+          processTimedOut result @?= False,
+        testCase "process runner bounds a blocked process group" $ do
+          result <-
+            runProcess
+              ProcessSpec
+                { executable = "/bin/sh",
+                  arguments = ["-c", "sleep 60 & wait"],
+                  workingDirectory = Nothing,
+                  environment = Nothing,
+                  stdinBytes = "",
+                  timeoutMicros = 300000
+                }
+          processTimedOut result @?= True,
+        testCase "process runner bounds descendants holding output pipes" $ do
+          result <-
+            runProcess
+              ProcessSpec
+                { executable = "/bin/sh",
+                  arguments = ["-c", "sleep 60 & exit 0"],
+                  workingDirectory = Nothing,
+                  environment = Nothing,
+                  stdinBytes = "",
+                  timeoutMicros = 300000
+                }
+          processTimedOut result @?= True
       ]
 
 assertLeft :: T.Text -> Either T.Text a -> IO ()

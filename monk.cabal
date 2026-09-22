@@ -408,12 +408,14 @@ library monk-tooling
   visibility:          private
   hs-source-dirs:      tooling
   exposed-modules:     Monk.Tooling.Package
+                     , Monk.Tooling.Process
                      , Monk.Tooling.Summary
   build-depends:       monk:monk-runtime-core
                      , aeson ^>= 2.2
                      , bytestring ^>= 0.12
                      , process ^>= 1.6
                      , text ^>= 2.1
+                     , unix >= 2.8 && < 2.9
 
 executable monk-tool
   import:              common-options
