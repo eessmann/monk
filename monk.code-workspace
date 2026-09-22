@@ -5,7 +5,7 @@
 		}
 	],
 	"settings": {
-		"haskell.ghcupExecutablePath": "~/.ghcup/bin/ghcup",
-		"haskell.manageHLS": "GHCup"
+		"haskell.ghcupExecutablePath": "",
+		"haskell.manageHLS": "PATH"
 	}
 }
