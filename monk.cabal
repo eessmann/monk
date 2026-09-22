@@ -408,6 +408,7 @@ library monk-tooling
   visibility:          private
   hs-source-dirs:      tooling
   exposed-modules:     Monk.Tooling.Package
+                     , Monk.Tooling.Summary
   build-depends:       monk:monk-runtime-core
                      , aeson ^>= 2.2
                      , bytestring ^>= 0.12
@@ -424,6 +425,7 @@ executable monk-tool
                      , directory ^>= 1.3
                      , filepath ^>= 1.5
                      , optparse-applicative ^>= 0.19
+                     , unix >= 2.8 && < 2.9
 
 test-suite monk-tool-test
   import:              common-options
@@ -433,6 +435,8 @@ test-suite monk-tool-test
   build-tool-depends:  monk:monk-tool
   build-depends:       monk:monk-tooling
                      , aeson ^>= 2.2
+                     , bytestring ^>= 0.12
+                     , directory ^>= 1.3
                      , process ^>= 1.6
                      , tasty ^>= 1.5
                      , tasty-hunit ^>= 0.10

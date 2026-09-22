@@ -2,12 +2,17 @@
 
 module Main (main) where
 
-import Data.Aeson (Value (..))
+import Data.Aeson (Value (..), encode, object, (.=))
 import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString qualified as B
+import Data.ByteString.Lazy qualified as BL
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Monk.Tooling.Package (Linkage (..), Target (..), inspectLinkage, packageReport, readTarget, verifyDescription)
+import Monk.Tooling.Summary (compact, summaryReport)
+import System.Directory (doesFileExist, getTemporaryDirectory, removeFile)
 import System.Exit (ExitCode (..))
+import System.IO (hClose, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Test.Tasty (defaultMain, testGroup)
 import Test.Tasty.HUnit (assertBool, testCase, (@?=))
@@ -50,7 +55,38 @@ main =
           (status, output, _) <- readProcessWithExitCode "monk-tool" ["runtime", "inspect", "--help"] ""
           status @?= ExitSuccess
           assertBool "missing --target option" ("--target" `isInfixOf` output)
-          assertBool "missing --binary option" ("--binary" `isInfixOf` output)
+          assertBool "missing --binary option" ("--binary" `isInfixOf` output),
+        testCase "summary drops raw streams and observations recursively" $ do
+          let input = object ["base64" .= ("raw" :: T.Text), "fixtures" .= [object ["observations" .= [True], "stdout" .= object ["base64" .= ("abc" :: T.Text), "sha256" .= ("digest" :: T.Text)]]]]
+          compact input @?= object ["fixtures" .= [object ["stdout" .= object ["sha256" .= ("digest" :: T.Text)]]]],
+        testCase "summary records the complete source report hash" $ do
+          let raw = BL.toStrict (encode (object ["status" .= ("match" :: T.Text)]))
+          case summaryReport "/tmp/raw.json" raw of
+            Left failure -> assertBool failure False
+            Right (Object fields) -> do
+              KM.lookup "status" fields @?= Just (String "match")
+              case KM.lookup "raw_report" fields of
+                Just (Object source) -> do
+                  KM.lookup "path" source @?= Just (String "/tmp/raw.json")
+                  KM.lookup "sha256" source @?= Just (String "d0928a42b4e34a3c937e0ff09dffb48e8bc98d996f956655651dc248501b9dd8")
+                _ -> assertBool "missing raw report identity" False
+            Right _ -> assertBool "expected summary object" False,
+        testCase "summary CLI creates once and refuses to replace evidence" $ do
+          temporary <- getTemporaryDirectory
+          (input, handle) <- openTempFile temporary "monk-summary-"
+          hClose handle
+          let output = input <> ".summary.json"
+          BL.writeFile input (encode (object ["base64" .= ("raw" :: T.Text), "status" .= ("match" :: T.Text)]))
+          (firstStatus, _, _) <- readProcessWithExitCode "monk-tool" ["evidence", "summary", input, output] ""
+          firstStatus @?= ExitSuccess
+          saved <- B.readFile output
+          assertBool "raw base64 leaked into summary" (not ("base64" `isInfixOf` show saved))
+          (secondStatus, _, _) <- readProcessWithExitCode "monk-tool" ["evidence", "summary", input, output] ""
+          assertBool "existing evidence was replaced" (secondStatus /= ExitSuccess)
+          B.readFile output >>= (@?= saved)
+          removeFile input
+          exists <- doesFileExist output
+          when exists (removeFile output)
       ]
 
 assertLeft :: T.Text -> Either T.Text a -> IO ()
