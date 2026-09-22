@@ -402,3 +402,38 @@ test-suite runtime-test
   ghc-options:         -Wall
   if flag(development)
     ghc-options:       -Werror
+
+library monk-tooling
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      tooling
+  exposed-modules:     Monk.Tooling.Package
+  build-depends:       monk:monk-runtime-core
+                     , aeson ^>= 2.2
+                     , bytestring ^>= 0.12
+                     , process ^>= 1.6
+                     , text ^>= 2.1
+
+executable monk-tool
+  import:              common-options
+  hs-source-dirs:      tooling-app
+  main-is:             Main.hs
+  build-depends:       monk:monk-tooling
+                     , aeson ^>= 2.2
+                     , bytestring ^>= 0.12
+                     , directory ^>= 1.3
+                     , filepath ^>= 1.5
+                     , optparse-applicative ^>= 0.19
+
+test-suite monk-tool-test
+  import:              common-options
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      tooling-test
+  main-is:             Main.hs
+  build-tool-depends:  monk:monk-tool
+  build-depends:       monk:monk-tooling
+                     , aeson ^>= 2.2
+                     , process ^>= 1.6
+                     , tasty ^>= 1.5
+                     , tasty-hunit ^>= 0.10
+                     , text ^>= 2.1
