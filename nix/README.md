@@ -1,7 +1,11 @@
 # Reproducible development and native runtime packages
 
-Use standalone devenv 2.3.1 or newer. `devenv.lock` pins IOHK haskell.nix,
-its tested nixpkgs, the tool packages, and the Fish 4.6.0 reference package.
+Use standalone devenv 2.3.1 or newer. `devenv.yaml` declares
+`github:input-output-hk/haskell.nix` and `github:NixOS/nixpkgs/nixos-unstable`.
+Exact revisions belong in `devenv.lock`, including the independently locked tool
+and reference package sets. haskell.nix's nested `nixpkgs` input follows the root
+`nixpkgs` input. `follows: nixpkgs` names that input; the branch belongs in its URL,
+not in a `follows: nixpkgs/nixos-unstable` path.
 `cabal.project` supplies the shared Hackage index-state and development flags.
 The default compiler is GHC 9.14.1; compatibility uses GHC 9.12.2.
 
@@ -38,7 +42,14 @@ lock until an intentional `devenv update nixpkgs-tools` revision change.
 Record the exact binaries and locale-sensitive Bash build behavior with
 `python3 scripts/reference-runtime-profile.py`. In particular, iconv configuration
 can change invalid Unicode escape behavior even at the same Bash version.
-Keep `nixpkgs` following haskell.nix's tested package set to preserve cache hits.
+Use targeted updates such as `devenv update haskell-nix`, `devenv update nixpkgs`,
+or `devenv update nixpkgs-tools`. A bare `devenv update` also advances
+`nixpkgs-reference`; update that input only when deliberately changing the
+reference pair and its version assertions in `nix/reference-runtimes.nix`.
+Check IOG cache availability after changing the compiler package set: following
+the root nixpkgs does not guarantee it matches haskell.nix's tested revision.
+CI reads its standalone devenv bootstrap revision from the `nixpkgs-tools` lock
+node so the workflow does not duplicate a commit pin.
 
 Native Fish integration remains the standalone devenv hook. Existing users
 of `devenv hook fish | source` can approve this checkout with `devenv allow`;

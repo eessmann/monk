@@ -1,6 +1,6 @@
 { pkgs, lib, inputs, config, ... }:
 let
-  # Match haskell.nix's tested nixpkgs and overlay to use the IOG cache.
+  # Share the lock-resolved root nixpkgs with haskell.nix's overlay.
   hp = import inputs.nixpkgs {
     system = pkgs.stdenv.hostPlatform.system;
     inherit (inputs.haskell-nix) config;

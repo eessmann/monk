@@ -13,7 +13,6 @@ permissions:
   contents: read
 
 env:
-  DEVENV_NIXPKGS_REV: 44a91898084f46797b5fac650c7e8c9ac38c43d4
   LC_ALL: C
   LANG: C
   NIX_CONFIG: |
@@ -32,8 +31,10 @@ jobs:
         extra_nix_config: |
           extra-substituters = https://cache.iog.io
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
-    - name: Install pinned standalone devenv
-      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - name: Install locked standalone devenv
+      run: |
+        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - run: devenv shell -- monk-quality
 
   acceptance:
@@ -52,8 +53,10 @@ jobs:
         extra_nix_config: |
           extra-substituters = https://cache.iog.io
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
-    - name: Install pinned standalone devenv
-      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - name: Install locked standalone devenv
+      run: |
+        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - name: Identify the locked execution profile
       run: |
         devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
@@ -116,8 +119,10 @@ jobs:
         extra_nix_config: |
           extra-substituters = https://cache.iog.io
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
-    - name: Install pinned standalone devenv
-      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - name: Install locked standalone devenv
+      run: |
+        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - name: Inspect the release build plan and cache availability
       run: |
         mkdir -p artifacts

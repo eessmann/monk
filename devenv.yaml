@@ -1,12 +1,16 @@
 # yaml-language-server: $schema=https://devenv.sh/devenv.schema.json
 inputs:
   haskell-nix:
-    url: github:input-output-hk/haskell.nix/cc0be951a0041bb1c213b37858a51e1da2b5f689
+    url: github:input-output-hk/haskell.nix
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
   nixpkgs:
-    follows: haskell-nix/nixpkgs
+    url: github:NixOS/nixpkgs/nixos-unstable
   nixpkgs-tools:
-    url: github:NixOS/nixpkgs/44a91898084f46797b5fac650c7e8c9ac38c43d4
+    url: github:NixOS/nixpkgs/nixos-unstable
+  # Keep the reference shell versions fixed in devenv.lock.
   nixpkgs-reference:
-    url: github:NixOS/nixpkgs/c5f167527b44a51c1e8cdd0e519040092ad31b8f
+    url: github:NixOS/nixpkgs/nixos-unstable
 
 allow_unfree: true
