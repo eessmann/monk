@@ -42,7 +42,7 @@ unitOutputBundleTests =
             _ -> assertFailure "expected one owned native image" >> fail "native artifact missing"
           bytes <- readFileBS provider
           nativeImageBytes image @?= bytes
-          nativeImageABI image @?= 1
+          nativeImageABI image @?= 2
           nativeImageProfile image @?= Bash53Signed64Fish46
           removeFile provider
           void (publishRequired bundle)

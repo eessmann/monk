@@ -8,9 +8,11 @@ module Language.Fish.Translator.Child
     ChildRuntime (..),
     ChildInvocation,
     childPrelude,
+    childSnapshotPrelude,
     childCommand,
     childRequirements,
     childStatistics,
+    childSessionFrames,
     ChildCapture (..),
     ChildPipeline (..),
     materializeChild,
@@ -25,10 +27,11 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Language.Fish.DSL.Internal
 import Language.Fish.Translator.Statistics (materializationStatistics)
+import Language.Fish.Translator.Traps qualified as Traps
 import Monk.Translation.Types
   ( FishFeature (FunctionScopeSharing, NulDelimitedCapture),
     NativeOperation (NativeChildCapture, NativeChildRun, NativeDescriptorState),
-    PlatformCapability (Linux64DescriptorFilesystem),
+    PlatformCapability (PosixOwnedDescriptors),
     RequirementUse (..),
     RuntimeProgram (RequiresCommand, RequiresFishFeature, RequiresPlatformCapability),
     RuntimeRequirement (..),
@@ -46,18 +49,22 @@ data ChildRuntime = MkChildRuntime
     childSuppressionName :: Text,
     childRuntimeNames :: Set Text,
     childNativeRuntimeName :: Text,
-    childLexicallySuppressed :: Bool
+    childLexicallySuppressed :: Bool,
+    childSupervised :: Bool,
+    childTraps :: Bool
   }
   deriving stock (Eq, Show)
 
 data ChildInvocation = MkChildInvocation
   { childPrelude :: [FishStatement],
+    childSnapshotPrelude :: [FishStatement],
     childCommand :: FishStatement,
     childRequirements :: [RuntimeRequirement],
     childStatistics :: TranslationStatistics,
     invocationFrames :: [ExprOrRedirect],
     invocationShadows :: [FishStatement],
-    invocationRuntimeName :: Text
+    invocationRuntimeName :: Text,
+    invocationSupervised :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -79,12 +86,13 @@ data ChildPipeline = MkChildPipeline
 
 -- | Prefix, execution mode, runtime names, actual visible Fish scalar names,
 -- owned helper/function definitions, then the lowered child statements.
-materializeChild :: Text -> ChildMode -> ChildRuntime -> Set Text -> [FishStatement] -> [FishStatement] -> Either Text ChildInvocation
-materializeChild prefix mode runtime bindings definitions body = do
+materializeChild :: Text -> ChildMode -> ChildRuntime -> Set Text -> Set Text -> [FishStatement] -> [FishStatement] -> Either Text ChildInvocation
+materializeChild prefix mode runtime bindings arrays definitions body = do
   let names = S.toAscList ((bindings <> childRuntimeNames runtime <> S.fromList [childStatusName runtime, childErrexitName runtime, childSuppressionName runtime]) S.\\ S.fromList ["SHLVL", "PWD"])
-  unless (all validName (childNativeRuntimeName runtime : prefix : names)) (Left "Child snapshot requires concrete scalar Fish binding names")
+  unless (all validName (childNativeRuntimeName runtime : prefix : names <> S.toAscList arrays)) (Left "Child snapshot requires concrete scalar Fish binding names")
   let snapshots = zipWith snapshot [0 :: Int ..] names
-      arguments = concatMap (\(_, values, _) -> values) snapshots
+      vectors = zipWith snapshotArray [0 :: Int ..] (S.toAscList arrays)
+      arguments = concatMap (\(_, values, _) -> values) (snapshots <> vectors)
       restore = concatMap (\(_, _, statements) -> statements) snapshots
       finalStatus = if null body then ExprLiteral "0" else variable (childStatusName runtime)
       wrapper = prefix <> "_body"
@@ -95,19 +103,22 @@ materializeChild prefix mode runtime bindings definitions body = do
               <> definitions
               <> restore
               <> [setList [] "argv" (ExprVariable (VarIndex "argv" (IndexRange (Just (ExprNumLiteral (length names * 4 + 1))) Nothing)))]
+              <> concatMap (\(_, _, statements) -> statements) vectors
+              <> [statement | childTraps runtime, statement <- Traps.initialize (childOwnedPrefix runtime)]
               <> [set [] (childErrexitName runtime) (ExprLiteral "0") | mode == SubstitutionChild]
               <> [set [] (childSuppressionName runtime) (ExprLiteral "1") | childLexicallySuppressed runtime]
               <> [ Stmt (Function (MkFishFunction wrapper [FuncUnknownFlag "--no-scope-shadowing"] [] (bodyNE (body <> [builtin "return" [value finalStatus]])))),
                    Stmt (Command wrapper [value (ExprVariable (VarAll "argv"))]),
-                   builtin "exit" [value (variable "status")]
+                   if childTraps runtime then Traps.exitWithStatus (childOwnedPrefix runtime) (variable "status") else builtin "exit" [value (variable "status")]
                  ]
           )
       frames = [value (ExprEmbeddedScript script), value (variable "SHLVL")] <> arguments <> [value (ExprVariable (VarAll "argv"))]
-      shadows = [setList [SetLocal, SetUnexport, SetUnpath] name (ExprVariable (VarAll name)) | name <- names]
+      shadows = [setList [SetLocal, SetUnexport, SetUnpath] name (ExprVariable (VarAll name)) | name <- names <> S.toAscList arrays]
       launcher = prefix <> "_launch"
-      launch = Stmt (Function (MkFishFunction launcher [FuncUnknownFlag "--no-scope-shadowing"] [] (transportCommand (childNativeRuntimeName runtime) "child-run" "" frames shadows NE.:| [])))
-      prelude = concatMap (\(statements, _, _) -> statements) snapshots <> [launch]
-  pure (MkChildInvocation prelude (Stmt (Command launcher [value (ExprVariable (VarAll "argv"))])) [require "fish", nativeRuntimeRequirement NativeDescriptorState "Observe original child stream descriptors", nativeRuntimeRequirement NativeChildRun "Owned child execution and byte transport", feature FunctionScopeSharing, feature NulDelimitedCapture, platformRequirement] (materializationStatistics (childOwnedPrefix runtime) (childNativeRuntimeName runtime) script) frames shadows (childNativeRuntimeName runtime))
+      launch = Stmt (Function (MkFishFunction launcher [FuncUnknownFlag "--no-scope-shadowing"] [] (transportCommand (childNativeRuntimeName runtime) (if childSupervised runtime then "child-run-session" else "child-run") "" frames shadows NE.:| [])))
+      snapshotPrelude = concatMap (\(statements, _, _) -> statements) (snapshots <> vectors)
+      prelude = snapshotPrelude <> [launch]
+  pure (MkChildInvocation prelude snapshotPrelude (Stmt (Command launcher [value (ExprVariable (VarAll "argv"))])) [require "fish", nativeRuntimeRequirement NativeDescriptorState "Observe original child stream descriptors", nativeRuntimeRequirement NativeChildRun "Owned child execution and byte transport", feature FunctionScopeSharing, feature NulDelimitedCapture, platformRequirement] (materializationStatistics (childOwnedPrefix runtime) (childNativeRuntimeName runtime) script) frames shadows (childNativeRuntimeName runtime) (childSupervised runtime))
   where
     snapshot index name =
       let present = prefix <> "_present_" <> show index
@@ -133,6 +144,30 @@ materializeChild prefix mode runtime bindings definitions body = do
                 [builtin "set" [value (ExprLiteral "--erase"), value (ExprLiteral name)]]
             ]
        in (setup, map (value . variable) [present, exported, count, saved], restore)
+    snapshotArray index name =
+      let present = prefix <> "_array_present_" <> show index
+          saved = prefix <> "_array_values_" <> show index
+          count = prefix <> "_array_count_" <> show index
+          end = prefix <> "_array_end_" <> show index
+          next = prefix <> "_array_next_" <> show index
+          setup =
+            [ set [SetLocal] present (ExprLiteral "0"),
+              conditional (builtinCommand "set" [value (ExprLiteral "--query"), value (ExprLiteral name)]) [set [] present (ExprLiteral "1")] [],
+              setList [SetLocal] saved (ExprVariable (VarAll name)),
+              set [SetLocal] count (ExprQuotedCommandSubst (builtin "count" [value (ExprVariable (VarAll saved))] NE.:| []))
+            ]
+          addition amount = ExprQuotedCommandSubst (builtin "math" [value (argument 2), value (ExprLiteral "+"), value (ExprLiteral amount)] NE.:| [])
+          restored = ExprVariable (VarIndex "argv" (IndexRange (Just (ExprNumLiteral 3)) (Just (ExprMath (variable end NE.:| [])))))
+          restore =
+            [ set [SetGlobal] end (addition "2"),
+              set [SetGlobal] next (addition "3"),
+              conditional
+                (equals (argument 1) "1")
+                [conditional (equals (argument 2) "0") [setList [SetGlobal, SetUnexport, SetUnpath] name (ExprListLiteral [])] [setList [SetGlobal, SetUnexport, SetUnpath] name restored]]
+                [builtin "set" [value (ExprLiteral "--erase"), value (ExprLiteral name)]],
+              setList [] "argv" (ExprVariable (VarIndex "argv" (IndexRange (Just (ExprMath (variable next NE.:| []))) Nothing)))
+            ]
+       in (setup, [value (variable present), value (variable count), value (ExprVariable (VarAll saved))], restore)
     argument index = ExprQuotedVariable (VarIndex "argv" (IndexSingle (ExprNumLiteral index)))
     -- Only the directory subsystem owns a list binding. Its variable-style
     -- byte encoding contains no slash or newline, so one scalar snapshot frame
@@ -148,6 +183,11 @@ materializeChild prefix mode runtime bindings definitions body = do
         (ExprCommandSubst (builtin "string" [value (ExprLiteral "unescape"), value (ExprLiteral "--style=var"), value (ExprLiteral "--"), value (ExprCommandSubst (builtin "string" [value (ExprLiteral "split"), value (ExprLiteral "/"), value (ExprLiteral "--"), value encoded] NE.:| []))] NE.:| []))
     restoreSnapshot flags name encoded = set flags name encoded
 
+-- | A compiled script, SHLVL and scalar/argv snapshot for the native owner.
+-- Values remain pipe-framed data; they never cross an exec argv limit.
+childSessionFrames :: ChildInvocation -> [ExprOrRedirect]
+childSessionFrames = invocationFrames
+
 materializeCapture :: Text -> Maybe SourceRange -> ChildInvocation -> Either Text ChildCapture
 materializeCapture prefix range invocation = do
   unless (validName prefix) (Left "Capture temporary prefix is not a scalar Fish name")
@@ -157,7 +197,7 @@ materializeCapture prefix range invocation = do
       status = prefix <> "_status"
       failure = prefix <> "_error"
       warning = srcFile source <> ": line " <> show (srcLine source) <> ": warning: command substitution: ignored null byte in input\n"
-      producer = transportCommand (invocationRuntimeName invocation) "child-capture" warning (invocationFrames invocation) (invocationShadows invocation)
+      producer = transportCommand (invocationRuntimeName invocation) (if invocationSupervised invocation then "child-capture-session" else "child-capture") warning (invocationFrames invocation) (invocationShadows invocation)
       capture = ExprCommandSubst (Stmt (Pipeline (MkFishJobPipeline False [] producer [PipeTo [] (builtin "string" [value (ExprLiteral "split0")])] False)) NE.:| [])
       member index = ExprQuotedVariable (VarIndex packet (IndexSingle (ExprNumLiteral index)))
       validPacket = builtinCommand "test" [value (ExprCommandSubst (builtin "count" [value (ExprVariable (VarAll packet))] NE.:| [])), value (ExprLiteral "="), value (ExprLiteral "3")]
@@ -165,7 +205,7 @@ materializeCapture prefix range invocation = do
       check = conditional validPacket [conditional (equals (member 1) "ok") accepted []] []
   pure
     MkChildCapture
-      { captureStatements = childPrelude invocation <> [set [SetLocal] result (ExprLiteral ""), set [SetLocal] status (ExprLiteral "125"), set [SetLocal] failure (ExprLiteral "child-transport-failure"), setList [SetLocal] packet (ExprListLiteral []), Stmt (Begin (set [SetLocal] "fish_read_limit" (ExprLiteral "0") NE.:| [setList [] packet capture]) []), check],
+      { captureStatements = childSnapshotPrelude invocation <> [set [SetLocal] result (ExprLiteral ""), set [SetLocal] status (ExprLiteral "125"), set [SetLocal] failure (ExprLiteral "child-transport-failure"), setList [SetLocal] packet (ExprListLiteral []), Stmt (Begin (set [SetLocal] "fish_read_limit" (ExprLiteral "0") NE.:| [setList [] packet capture]) []), check],
         captureValue = variable result,
         captureStatus = variable status,
         captureError = variable failure,
@@ -229,7 +269,7 @@ feature :: FishFeature -> RuntimeRequirement
 feature capability = MkRuntimeRequirement (RequiresFishFeature capability) (MkRequirementUse "Owned child snapshots and launch scope" Nothing NE.:| [])
 
 platformRequirement :: RuntimeRequirement
-platformRequirement = MkRuntimeRequirement (RequiresPlatformCapability Linux64DescriptorFilesystem) (MkRequirementUse "Owned anonymous script and state descriptors" Nothing NE.:| [])
+platformRequirement = MkRuntimeRequirement (RequiresPlatformCapability PosixOwnedDescriptors) (MkRequirementUse "Owned POSIX child descriptors and private transport files" Nothing NE.:| [])
 
 -- | Duplicate the original stdin before connecting the metadata pipe. Every
 -- payload crosses a builtin byte writer, never an executable argument boundary.
@@ -237,11 +277,11 @@ transportCommand :: Text -> Text -> Text -> [ExprOrRedirect] -> [FishStatement] 
 transportCommand runtimeName mode warning frames shadows =
   let descriptorMask = runtimeName <> "_child_descriptors"
       writer = builtin "printf" (value (ExprLiteral "%s\\0") : value (ExprLiteral warning) : value (variable descriptorMask) : frames)
-      driver = Stmt (Command runtimeName (map (value . ExprLiteral) ["--abi", "1", mode]))
+      driver = Stmt (Command runtimeName (map (value . ExprLiteral) ["--abi", "2", mode]))
       pipe = Stmt (Pipeline (MkFishJobPipeline False [] writer [PipeTo [] driver] False))
       withInput = Stmt (Begin (pipe NE.:| []) [RedirectVal (MkRedirect (RedirectFD 3) RedirectIn (RedirectTargetFD 0))])
       -- Odd masks have an open stdin. A closed stdin must never be duplicated:
       -- Fish would fail the native exec before it could consume its metadata.
       launch = foldr (\mask fallback -> [conditional (equals (variable descriptorMask) mask) [withInput] fallback]) [pipe] ["1", "3", "5", "7"]
-      probe = Stmt (Command runtimeName (map (value . ExprLiteral) ["--abi", "1", "descriptor-state"]))
+      probe = Stmt (Command runtimeName (map (value . ExprLiteral) ["--abi", "2", "descriptor-state"]))
    in Stmt (Begin (bodyNE (shadows <> [probe, set [SetLocal] descriptorMask (variable "status")] <> launch)) [])

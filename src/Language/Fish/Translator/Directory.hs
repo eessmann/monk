@@ -9,22 +9,24 @@ import Language.Bash.Plan qualified as P
 import Language.Bash.Plan.Directory
 import Language.Fish.DSL.Internal
 import Language.Fish.Translator.Binding qualified as Binding
+import Language.Fish.Translator.NativeRuntime qualified as NativeRuntime
+import Language.Fish.Translator.Session qualified as Session
 import Monk.Translation.Types
 
 -- | Unique temporary prefix, immutable runtime function, semantic status slot,
 -- source origin/line and the admitted operation.
-directoryStatements :: EntryMode -> Text -> Text -> Text -> Text -> Text -> DirectoryOperation -> [FishStatement]
-directoryStatements mode prefix runtimePrefix status origin line operation = case operation of
-  PrintDirectory False -> [builtin "printf" [lit "%s\n", val (scalar "PWD")], saveStatus]
-  PrintDirectory True -> [native "directory-physical" [], saveStatus]
+directoryStatements :: Bool -> EntryMode -> Text -> Text -> Text -> Text -> Text -> DirectoryOperation -> [FishStatement]
+directoryStatements supervised mode prefix runtimePrefix status origin line operation = case operation of
+  PrintDirectory False -> [emit "pwd" "1" (ExprStringConcat (scalar "PWD") (ExprLiteral "\n")), saveStatus]
+  PrintDirectory True -> [relay "pwd" "1" (native "directory-physical" []), saveStatus]
   ChangeDirectory path -> change "cd" (ExprLiteral path) []
-  ChangePreviousDirectory -> change "cd" (scalar "OLDPWD") [builtin "printf" [lit "%s\n", val (scalar "PWD")]]
-  PushDirectory path -> change "pushd" (ExprLiteral path) [setList [SetGlobal] "dirstack" (ExprListConcat (ExprListLiteral [scalar previous]) (ExprVariable (VarAll "dirstack"))), displayStack]
+  ChangePreviousDirectory -> change "cd" (scalar "OLDPWD") [emit "cd" "1" (ExprStringConcat (scalar "PWD") (ExprLiteral "\n")), saveStatus]
+  PushDirectory path -> change "pushd" (ExprLiteral path) [setList [SetGlobal] "dirstack" (ExprListConcat (ExprListLiteral [scalar previous]) (ExprVariable (VarAll "dirstack"))), displayStack "pushd", saveStatus]
   PopDirectory ->
     [ choose
         (builtin "set" [lit "--query", lit "dirstack[1]"])
-        (change "popd" (index "dirstack" 1) [setList [SetGlobal] "dirstack" (ExprVariable (VarIndex "dirstack" (IndexRange (Just (ExprNumLiteral 2)) Nothing))), displayStack])
-        [builtin "printf" [lit "%s\n", lit (origin <> ": line " <> line <> ": popd: directory stack empty"), toError], set [] status (ExprLiteral "1")]
+        (change "popd" (index "dirstack" 1) [setList [SetGlobal] "dirstack" (ExprVariable (VarIndex "dirstack" (IndexRange (Just (ExprNumLiteral 2)) Nothing))), displayStack "popd", saveStatus])
+        [emit "popd" "2" (ExprLiteral (origin <> ": line " <> line <> ": popd: directory stack empty\n")), saveStatus, choose (builtin "test" [val (scalar status), lit "=", lit "141"]) [] [set [] status (ExprLiteral "1")]]
     ]
   where
     runtime = runtimePrefix <> "native"
@@ -32,11 +34,49 @@ directoryStatements mode prefix runtimePrefix status origin line operation = cas
     statuses = prefix <> "statuses"
     target = prefix <> "target"
     saveStatus = set [] status (scalar "status")
-    native name arguments = Stmt (Command runtime (map lit ["--abi", "1", name] <> arguments))
-    displayStack =
-      Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "PWD"), val (scalar "HOME"), val (ExprVariable (VarAll "dirstack"))]) [PipeTo [] (native "directory-stack" [])] False))
+    native name arguments
+      | name == "session-directory-diagnostic" = Stmt (Decorated DecCommand (CommandExpr (scalar (NativeRuntime.runtimePathName runtimePrefix)) (map lit ["--abi", "2", name] <> arguments)))
+      | otherwise = Stmt (Command runtime (map lit ["--abi", "2", name] <> arguments))
+    displayStack name =
+      relay name "1" $
+        Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "PWD"), val (scalar "HOME"), val (ExprVariable (VarAll "dirstack"))]) [PipeTo [] (native "directory-stack" [])] False))
+    emit name descriptor bytes
+      | supervised = Session.request runtimePrefix "run" (map lit ["directory-output", origin, line, name, descriptor] <> [val bytes])
+      | otherwise = builtin "printf" ([lit "%s", val bytes] <> [toError | descriptor == "2"])
+    -- Finite physical-path/stack output preserves trailing newlines through
+    -- NUL framing before the owner writes to the active descriptor table.
+    -- Parent cd diagnostics use a separate external client to preserve cwd.
+    relay name descriptor statement
+      | not supervised = statement
+      | otherwise =
+          Stmt (Begin (definition :| [Stmt (Command helper [])]) [])
+      where
+        helper = prefix <> "deliver"
+        packet = prefix <> "output"
+        code = prefix <> "output_status"
+        definition =
+          Stmt
+            ( Function
+                ( MkFishFunction
+                    helper
+                    [FuncUnknownFlag "--no-scope-shadowing"]
+                    []
+                    ( set [SetLocal] "fish_read_limit" (ExprLiteral "0")
+                        :| [ setList [SetLocal] packet captured,
+                             choose (builtin "test" [val (index packet 2), lit "=", lit "0"]) [] [builtin "return" [val (index packet 2)]],
+                             choose
+                               (builtin "test" [val (index packet 1), lit "!=", lit ""])
+                               [emit name descriptor (index packet 1), builtin "return" [val (scalar "status")]]
+                               [],
+                             builtin "return" [lit "0"]
+                           ]
+                    )
+                )
+            )
+        producer = Stmt (Begin (statement :| [set [SetLocal] code (scalar "status"), builtin "printf" [lit "\\0%s\\0", val (scalar code)]]) [])
+        captured = ExprCommandSubst (Stmt (Pipeline (MkFishJobPipeline False [] producer [PipeTo [] (builtin "string" [lit "split0"])] False)) :| [])
     pathBound = Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "PWD"), val (scalar target)]) [PipeTo [] (native "directory-path-bound" [])] False))
-    boundFailure = [builtin "printf" [lit "%s\n", lit "monk: stable directory contract failed: resolved logical directory path exceeds 4095 bytes", toError], builtin (if mode == Sourceable then "return" else "exit") [lit "125"]]
+    boundFailure = [builtin "printf" [lit "%s\n", lit "monk: stable directory contract failed: resolved logical directory path exceeds the platform limit", toError], builtin (if mode == Sourceable then "return" else "exit") [lit "125"]]
     change command operand after =
       [ set [SetLocal] previous (scalar "PWD"),
         set [SetLocal] target operand,
@@ -50,13 +90,13 @@ directoryStatements mode prefix runtimePrefix status origin line operation = cas
                       False
                       []
                       (Stmt (Begin (builtin "printf" [lit "%s\\0", lit origin, lit line, lit command, val (scalar target), toError] :| [builtin "cd" [lit "--", val (scalar target)]]) []))
-                      [PipeErrorTo [] (native "directory-diagnostic" [])]
+                      [PipeErrorTo [] (native (if supervised then "session-directory-diagnostic" else "directory-diagnostic") [])]
                       False
                   )
               ),
             setList [SetLocal] statuses (ExprVariable (VarAll "pipestatus")),
             set [] status (index statuses 1),
-            choose (builtin "test" [val (index statuses 2), lit "=", lit "0"]) [] [set [] status (ExprLiteral "125")],
+            choose (builtin "test" [val (index statuses 2), lit "=", lit "0"]) [] [set [] status (index statuses 2)],
             choose
               (builtin "test" [val (scalar status), lit "=", lit "0"])
               (Binding.writeBinding (Binding.bindingRuntime runtimePrefix "OLDPWD") P.Global (scalar previous) <> after)
@@ -78,13 +118,13 @@ directorySetup cfg runtimePrefix
         <> [ choose (builtin "set" [lit "--query", lit "OLDPWD"]) [require (builtin "test" [val (capture (builtin "count" [val (ExprVariable (VarAll "OLDPWD"))])), lit "=", lit "1"]) "OLDPWD must be scalar"] [],
              choose (builtin "set" [lit "--query", lit "--export", lit "dirstack"]) (failure "dirstack must be unexported") []
            ]
-        <> [require (Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "PWD"), val (ExprVariable (VarAll "dirstack"))]) [PipeTo [] (Stmt (Command runtime (map lit ["--abi", "1", "directory-validate"])))] False))) "PWD or stack paths are not valid ordinary absolute directories"]
+        <> [require (Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "PWD"), val (ExprVariable (VarAll "dirstack"))]) [PipeTo [] (Stmt (Command runtime (map lit ["--abi", "2", "directory-validate"])))] False))) "PWD or stack paths are not valid ordinary absolute directories"]
         <> [setList [SetGlobal, SetUnexport] "dirstack" (ExprListLiteral []) | entryMode cfg == Standalone]
         <> [choose initialOldpwd [] (Binding.eraseBinding oldpwdBinding <> Binding.declareExport oldpwdBinding P.Global Nothing) | entryMode cfg == Standalone]
   where
     runtime = runtimePrefix <> "native"
     oldpwdBinding = Binding.bindingRuntime runtimePrefix "OLDPWD"
-    initialOldpwd = Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "OLDPWD")]) [PipeTo [] (Stmt (Command runtime (map lit ["--abi", "1", "directory-initial-oldpwd"])))] False))
+    initialOldpwd = Stmt (Pipeline (MkFishJobPipeline False [] (builtin "printf" [lit "%s\\0", val (scalar "OLDPWD")]) [PipeTo [] (Stmt (Command runtime (map lit ["--abi", "2", "directory-initial-oldpwd"])))] False))
     failure message = [builtin "printf" [lit "%s\n", lit ("monk: stable directory contract failed: " <> message), toError], builtin (if entryMode cfg == Sourceable then "return" else "exit") [lit "125"]]
     require predicate message = choose predicate [] (failure message)
     ordinary name = [choose (builtin "set" (map lit ["--query", flag, name])) (failure ("unsupported " <> flag <> " binding " <> name)) [] | flag <- ["--universal", "--path", "--local"]]

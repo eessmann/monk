@@ -22,6 +22,7 @@ module Monk.Source
     sourceGraphDiagnostics,
     sourceGraphRuntimeRequirements,
     sourceGraphStatistics,
+    sourceGraphExecutionStrategy,
     translateSourceGraph,
     translateSourceGraphWithEnvironment,
   )
@@ -35,7 +36,7 @@ import Language.Bash.Plan qualified as P
 import Language.Bash.Plan.Normalize
   ( NormalizationResult (..),
     SourceDocument (..),
-    beginNormalization,
+    beginNormalizationWithOrigin,
   )
 import Language.Fish.DSL (SourceRange)
 import Language.Fish.Translator.Plan (compileSourcePlan, plannedDiagnostics, plannedRequirements, plannedStatistics)
@@ -91,6 +92,9 @@ sourceGraphRuntimeRequirements = plannedRequirements . graphTranslation
 sourceGraphStatistics :: SourceGraph -> TranslationStatistics
 sourceGraphStatistics = plannedStatistics . graphTranslation
 
+sourceGraphExecutionStrategy :: SourceGraph -> ExecutionStrategy
+sourceGraphExecutionStrategy = executionStrategyFor . sourceGraphRuntimeRequirements
+
 translateSourceGraph :: TranslateConfig -> Bool -> FilePath -> IO (Either SourceGraphFailure SourceGraph)
 translateSourceGraph cfg recursive rootPath = do
   environment <- try @IOException captureSourceEnvironment
@@ -111,11 +115,11 @@ translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
         Nothing ->
           drive
             (snapshotPath input)
-            (M.singleton (snapshotPath input) (input, parsed, Nothing))
+            (M.singleton (snapshotPath input) (input, parsed))
             [input]
             []
             (map positionedCommentDiagnostic (prComments parsed))
-            (beginNormalization cfg (snapshotText input) parsed)
+            (beginNormalizationWithOrigin cfg (toText rootPath) (snapshotText input) parsed)
   where
     drive root cache inputs occurrences diagnostics = \case
       NormalizationFailed errors -> pure (Left (MkSourceGraphFailure root (MkTranslationFailure errors)))
@@ -140,10 +144,10 @@ translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
                       component parts value = value : parts
                    in "/" <> T.intercalate "/" (reverse (foldl' component [] (T.splitOn "/" absolute)))
                 executionEnvironment = maybe environment (\path -> environment {sourceWorkingDirectory = toString (resolveDirectory path)}) (P.sourceRequestWorkingDirectory request)
-            resolved <- resolveSourcePathIn executionEnvironment (P.sourceRequestTarget request)
+            resolved <- resolveSourcePathAndOriginIn executionEnvironment (P.sourceRequestTarget request)
             case resolved of
               Left diagnostic -> pure (Left (oneFailure root diagnostic {diagnosticRange = P.sourceRequestRange request}))
-              Right path
+              Right (path, origin)
                 | toText path `elem` P.sourceRequestStack request ->
                     pure
                       ( Left
@@ -160,31 +164,22 @@ translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
                           Left diagnostic -> pure (Left diagnostic)
                           Right input -> do
                             parsed <- parseBashScript (snapshotPath input) (snapshotText input)
-                            pure (Right (input, parsed, Just (P.sourceRequestEntryContext request)))
+                            pure (Right (input, parsed))
                     case loaded of
                       Left diagnostic -> pure (Left (oneFailure path diagnostic {diagnosticRange = P.sourceRequestRange request}))
-                      Right (input, parsed, priorContext)
-                        | maybe False (/= P.sourceRequestEntryContext request) priorContext ->
-                            pure
-                              ( Left
-                                  ( oneFailure
-                                      path
-                                      (sourceDiagnostic (P.sourceRequestRange request) "entry-context" "A dependency was reached under incompatible binding or dispatch facts")
-                                  )
-                              )
-                        | otherwise -> case parsedFailure parsed of
-                            Just failure -> pure (Left (MkSourceGraphFailure path failure))
-                            Nothing -> do
-                              let fresh = not (M.member path cache)
-                                  parent = maybe root toString (listToMaybe (reverse (P.sourceRequestStack request)))
-                                  occurrence = MkSourceOccurrence (length occurrences) (P.sourceRequestId request) parent path (P.sourceRequestRange request)
-                              drive
-                                root
-                                (M.insert path (input, parsed, Just (P.sourceRequestEntryContext request)) cache)
-                                (inputs <> [input | fresh])
-                                (occurrences <> [occurrence])
-                                (diagnostics <> [positionedCommentDiagnostic comment | fresh, comment <- prComments parsed])
-                                (resume (SourceDocument (snapshotText input) parsed))
+                      Right (input, parsed) -> case parsedFailure parsed of
+                        Just failure -> pure (Left (MkSourceGraphFailure path failure))
+                        Nothing -> do
+                          let fresh = not (M.member path cache)
+                              parent = maybe root toString (listToMaybe (reverse (P.sourceRequestStack request)))
+                              occurrence = MkSourceOccurrence (length occurrences) (P.sourceRequestId request) parent path (P.sourceRequestRange request)
+                          drive
+                            root
+                            (M.insert path (input, parsed) cache)
+                            (inputs <> [input | fresh])
+                            (occurrences <> [occurrence])
+                            (diagnostics <> [positionedCommentDiagnostic comment | fresh, comment <- prComments parsed])
+                            (resume (SourceDocument (snapshotText input) parsed origin))
 
 parsedFailure :: ParseResult -> Maybe TranslationFailure
 parsedFailure parsed

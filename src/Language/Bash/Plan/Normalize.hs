@@ -4,6 +4,7 @@ module Language.Bash.Plan.Normalize
   ( normalizeSource,
     normalizeDocument,
     beginNormalization,
+    beginNormalizationWithOrigin,
     NormalizationResult (..),
     SourceDocument (..),
   )
@@ -20,6 +21,7 @@ import Data.Set qualified as S
 import Data.Text qualified as T
 import Language.Bash.Arithmetic.Plan qualified as A
 import Language.Bash.Arithmetic.Source qualified as ArithmeticSource
+import Language.Bash.Parser (parseBashFragment)
 import Language.Bash.Plan qualified as P
 import Language.Bash.Plan.Directory qualified as Directory
 import Language.Bash.Plan.Effects (admitPipeline, closeChildRegion, mayWriteBuiltin)
@@ -37,6 +39,7 @@ import Prelude hiding (get, gets, identity, local, put)
 data Normalization = Normalization
   { nConfig :: TranslateConfig,
     nPositions :: M.Map Id (Position, Position),
+    nRuntimeOrigin :: Text,
     nConstants :: M.Map Text Text,
     nNumeric :: S.Set Text,
     nContinueNumeric :: M.Map Int (S.Set Text),
@@ -66,12 +69,15 @@ data Normalization = Normalization
     nDescriptors :: S.Set Int,
     nWritableDescriptors :: S.Set Int,
     nDirectoryFacts :: Directory.DirectoryFacts,
-    nDirectoryOutcomes :: Maybe (Directory.DirectoryFacts, Directory.DirectoryFacts)
+    nDirectoryOutcomes :: Maybe (Directory.DirectoryFacts, Directory.DirectoryFacts),
+    nEvaluatedPrograms :: [Text],
+    nArrays :: M.Map Text Int,
+    nErrTrapWrites :: S.Set Text
   }
 
 -- | The IO graph driver supplies immutable documents only when authoritative
 -- normalization reaches an executable source occurrence.
-data SourceDocument = SourceDocument Text ParseResult
+data SourceDocument = SourceDocument Text ParseResult Text
 
 data NormalizationResult a
   = NormalizationFailed (NonEmpty Diagnostic)
@@ -96,13 +102,16 @@ instance Monad NormalizationResult where
 type Normalize = StateT Normalization NormalizationResult
 
 normalizeSource :: TranslateConfig -> ParseResult -> Either (NonEmpty Diagnostic) P.SourcePlan
-normalizeSource cfg = withoutSources . startNormalization cfg Nothing
+normalizeSource cfg = withoutSources . startNormalization cfg Nothing Nothing
 
 normalizeDocument :: TranslateConfig -> Text -> ParseResult -> Either (NonEmpty Diagnostic) P.SourcePlan
-normalizeDocument cfg document = withoutSources . startNormalization cfg (Just document)
+normalizeDocument cfg document = withoutSources . startNormalization cfg (Just document) Nothing
 
 beginNormalization :: TranslateConfig -> Text -> ParseResult -> NormalizationResult P.SourcePlan
-beginNormalization cfg document = startNormalization cfg (Just document)
+beginNormalization cfg document = startNormalization cfg (Just document) Nothing
+
+beginNormalizationWithOrigin :: TranslateConfig -> Text -> Text -> ParseResult -> NormalizationResult P.SourcePlan
+beginNormalizationWithOrigin cfg origin document = startNormalization cfg (Just document) (Just origin)
 
 withoutSources :: NormalizationResult a -> Either (NonEmpty Diagnostic) a
 withoutSources = \case
@@ -110,8 +119,8 @@ withoutSources = \case
   NormalizationComplete value -> Right value
   NormalizationNeedsSource request _ -> Left (diagnostic (P.sourceRequestRange request) "source-environment" "Literal source requires an explicit graph environment" :| [])
 
-startNormalization :: TranslateConfig -> Maybe Text -> ParseResult -> NormalizationResult P.SourcePlan
-startNormalization cfg document parsed = do
+startNormalization :: TranslateConfig -> Maybe Text -> Maybe Text -> ParseResult -> NormalizationResult P.SourcePlan
+startNormalization cfg document origin parsed = do
   when
     (entryMode cfg == Standalone && callerContract cfg /= emptyCallerContract)
     (NormalizationFailed (diagnostic Nothing "caller-contract-mode" "Standalone execution cannot carry a caller contract" :| []))
@@ -125,6 +134,7 @@ startNormalization cfg document parsed = do
         Normalization
           cfg
           (prTokenPositions parsed)
+          (fromMaybe (documentName parsed) origin)
           (M.singleton "IFS" " \t\n")
           mempty
           mempty
@@ -155,6 +165,9 @@ startNormalization cfg document parsed = do
           (S.fromList [1, 2])
           (Directory.MkDirectoryFacts Directory.InitialDirectory False)
           Nothing
+          []
+          mempty
+          mempty
   when
     (entryMode cfg == Sourceable && callerAmbientEffects imports /= NoRelevantAmbientEffects)
     (NormalizationFailed (diagnostic Nothing "caller-effects" "Sourceable execution requires explicit no-relevant-ambient-effects obligations" :| []))
@@ -178,11 +191,18 @@ tokenRange token = gets (fmap convert . M.lookup (getId token) . nPositions)
     convert (start, end) = MkSourceRange (point start) (point end)
     point p = MkSourcePos (toText (posFile p)) (fromInteger (posLine p)) (fromInteger (posColumn p))
 
+-- Runtime spelling belongs to the source occurrence; canonical parser positions
+-- remain authoritative for discovery, cycles, diagnostics and function identity.
+runtimeTokenRange :: Token -> Normalize (Maybe SourceRange)
+runtimeTokenRange token = do
+  origin <- gets nRuntimeOrigin
+  fmap (\range -> range {rangeStart = (rangeStart range) {srcFile = origin}, rangeEnd = (rangeEnd range) {srcFile = origin}}) <$> tokenRange token
+
 normalizeStatement :: Token -> Normalize P.Statement
 normalizeStatement token = do
-  range <- tokenRange token
+  range <- runtimeTokenRange token
   modify' (\s -> s {nCommandLine = maybe 1 (srcLine . rangeStart) range, nDirectoryOutcomes = Nothing})
-  P.Statement range <$> case token of
+  node <- case token of
     T_Script _ _ body -> P.Sequence <$> normalizeStatements body
     T_BraceGroup _ body -> P.Sequence <$> normalizeStatements body
     T_Redirecting _ [] body -> statementNode <$> normalizeStatement body
@@ -194,9 +214,15 @@ normalizeStatement token = do
         length body > 1 -> do
           childrenValue <- traverse (normalizeChild token . (: [])) body
           stages <- maybe (reject token "empty-pipeline" "A pipeline needs stages") pure (NE.nonEmpty childrenValue)
-          either (reject token "pipeline-signal-lifetime") pure (admitPipeline stages)
-          pure (P.Pipeline stages)
+          case admitPipeline stages of
+            Right () -> pure (P.Pipeline stages)
+            Left message -> do
+              mode <- gets (entryMode . nConfig)
+              if mode == Standalone then pure (P.SupervisedPipeline stages) else reject token "pipeline-signal-lifetime" message
     T_Subshell _ body -> P.Subshell <$> normalizeChild token body
+    T_Backgrounded _ body -> do
+      requireSession token
+      P.Background <$> normalizeChild token [body]
     T_Banged _ body -> do
       value <- nested body
       modify' (\flow -> flow {nDirectoryOutcomes = fmap (\(success, failure) -> (failure, success)) (nDirectoryOutcomes flow)})
@@ -226,7 +252,8 @@ normalizeStatement token = do
       put exits {nContinueNumeric = nContinueNumeric before, nBreakNumeric = nBreakNumeric before}
       pure (P.ArithmeticFor initialValue predicateValue incrementValue bodyValue)
     T_ForIn _ name values body -> do
-      checkedName token (toText name)
+      unless (name == "_") (checkedName token (toText name))
+      rejectArrayScalar token (toText name)
       storage <- storageFor token False (toText name)
       wordsValue <- normalizeWords values
       before <- get
@@ -267,6 +294,8 @@ normalizeStatement token = do
       (site, expression, bindings) <- normalizeArithmeticAt token
       pure (P.ArithmeticCommand site expression bindings)
     _ -> reject token "unsupported-syntax" ("No admitted semantics for " <> tokenKind token <> " in statement context")
+  modify' invalidateTrapWrites
+  pure (P.Statement range node)
   where
     statementNode (P.Statement _ node) = node
     ordinaryPipe (T_Pipe _ "|") = True
@@ -276,7 +305,7 @@ normalizeStatement token = do
       errorExit <- get
       -- The next loop clause executes only after successful header evaluation.
       modify' (\flow -> flow {nNumeric = numeric, nVariables = variables})
-      range <- tokenRange value
+      range <- runtimeTokenRange value
       pure (P.Statement range (P.ArithmeticCommand site expression bindings), [errorExit | potentialFailure])
 
 normalizeRedirected :: Token -> [Token] -> Token -> Normalize P.StatementNode
@@ -285,7 +314,12 @@ normalizeRedirected parent redirects body = do
   before <- get
   operations <- traverse normalizeRedirect redirects
   writable <- gets nWritableDescriptors
+  let fallible = any (\case P.OpenDescriptor {} -> True; _ -> False) operations
+  when fallible (modify' (\flow -> flow {nDirect = False}))
   value <- normalizeStatement body
+  when fallible $ do
+    let effects = redirectedOperandEffects value
+    unless (S.null (Effects.effectWrites effects) && not (Effects.effectSubstitution effects)) (reject parent "redirect-assignment-effects" "Effectful builtin or assignment operands need expansion before file opens")
   after <- get
   unless
     (nLocals before == nLocals after)
@@ -293,8 +327,26 @@ normalizeRedirected parent redirects body = do
   when
     (not (S.member 1 writable) && mayWriteBuiltin (nFunctionBodies before) [value])
     (reject parent "redirect-closed-writer" "A builtin writing a closed stdout needs its original error and owner termination semantics")
-  put after {nDescriptors = nDescriptors before, nWritableDescriptors = nWritableDescriptors before}
+  put (if fallible then joinStates before after else after) {nDescriptors = nDescriptors before, nWritableDescriptors = nWritableDescriptors before}
   pure (P.Redirected operations value)
+
+redirectedOperandEffects :: P.Statement -> Effects.Effects
+redirectedOperandEffects (P.Statement _ node) = case node of
+  P.AssignmentCommand _ statements -> foldMap assignmentEffects statements
+  P.DeclarationCommand values -> foldMap (\case P.DeclareLocal _ _ value -> foldMap Effects.scalarEffects value; P.DeclareExport _ _ value -> foldMap Effects.scalarEffects value) values
+  P.SetArguments values -> foldMap Effects.wordEffects values
+  P.SourceBody request _ -> foldMap Effects.wordEffects (P.sourceRequestArguments request)
+  P.Wait values -> foldMap Effects.wordEffects values
+  P.Return value -> foldMap Effects.scalarEffects value
+  P.Exit value -> foldMap Effects.scalarEffects value
+  _ -> mempty
+  where
+    assignmentEffects (P.Statement _ assignment) = case assignment of
+      P.Assign _ _ value -> Effects.scalarEffects value
+      P.AssignArray _ _ values -> foldMap Effects.wordEffects values
+      P.AppendArray _ _ values -> foldMap Effects.wordEffects values
+      P.AssignArrayElement _ _ _ value -> Effects.scalarEffects value
+      _ -> mempty
 
 normalizeRedirect :: Token -> Normalize P.Redirection
 normalizeRedirect token = case token of
@@ -313,16 +365,48 @@ normalizeRedirect token = case token of
     T_IoFile _ operator file -> do
       input <- direction operator
       descriptor <- sourceNumber source input
-      unless
-        (getLiteralString file == Just "/dev/null")
-        (reject token "redirect-file" "File opens require owned descriptor and failure semantics; only the stable null device is admitted")
-      modify' (\flow -> flow {nDescriptors = S.insert descriptor (nDescriptors flow), nWritableDescriptors = (if input then S.delete else S.insert) descriptor (nWritableDescriptors flow)})
-      pure (P.NullDescriptor descriptor input)
+      mode <- case operator of
+        T_Less {} -> pure P.ReadFile
+        T_Greater {} -> pure P.WriteFile
+        T_DGREAT {} -> pure P.AppendFile
+        T_CLOBBER {} -> pure P.WriteFile
+        T_LESSGREAT {} -> pure P.ReadWriteFile
+        _ -> reject token "redirect-mode" "File redirect mode has no owned primitive"
+      let writable = mode /= P.ReadFile
+      operationValue <-
+        if getLiteralString file == Just "/dev/null" && mode /= P.ReadWriteFile
+          then pure (P.NullDescriptor descriptor input)
+          else do
+            requireSession token
+            evaluated <- gets nEvaluatedPrograms
+            unless (null evaluated) (reject token "eval-file-diagnostic" "Eval file opens need exact nested diagnostic source locations")
+            wordsValue <- case processToken file of
+              Just endpoint -> (: []) . P.OneField <$> normalizeProcess endpoint
+              Nothing -> normalizeWords [file]
+            scalar <- case wordsValue of
+              [P.OneField value] -> pure value
+              _ -> reject token "redirect-cardinality" "File opens require a single proved path field"
+            let effects = Effects.scalarEffects scalar
+            unless (isJust (processToken file) || (S.null (Effects.effectWrites effects) && not (Effects.effectSubstitution effects))) (reject token "redirect-path-effects" "Effectful paths require pre-redirection command expansion facts")
+            pure (P.OpenDescriptor descriptor mode scalar)
+      modify' (\flow -> flow {nDescriptors = S.insert descriptor (nDescriptors flow), nWritableDescriptors = (if writable then S.insert else S.delete) descriptor (nWritableDescriptors flow)})
+      pure operationValue
+    T_HereString _ value -> do
+      requireSession token
+      descriptor <- sourceNumber source True
+      scalar <- normalizeScalar value
+      inputValue descriptor scalar True
+    T_HereDoc _ dashed _ _ parts -> do
+      requireSession token
+      descriptor <- sourceNumber source True
+      values <- if dashed == Dashed then heredocParts True parts else traverse normalizeScalar parts
+      inputValue descriptor (compact values) False
     _ -> reject token "redirect-shape" "No owned semantics for this redirection operation"
   _ -> reject token "redirect-shape" "Expected an explicit descriptor operation"
   where
     direction = \case
       T_Less {} -> pure True
+      T_LESSGREAT {} -> pure True
       T_LESSAND {} -> pure True
       T_Greater {} -> pure False
       T_GREATAND {} -> pure False
@@ -331,20 +415,43 @@ normalizeRedirect token = case token of
       _ -> reject token "redirect-mode" "This descriptor mode has no admitted primitive"
     sourceNumber "" input = pure (if input then 0 else 1)
     sourceNumber value _ = number value
-    number value = case value of
-      "0" -> pure 0
-      "1" -> pure 1
-      "2" -> pure 2
-      _ -> reject token "redirect-descriptor" "Only standard descriptors zero through two are admitted"
+    number value = descriptorNumber token (toText value)
+    inputValue descriptor scalar newline = do
+      let effects = Effects.scalarEffects scalar
+      unless (S.null (Effects.effectWrites effects) && not (Effects.effectSubstitution effects)) (reject token "redirect-input-effects" "Effectful input construction requires pre-redirection command expansion facts")
+      modify' (\flow -> flow {nDescriptors = S.insert descriptor (nDescriptors flow), nWritableDescriptors = S.delete descriptor (nWritableDescriptors flow)})
+      pure (P.InputDescriptor descriptor scalar newline)
+
+-- Tab stripping applies to source bytes before expansion, never to tabs
+-- introduced by a parameter value or command substitution.
+heredocParts :: Bool -> [Token] -> Normalize [P.Scalar]
+heredocParts _ [] = pure []
+heredocParts atStart (part : rest) = case part of
+  T_Literal _ value -> do
+    let (next, stripped) = foldl' strip (atStart, []) value
+        strip (leading, result) char
+          | leading && char == '\t' = (True, result)
+          | otherwise = (char == '\n', char : result)
+    (P.Literal (toText (reverse stripped)) :) <$> heredocParts next rest
+  _ -> do
+    scalar <- normalizeScalar part
+    (scalar :) <$> heredocParts False rest
+
+descriptorNumber :: Token -> Text -> Normalize Int
+descriptorNumber token value = do
+  descriptor <- maybe (reject token "redirect-descriptor" "Descriptor numbers must be decimal literals from zero through 255") pure (decimalIndex value)
+  when (descriptor > 255) (reject token "redirect-descriptor" "Descriptor numbers above 255 are outside the owned initial envelope")
+  when (descriptor > 2) (requireSession token)
+  pure descriptor
 
 normalizeChild :: Token -> [Token] -> Normalize P.ChildRegion
 normalizeChild token body = do
   before <- get
-  range <- tokenRange token
-  modify' (\s -> s {nDirect = False, nLoop = 0, nChild = True})
+  range <- runtimeTokenRange token
+  modify' (\s -> s {nDirect = True, nLoop = 0, nChild = True, nErrTrapWrites = mempty})
   bodyValue <- normalizeStatements body
   after <- get
-  child <- either (reject token "child-snapshot") pure (closeChildRegion range (nFunctionBodies before) bodyValue)
+  child <- either (reject token "child-snapshot") pure (closeChildRegion range (M.union (nFunctionBodies before) (nFunctionBodies after)) bodyValue)
   put
     before
       { nReserved = nReserved before <> nReserved after,
@@ -385,6 +492,8 @@ joinStates :: Normalization -> Normalization -> Normalization
 joinStates before after =
   before
     { nConstants = M.mergeWithKey (\_ a b -> if a == b then Just a else Nothing) (const mempty) (const mempty) (nConstants before) (nConstants after),
+      nArrays = joinArrayShapes (nArrays before) (nArrays after),
+      nErrTrapWrites = nErrTrapWrites before <> nErrTrapWrites after,
       nVariables = nVariables before `S.intersection` nVariables after,
       nNumeric = nNumeric before `S.intersection` nNumeric after,
       nContinueNumeric = M.unionWith S.intersection (nContinueNumeric before) (nContinueNumeric after),
@@ -442,7 +551,8 @@ joinContinueNumeric flow = flow {nNumeric = nNumeric flow `S.intersection` M.fin
 -- A relative dependency cannot freeze the first iteration's cwd when a
 -- directory transition invalidates that fact on the loop backedge.
 checkDirectoryLoop :: Token -> Normalization -> Normalization -> [P.Statement] -> Normalize ()
-checkDirectoryLoop token before after body =
+checkDirectoryLoop token before after body = do
+  unless (nArrays before == nArrays after) (reject token "array-loop-shape" "Array shape must remain invariant across loop backedges")
   when
     (nDirectoryFacts before /= nDirectoryFacts after && any varyingSource body)
     (reject token "source-directory-loop" "A relative source in a directory-changing loop requires an invariant absolute execution cwd")
@@ -478,11 +588,12 @@ normalizeFunctionWith redirects token name body = do
   active <- gets nActive
   unless (direct && null active) (reject token "function-context" "Conditional or nested function definitions need call-time binding analysis")
   stack <- gets nSourceStack
+  location <- tokenRange token
   let Id definitionId = getId token
-      identity = (fromMaybe "<input>" (viaNonEmpty last stack), definitionId)
+      identity = (maybe (fromMaybe "<input>" (viaNonEmpty last stack)) (srcFile . rangeStart) location, definitionId)
   modify' (\s -> s {nFunctions = S.insert name (nFunctions s), nLocalFunctions = S.insert name (nLocalFunctions s), nDefinitions = M.insert name identity (nDefinitions s)})
   before <- get
-  modify' (\s -> s {nConstants = mempty, nNumeric = mempty, nVariables = if entryMode cfg == Sourceable then initializedImports (callerContract cfg) else nVariables s, nActive = [name], nLocals = mempty, nContinueNumeric = mempty, nBreakNumeric = mempty, nLoop = 0, nDirect = True, nResolutionStable = True, nCurrentDependencies = mempty})
+  modify' (\s -> s {nConstants = mempty, nNumeric = mempty, nArrays = M.map (const (-1)) (nArrays s), nVariables = if entryMode cfg == Sourceable then initializedImports (callerContract cfg) else nVariables s, nActive = [name], nLocals = mempty, nContinueNumeric = mempty, nBreakNumeric = mempty, nLoop = 0, nDirect = True, nResolutionStable = True, nCurrentDependencies = mempty})
   bodyValue <-
     if null redirects
       then case body of
@@ -490,7 +601,7 @@ normalizeFunctionWith redirects token name body = do
         T_Redirecting _ [] (T_BraceGroup _ statements) -> normalizeStatements statements
         _ -> (: []) <$> normalizeStatement body
       else do
-        range <- tokenRange token
+        range <- runtimeTokenRange token
         redirected <- normalizeRedirected token redirects body
         pure [P.Statement range redirected]
   after <- get
@@ -499,12 +610,16 @@ normalizeFunctionWith redirects token name body = do
       { nReserved = nReserved before <> nReserved after,
         nResolutionFunctions = (if nResolutionStable after && nDirectoryFacts before == nDirectoryFacts after then S.delete else S.insert) name (nResolutionFunctions before),
         nFunctionDependencies = M.insert name (nCurrentDependencies after) (nFunctionDependencies before),
-        nFunctionBodies = M.insert name bodyValue (nFunctionBodies before)
+        nFunctionBodies = M.insert name bodyValue (nFunctionBodies before),
+        nArrays = M.union (nArrays before) (M.map (const (-1)) (nArrays after)),
+        nErrTrapWrites = nErrTrapWrites before <> nErrTrapWrites after
       }
   pure (P.DefineFunction name bodyValue)
 
 normalizeCommand :: Token -> [Token] -> [Token] -> Normalize P.StatementNode
-normalizeCommand token assignments = \case
+normalizeCommand token assignments commands
+  | not (null assignments), not (null commands) = normalizePrefixed token assignments commands
+normalizeCommand token assignments commands = case commands of
   [] -> P.AssignmentCommand False <$> traverse (normalizeAssignment False) assignments
   headToken : arguments -> do
     unless (null assignments) (reject token "command-prefix" "Command-prefix assignment lifetime is not yet materialized")
@@ -550,6 +665,7 @@ normalizeCommand token assignments = \case
               s
                 { nConstants = mempty,
                   nNumeric = mempty,
+                  nArrays = M.map (const (-1)) (nArrays s),
                   nResolutionStable = nResolutionStable s && not (S.member name resolutionFunctions || importedEffects),
                   nDirectoryFacts = if S.member name resolutionFunctions || importedEffects then Directory.MkDirectoryFacts Directory.UnknownDirectory False else directoryAfterImport (nDirectoryFacts s),
                   nCurrentDependencies = nCurrentDependencies s <> dependencies <> maybe mempty (M.singleton name) (M.lookup name definitions)
@@ -565,10 +681,14 @@ normalizeCommand token assignments = \case
         builtinCommand name arguments
   where
     builtinCommand name arguments = case name of
-      "eval" -> reject token "eval" "Runtime Bash program evaluation has no admitted translation"
+      "eval" -> normalizeEval token arguments
+      "read" -> normalizeRead token arguments
+      "trap" -> normalizeTrap token arguments
       "local" -> do
         direct <- gets nDirect
         active <- gets nActive
+        sourced <- gets nInSource
+        when sourced (reject token "source-local-context" "A sourced local declaration needs its caller function's declaration scope")
         unless
           (direct && not (null active))
           (reject token "local-context" "Local bindings require a direct function-body declaration")
@@ -584,7 +704,7 @@ normalizeCommand token assignments = \case
           (reject token "readonly-caller" "Readonly caller binding attributes cannot be approximated by this sourceable contract")
         unless (length arguments == 1) (reject token "readonly-form" "Readonly approximation admits one explicit assignment; multiple operands need declaration expansion sequencing")
         values <- traverse (normalizeAssignment False) arguments
-        range <- tokenRange token
+        range <- runtimeTokenRange token
         pure (P.Approximate ReadonlyUnchecked [P.Statement range (P.AssignmentCommand True values)])
       "unset" -> do
         names <- traverse (literalName token) arguments
@@ -598,6 +718,7 @@ normalizeCommand token assignments = \case
               s
                 { nConstants = foldr M.delete (nConstants s) names,
                   nNumeric = nNumeric s <> S.fromList names,
+                  nArrays = foldr M.delete (nArrays s) names,
                   nVariables = nVariables s S.\\ S.fromList names,
                   nResolutionStable = nResolutionStable s && not (any (`elem` resolutionVariables) names)
                 }
@@ -628,13 +749,30 @@ normalizeCommand token assignments = \case
       "test" -> normalizeFixedTest token "test" arguments
       "[" -> normalizeFixedTest token "[" arguments
       "set" -> normalizeSet token arguments
+      "wait" -> do
+        requireSession token
+        evaluated <- gets nEvaluatedPrograms
+        unless (null evaluated) (reject token "eval-wait-diagnostic" "Eval wait needs exact nested diagnostic source locations")
+        values <- normalizeWords (case arguments of marker : rest | getLiteralString marker == Just "--" -> rest; _ -> arguments)
+        numeric <- gets nNumeric
+        let pidScalar = \case
+              P.LastBackgroundPid -> True
+              P.Literal value -> T.all isDigit value
+              P.Variable bindingName -> S.member bindingName numeric
+              P.ArithmeticValue {} -> True
+              P.ArgumentCount -> True
+              P.LastStatus -> True
+              _ -> False
+            pidWord = \case P.OneField value -> pidScalar value; P.SplitFields value -> pidScalar value; _ -> False
+        unless (all pidWord values) (reject token "wait-operand" "Wait operands require proved numeric PID values; job specs and options are outside this envelope")
+        pure (P.Wait values)
       "return" -> do
         active <- gets nActive
         mode <- gets (entryMode . nConfig)
         sourced <- gets nInSource
         when (null active && mode == Standalone && not sourced) (reject token "return-context" "Return requires an owned function or source boundary")
         value <- optionalStatus arguments
-        when (sourced && null active) $ modify' (\s -> s {nSourceReturns = S.insert (entryContext s) (nSourceReturns s)})
+        when sourced $ modify' (\s -> s {nSourceReturns = S.insert (entryContext s) (nSourceReturns s)})
         pure (P.Return value)
       "exit" -> P.Exit <$> optionalStatus arguments
       "break" -> loopControl P.Break arguments
@@ -644,17 +782,17 @@ normalizeCommand token assignments = \case
       "builtin" -> case arguments of
         next : rest -> do
           selected <- literalName token next
-          unless (selected `elem` ("local" : "export" : "cd" : "pwd" : "pushd" : "popd" : safeBuiltins)) (reject token "builtin" "The selected builtin has no admitted operand semantics")
+          unless (selected `elem` ("trap" : "read" : "wait" : "eval" : "local" : "export" : "cd" : "pwd" : "pushd" : "popd" : safeBuiltins)) (reject token "builtin" "The selected builtin has no admitted operand semantics")
           builtinCommand selected rest
         [] -> reject token "builtin" "Builtin requires a command operand"
       "command" -> case arguments of
         next : rest -> do
           selected <- resolveHead next
-          if selected `elem` ("local" : "export" : "cd" : "pwd" : "pushd" : "popd" : safeBuiltins)
+          if selected `elem` ("trap" : "read" : "wait" : "eval" : "local" : "export" : "cd" : "pwd" : "pushd" : "popd" : safeBuiltins)
             then builtinCommand selected rest
             else do
               when (selected `elem` unsupportedBuiltins) (reject token "command-builtin" "This dispatched builtin has no admitted semantics")
-              P.Invoke (P.External selected) <$> normalizeWords rest
+              P.Invoke (P.External selected) <$> normalizeConsumerWords selected rest
         [] -> reject token "command" "Command requires an executable operand"
       _ -> do
         when (name `elem` unsupportedBuiltins) (reject token "builtin" ("No admitted semantics for builtin " <> name))
@@ -663,7 +801,7 @@ normalizeCommand token assignments = \case
         when
           (entryMode cfg == Sourceable && name `notElem` safeBuiltins)
           (reject token "ambient-dispatch" "Sourceable external dispatch requires an explicit import")
-        P.Invoke (if name `elem` safeBuiltins then P.Builtin name else P.External name) <$> normalizeWords arguments
+        P.Invoke (if name `elem` safeBuiltins then P.Builtin name else P.External name) <$> normalizeConsumerWords name arguments
     optionalStatus [] = pure Nothing
     optionalStatus [value] = do
       scalar <- normalizeScalar value
@@ -688,6 +826,214 @@ normalizeCommand token assignments = \case
           pure node
         else reject token "loop-control" "Loop control has no owned target"
     loopControl _ _ = reject token "loop-control-depth" "Only the immediate owned loop target is currently admitted"
+
+requireSession :: Token -> Normalize ()
+requireSession token = do
+  mode <- gets (entryMode . nConfig)
+  unless (mode == Standalone) (reject token "session-context" "Owned jobs require standalone execution")
+
+-- Proved operands are parsed once during translation and then use the same
+-- statement normalizer as the enclosing script. No eval reaches the renderer.
+normalizePrefixed :: Token -> [Token] -> [Token] -> Normalize P.StatementNode
+normalizePrefixed token assignments command = do
+  requireSession token
+  case command of
+    headToken : _ | isJust (getLiteralString headToken) -> pure ()
+    _ -> reject token "prefix-command" "Temporary command bindings require a literal executable identity"
+  invocation <- normalizeCommand token [] command
+  makeInvocation <- case invocation of
+    P.Invoke callTarget@(P.External _) wordsValue -> pure (\values -> P.PrefixedInvoke values callTarget wordsValue)
+    P.Invoke callTarget@(P.Builtin name) wordsValue | name `elem` safeBuiltins -> pure (\values -> P.PrefixedInvoke values callTarget wordsValue)
+    P.Read options target | all ifsAssignment assignments, not (targetIsIfs target) -> pure (\values -> P.PrefixedRead values options target)
+    _ -> reject token "prefix-command" "Temporary bindings require ordinary calls or an IFS-only read prefix"
+  before <- get
+  names <- forM assignments $ \assignment -> case assignment of
+    T_Assignment _ Assign name [] _ -> checkedName assignment (toText name) >> rejectArrayScalar assignment (toText name) >> pure (toText name)
+    _ -> reject token "prefix-assignment" "Temporary command bindings require replacing scalar assignments"
+  let nameSet = S.fromList names
+  values <- forM assignments $ \assignment -> do
+    planned <- normalizeAssignment False assignment
+    case planned of
+      P.Statement _ (P.Assign storage name scalar) -> do
+        unless (S.null (Effects.effectWrites (Effects.scalarEffects scalar) `S.intersection` nameSet)) (reject assignment "prefix-rhs-write" "Prefix RHS writes to temporary binding names require a separate scope proof")
+        pure (storage, name, scalar)
+      _ -> reject assignment "prefix-assignment" "Temporary command bindings require scalar values"
+  after <- get
+  let restoreMap :: M.Map Text a -> M.Map Text a -> M.Map Text a
+      restoreMap old new = M.restrictKeys old nameSet <> M.withoutKeys new nameSet
+      restoreSet old new = (old `S.intersection` nameSet) <> (new S.\\ nameSet)
+      rhsWrites = foldMap (Effects.effectWrites . Effects.scalarEffects . (\(_, _, value) -> value)) values
+  put after {nConstants = restoreMap (nConstants before) (nConstants after), nNumeric = restoreSet (nNumeric before) (nNumeric after), nArrays = restoreMap (nArrays before) (nArrays after), nVariables = restoreSet (nVariables before) (nVariables after), nResolutionStable = nResolutionStable before && S.null (rhsWrites `S.intersection` S.fromList resolutionVariables)}
+  pure (makeInvocation values)
+  where
+    ifsAssignment (T_Assignment _ Assign "IFS" [] _) = True
+    ifsAssignment _ = False
+    targetIsIfs (P.ReadScalars names) = any ((== "IFS") . snd) names
+    targetIsIfs (P.ReadArray _ name) = name == "IFS"
+    targetIsIfs _ = False
+
+-- ERR callbacks can change bindings after a failing command. Keeping the
+-- possible write set monotonic is conservative across replacement and calls.
+invalidateTrapWrites :: Normalization -> Normalization
+invalidateTrapWrites flow =
+  let names = nErrTrapWrites flow
+   in flow {nConstants = M.withoutKeys (nConstants flow) names, nNumeric = nNumeric flow S.\\ names, nArrays = M.mapWithKey (\name size -> if S.member name names then -1 else size) (nArrays flow)}
+
+normalizeTrap :: Token -> [Token] -> Normalize P.StatementNode
+normalizeTrap token operands = do
+  requireSession token
+  arguments <- traverse (\operand -> maybe (reject operand "trap-handler" "Trap operands require literal source text and signal names") (pure . toText) (getLiteralString operand)) operands
+  (handler, kind) <- case arguments of
+    [source, signal] -> (source,) <$> trapKind signal
+    ["--", source, signal] -> (source,) <$> trapKind signal
+    _ -> reject token "trap-form" "Trap requires one literal handler and EXIT or ERR"
+  if handler == "-"
+    then pure (P.SetTrap kind Nothing)
+    else do
+      before <- get
+      when (length (nEvaluatedPrograms before) >= 64) (reject token "trap-depth" "Nested compiled callback definitions exceed the finite admission bound")
+      let Id ordinal = getId token
+          file = documentNameFrom before <> ":trap:" <> show ordinal
+          parsed = parseBashFragment (toString file) handler
+      root <- maybe (reject token "trap-parse" "Literal trap body is not valid Bash syntax") pure (prRoot parsed)
+      put before {nPositions = prTokenPositions parsed, nDocument = Just handler, nConstants = mempty, nNumeric = mempty, nArrays = M.map (const (-1)) (nArrays before), nDirect = False, nLoop = 0, nErrTrapWrites = mempty, nEvaluatedPrograms = handler : nEvaluatedPrograms before}
+      body <- normalizeStatement root
+      unless (admittedHandler body) (reject token "trap-body" "Initial callbacks require builtin/scalar control flow without external lookup or context transfers")
+      after <- get
+      let effects = Effects.statementEffects body
+          writes = if kind == P.ErrTrap then Effects.effectWrites effects else mempty
+      put before {nReserved = nReserved before <> nReserved after, nErrTrapWrites = nErrTrapWrites before <> writes}
+      pure (P.SetTrap kind (Just [body]))
+  where
+    trapKind "EXIT" = pure P.ExitTrap
+    trapKind "0" = pure P.ExitTrap
+    trapKind "ERR" = pure P.ErrTrap
+    trapKind _ = reject token "trap-signal" "Only deferred EXIT and ERR callbacks are admitted"
+    documentNameFrom flow = fromMaybe "<input>" (viaNonEmpty last (nSourceStack flow))
+    admittedHandler (P.Statement _ node) = case node of
+      P.Sequence values -> all admittedHandler values
+      P.AssignmentCommand _ values -> all admittedHandler values
+      P.Assign {} -> True
+      P.AssignArray {} -> True
+      P.AppendArray {} -> True
+      P.AssignArrayElement {} -> True
+      P.Invoke (P.Builtin _) _ -> True
+      P.And left right -> all admittedHandler [left, right]
+      P.Or left right -> all admittedHandler [left, right]
+      P.Negate value -> admittedHandler value
+      P.Conditional condition yes no -> all admittedHandler (condition <> yes <> no)
+      P.WhileLoop _ condition body -> all admittedHandler (condition <> body)
+      P.ForLoop _ _ _ body -> all admittedHandler body
+      P.Case _ arms -> all (\(P.CaseArm _ body _) -> all admittedHandler body) arms
+      P.PatternCondition {} -> True
+      P.NumericCondition {} -> True
+      P.ArithmeticCommand {} -> True
+      P.SetTrap _ body -> maybe True (all admittedHandler) body
+      P.Exit {} -> True
+      _ -> False
+
+normalizeRead :: Token -> [Token] -> Normalize P.StatementNode
+normalizeRead token arguments = do
+  requireSession token
+  evaluated <- gets nEvaluatedPrograms
+  unless (null evaluated) (reject token "eval-read-diagnostic" "Eval read needs exact nested diagnostic source locations")
+  (options, arrayTarget, names) <- parseOptions (P.ReadOptions False "\n" Nothing 0) Nothing arguments
+  descriptors <- gets nDescriptors
+  unless (S.member (P.readDescriptor options) descriptors) (reject token "read-descriptor" "Read requires an explicitly owned descriptor")
+  target <- case arrayTarget of
+    Just name -> do
+      unless (null names) (reject token "read-array-operands" "Array reads currently require no additional scalar destinations")
+      storage <- arrayStorage token False name
+      rememberArray name (-2)
+      pure (P.ReadArray storage name)
+    Nothing -> case names of
+      [] -> P.ReadReply <$> destination "REPLY"
+      _ -> P.ReadScalars <$> traverse (\name -> (,name) <$> destination name) names
+  pure (P.Read options target)
+  where
+    destination name = do
+      checkedName token name
+      rejectArrayScalar token name
+      storage <- storageFor token False name
+      modify' (\flow -> flow {nVariables = S.insert name (nVariables flow), nConstants = M.delete name (nConstants flow), nNumeric = S.delete name (nNumeric flow), nResolutionStable = nResolutionStable flow && name `notElem` resolutionVariables})
+      pure storage
+    literal operand = do
+      scalar <- normalizeScalar operand
+      maybe (reject operand "read-operand" "Read options and destination names require literal operands") pure (scalarLiteral scalar)
+    parseOptions options arrayTarget [] = pure (options, arrayTarget, [])
+    parseOptions options arrayTarget (operand : rest) = do
+      spelling <- literal operand
+      if spelling == "--"
+        then (options,arrayTarget,) <$> traverse literal rest
+        else case T.stripPrefix "-" spelling of
+          Just flags | not (T.null flags) -> parseFlags options arrayTarget (T.unpack flags) rest
+          _ -> (options,arrayTarget,) <$> traverse literal (operand : rest)
+    parseFlags options arrayTarget [] rest = parseOptions options arrayTarget rest
+    parseFlags options arrayTarget ('r' : flags) rest = parseFlags options {P.readRaw = True} arrayTarget flags rest
+    parseFlags options arrayTarget (flag : flags) rest
+      | flag `elem` ("duna" :: String) = do
+          (value, remaining) <-
+            if null flags
+              then case rest of
+                operand : tailTokens -> (,tailTokens) <$> literal operand
+                [] -> reject token "read-option-argument" "Read option is missing its literal operand"
+              else pure (toText flags, rest)
+          case flag of
+            'd' -> parseOptions options {P.readDelimiter = value} arrayTarget remaining
+            'u' -> do
+              descriptor <- descriptorNumber token value
+              parseOptions options {P.readDescriptor = descriptor} arrayTarget remaining
+            'n' -> do
+              count <- maybe (reject token "read-count" "Read character counts require a bounded nonnegative decimal literal") pure (decimalIndex value)
+              parseOptions options {P.readCount = Just count} arrayTarget remaining
+            _ -> checkedName token value >> parseOptions options (Just value) remaining
+    parseFlags _ _ _ _ = reject token "read-option" "Read admits only literal -r, -d, -n, -u and -a options"
+
+normalizeEval :: Token -> [Token] -> Normalize P.StatementNode
+normalizeEval token operands = do
+  arguments <- normalizeWords operands
+  before <- get
+  let known = \case
+        P.Literal text -> Just text
+        P.Variable name -> M.lookup name (nConstants before)
+        P.Concat parts -> T.concat <$> traverse known parts
+        _ -> Nothing
+      knownWord = \case P.OneField value -> known value; _ -> Nothing
+  values <- maybe (reject token "eval" "Eval operands need pure, single-field, compile-time-proved source text") pure (traverse knownWord arguments)
+  let sourceArguments = case values of "--" : rest -> rest; _ -> values
+  when (maybe False (T.isPrefixOf "-") (listToMaybe sourceArguments)) (reject token "eval-option" "Eval option errors need a separate diagnostic contract")
+  let source = T.intercalate " " sourceArguments
+  when
+    (source `elem` nEvaluatedPrograms before || length (nEvaluatedPrograms before) >= 64)
+    (reject token "eval-recursion" "Eval source exceeds the finite compilation nesting envelope")
+  range <- tokenRange token
+  let Id ordinal = getId token
+      name = maybe "<input>" (srcFile . rangeStart) range <> ":eval:" <> show ordinal
+      parsed = parseBashFragment (toString name) source
+  root <- maybe (reject token "eval-parse" "Proved eval source is not a valid Bash program") pure (prRoot parsed)
+  modify'
+    ( \flow ->
+        flow
+          { nDocument = Just source,
+            nPositions = prTokenPositions parsed,
+            nEvaluatedPrograms = source : nEvaluatedPrograms before,
+            nAllFunctions = nAllFunctions flow <> functionNames root,
+            nReserved = nReserved flow <> sourceNames root
+          }
+    )
+  body <- normalizeStatement root
+  modify'
+    ( \flow ->
+        flow
+          { nDocument = nDocument before,
+            nPositions = nPositions before,
+            nCommandLine = nCommandLine before,
+            nEvaluatedPrograms = nEvaluatedPrograms before
+          }
+    )
+  pure $ case body of
+    P.Statement _ (P.Sequence []) -> P.Invoke (P.Builtin "true") []
+    _ -> P.Sequence [body]
 
 normalizeDirectory :: Token -> Text -> [Token] -> Normalize P.StatementNode
 normalizeDirectory token command operands = do
@@ -885,6 +1231,7 @@ normalizeDeclarations local parent operands = do
       T_Assignment _ Assign name [] value -> pure (toText name, Just value)
       _ -> (,Nothing) <$> literalName parent operand
     checkedName operand name
+    rejectArrayScalar operand name
     when (not local && name == "IFS") (reject operand "export-ifs" "Exported IFS requires an explicit source environment alias")
     storage <- storageFor operand local name
     scalar <- traverse normalizeScalar value
@@ -911,30 +1258,118 @@ normalizeDeclarations local parent operands = do
     pure (if local then P.DeclareLocal freshLocal name value else P.DeclareExport storage name value)
   pure (P.DeclarationCommand declarations)
 
+-- Negative shape denotes a possible array whose dense length is not proved.
+-- Retaining its name prevents a later scalar operation from erasing its tail.
+joinArrayShapes :: M.Map Text Int -> M.Map Text Int -> M.Map Text Int
+joinArrayShapes = M.mergeWithKey (\_ a b -> Just (if a == b then a else -1)) (M.map (const (-1))) (M.map (const (-1)))
+
+rejectArrayScalar :: Token -> Text -> Normalize ()
+rejectArrayScalar token name = do
+  arrays <- gets nArrays
+  when (M.member name arrays) (reject token "array-scalar-operation" "This scalar operation does not preserve indexed array storage")
+
+arrayLength :: Token -> Text -> Normalize Int
+arrayLength token name = do
+  checkedName token name
+  arrays <- gets nArrays
+  case M.lookup name arrays of
+    Just size | size >= 0 || size == -2 -> pure size
+    _ -> reject token "array-shape" "An indexed array requires a proved dense owned shape"
+
+arrayReadable :: Token -> Text -> Normalize ()
+arrayReadable token name = do
+  checkedName token name
+  arrays <- gets nArrays
+  case M.lookup name arrays of
+    Just size | size >= 0 || size == -2 -> pure ()
+    _ -> reject token "array-shape" "An indexed array read requires proved owned dense storage"
+
+arrayStorage :: Token -> Bool -> Text -> Normalize P.Storage
+arrayStorage token local name = do
+  cfg <- gets nConfig
+  unless (entryMode cfg == Standalone) (reject token "array-context" "Owned arrays currently require standalone execution")
+  depth <- gets nLoop
+  unless (depth == 0) (reject token "array-loop-write" "Array mutations inside loops require a stable indexed storage proof")
+  checkedName token name
+  when (name `elem` resolutionVariables || name `elem` ["IFS", "PWD", "OLDPWD"]) (reject token "array-special-binding" "Special shell state cannot use ordinary indexed array storage")
+  storageFor token local name
+
+rememberArray :: Text -> Int -> Normalize ()
+rememberArray name size = modify' (\flow -> flow {nArrays = M.insert name size (nArrays flow), nVariables = S.insert name (nVariables flow), nNumeric = S.delete name (nNumeric flow), nConstants = M.delete name (nConstants flow)})
+
+literalArrayIndex :: Token -> Normalize Int
+literalArrayIndex token = case token of
+  TA_Sequence _ [value] -> literalArrayIndex value
+  TA_Expansion _ [value] -> literalArrayIndex value
+  T_Literal _ value -> maybe invalid pure (decimalIndex (toText value))
+  _ -> invalid
+  where
+    invalid = reject token "array-index" "Indexed array writes require a nonnegative decimal literal index"
+
+decimalIndex :: Text -> Maybe Int
+decimalIndex value
+  | not (T.null value),
+    T.all isDigit value,
+    value == "0" || not (T.isPrefixOf "0" value) = do
+      integer <- readMaybe (toString value) :: Maybe Integer
+      guard (integer <= toInteger (maxBound :: Int))
+      pure (fromInteger integer)
+  | otherwise = Nothing
+
 normalizeAssignment :: Bool -> Token -> Normalize P.Statement
 normalizeAssignment local token = do
-  (name, value, appendValue) <- case token of
-    T_Assignment _ Assign name [] value -> pure (toText name, value, False)
-    T_Assignment _ Append name [] value -> pure (toText name, value, True)
-    _ | local, isJust (getLiteralString token) -> reject token "unset-local-declaration" "Bare local declarations require an unset binding with owned scope lifetime"
-    _ -> reject token "assignment-shape" "Only replacing scalar assignments are admitted; arrays and append assignments need storage plans"
-  checkedName token name
-  rhs <- normalizeScalar value
-  when appendValue (readBinding token name)
-  let valuePlan = if appendValue then P.AppendValue name rhs else rhs
-  storage <- storageFor token local name
-  modify'
-    ( \s ->
-        s
-          { nVariables = S.insert name (nVariables s),
-            nLocals = if local then S.insert name (nLocals s) else nLocals s,
-            nResolutionStable = nResolutionStable s && name `notElem` resolutionVariables,
-            nNumeric = (if numericScalar valuePlan then S.insert else S.delete) name (nNumeric s),
-            nConstants = case scalarLiteral valuePlan of Just literal -> M.insert name literal (nConstants s); Nothing -> M.delete name (nConstants s)
-          }
-    )
-  range <- tokenRange token
-  pure (P.Statement range (P.Assign storage name valuePlan))
+  node <- case token of
+    T_Assignment _ operation rawName [] (T_Array _ elements) -> do
+      let name = toText rawName
+      storage <- arrayStorage token local name
+      oldSize <- if operation == Append then arrayLength token name else pure 0
+      wordsValue <- normalizeWords elements
+      unless (all (\case P.OneField _ -> True; _ -> False) wordsValue) (reject token "array-construction-cardinality" "Dense array construction currently needs one field per element")
+      rememberArray name (if oldSize == -2 then -2 else oldSize + length wordsValue)
+      pure ((if operation == Append then P.AppendArray else P.AssignArray) storage name wordsValue)
+    T_Assignment _ Assign rawName [index] value -> do
+      let name = toText rawName
+      storage <- arrayStorage token local name
+      size <- arrayLength token name
+      offset <- literalArrayIndex index
+      when (if size == -2 then offset /= 0 else offset > size) (reject token "array-sparse-write" "Indexed assignment cannot create a sparse array")
+      scalar <- normalizeScalar value
+      rememberArray name (if size == -2 then -2 else max size (offset + 1))
+      pure (P.AssignArrayElement storage name offset scalar)
+    _ -> do
+      (name, value, appendValue) <- case token of
+        T_Assignment _ Assign name [] value -> pure (toText name, value, False)
+        T_Assignment _ Append name [] value -> pure (toText name, value, True)
+        _ | local, isJust (getLiteralString token) -> reject token "unset-local-declaration" "Bare local declarations require an unset binding with owned scope lifetime"
+        _ -> reject token "assignment-shape" "Assignment has no proved scalar or dense indexed storage plan"
+      checkedName token name
+      arrays <- gets nArrays
+      if M.member name arrays
+        then do
+          when appendValue (reject token "array-scalar-append" "Appending to element zero requires a separate array element update")
+          storage <- arrayStorage token local name
+          size <- arrayLength token name
+          scalar <- normalizeScalar value
+          rememberArray name (if size == -2 then -2 else max 1 size)
+          pure (P.AssignArrayElement storage name 0 scalar)
+        else do
+          rhs <- normalizeScalar value
+          when appendValue (readBinding token name)
+          let valuePlan = if appendValue then P.AppendValue name rhs else rhs
+          storage <- storageFor token local name
+          modify'
+            ( \flow ->
+                flow
+                  { nVariables = S.insert name (nVariables flow),
+                    nLocals = if local then S.insert name (nLocals flow) else nLocals flow,
+                    nResolutionStable = nResolutionStable flow && name `notElem` resolutionVariables,
+                    nNumeric = (if numericScalar valuePlan then S.insert else S.delete) name (nNumeric flow),
+                    nConstants = case scalarLiteral valuePlan of Just literal -> M.insert name literal (nConstants flow); Nothing -> M.delete name (nConstants flow)
+                  }
+            )
+          pure (P.Assign storage name valuePlan)
+  range <- runtimeTokenRange token
+  pure (P.Statement range node)
 
 resolveHead :: Token -> Normalize Text
 resolveHead token = case getLiteralString token of
@@ -979,6 +1414,31 @@ validName name = case T.uncons name of
 normalizeWords :: [Token] -> Normalize [P.Word]
 normalizeWords values = concat <$> traverse (expandBraces >=> traverse normalizeWord) values
 
+-- Endpoint pathnames may only reach commands whose admitted use consumes bytes.
+normalizeConsumerWords :: Text -> [Token] -> Normalize [P.Word]
+normalizeConsumerWords command = fmap concat . traverse operand
+  where
+    operand value = case processToken value of
+      Just endpoint | command `elem` ["cat", "diff", "cmp", "tee", "wc"] -> (: []) . P.OneField <$> normalizeProcess endpoint
+      _ -> normalizeWords [value]
+
+processToken :: Token -> Maybe Token
+processToken value@T_ProcSub {} = Just value
+processToken (T_NormalWord _ [value]) = processToken value
+processToken _ = Nothing
+
+normalizeProcess :: Token -> Normalize P.Scalar
+normalizeProcess token@(T_ProcSub _ direction body) = do
+  requireSession token
+  evaluated <- gets nEvaluatedPrograms
+  unless (null evaluated) (reject token "eval-process-diagnostic" "Deferred source cannot own process substitution diagnostics")
+  mode <- case direction of
+    "<" -> pure P.ProcessInput
+    ">" -> pure P.ProcessOutput
+    _ -> reject token "process-direction" "Unknown process substitution direction"
+  P.ProcessSubstitution mode <$> normalizeChild token body
+normalizeProcess token = reject token "process-shape" "Process substitution requires an entire endpoint word"
+
 expandBraces :: Token -> Normalize [Token]
 expandBraces token = case token of
   T_BraceExpansion _ alternatives -> concat <$> traverse expandBraces alternatives
@@ -989,12 +1449,17 @@ expandBraces token = case token of
 
 normalizeWord :: Token -> Normalize P.Word
 normalizeWord token = case token of
-  T_NormalWord _ parts | any isGlobPart parts -> P.PathnameFields <$> literalPathname token parts
+  T_NormalWord _ parts | any isGlobPart parts && all simplePatternPart parts -> P.PathnameFields <$> literalPathname token parts
   T_NormalWord _ parts -> normalizeParts token parts
   other -> normalizeParts token [other]
   where
     isGlobPart T_Glob {} = True
     isGlobPart _ = False
+    simplePatternPart (T_Glob _ value) = value `elem` ["*", "?"]
+    simplePatternPart T_Literal {} = True
+    simplePatternPart T_SingleQuoted {} = True
+    simplePatternPart (T_DoubleQuoted _ values) = all (\case T_Literal {} -> True; T_SingleQuoted {} -> True; _ -> False) values
+    simplePatternPart _ = False
 
 literalPathname :: Token -> [Token] -> Normalize P.Pattern
 literalPathname token parts = P.MkPattern . concat <$> traverse fragment parts
@@ -1013,7 +1478,7 @@ literalPathname token parts = P.MkPattern . concat <$> traverse fragment parts
 normalizeParts :: Token -> [Token] -> Normalize P.Word
 normalizeParts token parts = do
   pieces <- concat <$> traverse wordPieces parts
-  case [() | ArgvPiece <- pieces] of
+  case [piece | piece <- pieces, isArgv piece] of
     [] -> do
       constants <- gets nConstants
       let knownIfs = M.lookup "IFS" constants
@@ -1022,23 +1487,32 @@ normalizeParts token parts = do
           inert (ScalarPiece False _) = True
           inert _ = False
           split = any isSplit pieces && not (all inert pieces)
-      when (split && length pieces /= 1) (reject token "mixed-splitting" "Mixed unquoted field splitting requires a field concatenation plan")
       let value = compact [scalar | ScalarPiece _ scalar <- pieces]
-      when split $ do
-        unless
-          (noPathnameExpansion constants value)
-          (reject token "pathname-expansion" "Unquoted fields require proven absence of pathname patterns until the owned glob operation is available")
-      pure ((if split then P.SplitFields else P.OneField) value)
-    [_] -> do
+          composed = any isGlob pieces || (split && (length pieces /= 1 || not (noPathnameExpansion constants value)))
+          expansion = \case
+            ScalarPiece True scalar -> P.SplitExpansion scalar
+            ScalarPiece False scalar -> P.QuotedExpansion scalar
+            GlobPiece patternValue -> P.LiteralExpansion (P.Literal patternValue)
+            _ -> P.QuotedExpansion (P.Literal "")
+      pure (if composed then P.ExpandedWord (map expansion pieces) else (if split then P.SplitFields else P.OneField) value)
+    [splice] -> do
       let (before, after0) = break isArgv pieces
           after = drop 1 after0
-      when (any isSplit (before <> after)) (reject token "argv-splitting" "Quoted argv cannot share an unquoted splitting region")
-      pure (P.QuotedArguments (compact [s | ScalarPiece _ s <- before]) (compact [s | ScalarPiece _ s <- after]) (not (null before && null after)))
+      when (any isSplit (before <> after) || any isGlob (before <> after)) (reject token "argv-splitting" "Quoted argv cannot share an unquoted splitting region")
+      let prefix = compact [value | ScalarPiece _ value <- before]
+          suffix = compact [value | ScalarPiece _ value <- after]
+          forceField = not (null before && null after)
+      pure (case splice of ArrayPiece name -> P.QuotedArray name prefix suffix forceField; _ -> P.QuotedArguments prefix suffix forceField)
     _ -> reject token "argv-products" "Multiple argv splices require an explicit product plan"
   where
     isSplit (ScalarPiece split _) = split
     isSplit ArgvPiece = False
+    isSplit (ArrayPiece _) = False
+    isSplit (GlobPiece _) = False
+    isGlob (GlobPiece _) = True
+    isGlob _ = False
     isArgv ArgvPiece = True
+    isArgv (ArrayPiece _) = True
     isArgv _ = False
 
 -- The field splitter is exact only when no later pathname expansion is possible.
@@ -1048,6 +1522,7 @@ noPathnameExpansion constants = \case
   P.Literal value -> safe value
   P.Variable name -> maybe False safe (M.lookup name constants)
   P.LastStatus -> True
+  P.LastBackgroundPid -> True
   P.ArgumentCount -> True
   P.ArithmeticValue {} -> True
   P.Concat values -> all (noPathnameExpansion constants) values
@@ -1055,10 +1530,12 @@ noPathnameExpansion constants = \case
   where
     safe = not . T.any (`elem` ("*?[" :: String))
 
-data Piece = ScalarPiece Bool P.Scalar | ArgvPiece
+data Piece = ScalarPiece Bool P.Scalar | ArgvPiece | ArrayPiece Text | GlobPiece Text
 
 wordPieces :: Token -> Normalize [Piece]
 wordPieces = \case
+  T_Glob _ value -> pure [GlobPiece (toText value)]
+  T_DoubleQuoted _ [] -> pure [ScalarPiece False (P.Literal "")]
   T_DoubleQuoted _ parts -> concat <$> traverse quotedPiece parts
   token@(T_DollarBraced _ _ inner) -> do
     if parameterText inner == Just "@" then reject token "unquoted-argv" "Unquoted argv needs per-argument field splitting" else (: []) . ScalarPiece True <$> normalizeScalar token
@@ -1066,6 +1543,8 @@ wordPieces = \case
   token -> (: []) . ScalarPiece False <$> normalizeScalar token
   where
     quotedPiece (T_DollarBraced _ _ inner) | parameterText inner == Just "@" = pure [ArgvPiece]
+    quotedPiece token@(T_DollarBraced _ _ inner)
+      | Just name <- parameterText inner >>= T.stripSuffix "[@]", validName name = arrayReadable token name >> pure [ArrayPiece name]
     quotedPiece token = (: []) . ScalarPiece False <$> normalizeScalarIn True token
 
 normalizeScalar :: Token -> Normalize P.Scalar
@@ -1076,12 +1555,16 @@ normalizeScalarIn quoted token = case token of
   T_Literal _ value -> pure (P.Literal (toText value))
   T_SingleQuoted _ value -> pure (P.Literal (if quoted then "'" <> toText value <> "'" else toText value))
   T_DollarSingleQuoted _ value -> do
-    bytes <- either (reject token "ansi-quoted-escape") pure (ansiBytes value)
-    pure (either (const (P.ByteLiteral bytes)) P.Literal (decodeUtf8' bytes))
+    darwin <- either (reject token "ansi-quoted-escape") pure (ansiBytes True value)
+    linux <- either (reject token "ansi-quoted-escape") pure (ansiBytes False value)
+    pure (if darwin /= linux then P.PlatformBytes darwin linux else either (const (P.ByteLiteral darwin)) P.Literal (decodeUtf8' darwin))
   T_NormalWord _ parts -> compact <$> traverse (normalizeScalarIn quoted) parts
   T_DoubleQuoted _ parts -> compact <$> traverse (normalizeScalarIn True) parts
   T_DollarBraced _ _ inner -> normalizeParameter quoted token inner
-  T_DollarExpansion _ body -> P.Substitute <$> normalizeChild token body
+  T_DollarExpansion _ body -> do
+    evaluated <- gets nEvaluatedPrograms
+    unless (null evaluated) (reject token "eval-substitution-diagnostic" "Eval command substitution needs exact nested warning source locations")
+    P.Substitute <$> normalizeChild token body
   T_DollarBracket {} -> do
     (site, expression, bindings) <- normalizeArithmeticAt token
     pure (P.ArithmeticValue site expression bindings)
@@ -1093,14 +1576,24 @@ normalizeScalarIn quoted token = case token of
 normalizeParameter :: Bool -> Token -> Token -> Normalize P.Scalar
 normalizeParameter quoted token inner = case parameterText inner of
   Just "?" -> pure P.LastStatus
+  Just "!" -> requireSession token >> pure P.LastBackgroundPid
   Just "#" -> pure P.ArgumentCount
   Just name | Just index <- positional name -> pure (P.Positional index)
-  Just name | validName name -> checkedName token name >> readBinding token name >> pure (P.Variable name)
+  Just name | validName name -> do
+    checkedName token name
+    readBinding token name
+    arrays <- gets nArrays
+    if M.member name arrays then arrayReadable token name >> pure (P.ArrayElement name 0) else pure (P.Variable name)
+  Just spelling | Just name <- T.stripPrefix "#" spelling >>= T.stripSuffix "[@]", validName name -> arrayReadable token name >> pure (P.ArrayLength name)
+  Just spelling | Just (name, index) <- indexedParameter spelling -> do
+    arrayReadable token name
+    pure (P.ArrayElement name index)
   _ -> do
     (name, suffix, remaining) <- case inner of
       T_NormalWord _ (T_Literal _ leading : rest) -> let (name, suffix) = T.span (\c -> isAlphaNum c || c == '_') (toText leading) in pure (name, suffix, rest)
       T_Literal _ leading -> let (name, suffix) = T.span (\c -> isAlphaNum c || c == '_') (toText leading) in pure (name, suffix, [])
       _ -> reject token "parameter" "Parameter operation needs a literal scalar name and operator"
+    rejectArrayScalar token name
     let target = maybe (P.Variable name) P.Positional (positional name)
     unless (isJust (positional name)) (checkedName token name >> readBinding token name)
     case asum [(operator,) <$> T.stripPrefix operator suffix | operator <- [":=", ":-", ":+", "=", "-", "+"]] of
@@ -1120,30 +1613,68 @@ normalizeParameter quoted token inner = case parameterText inner of
             when assigning (modify' (\s -> s {nConstants = M.delete name (nConstants s), nNumeric = S.delete name (nNumeric s), nVariables = S.insert name (nVariables s), nResolutionStable = nResolutionStable s && name `notElem` resolutionVariables}))
             storage <- if assigning then storageFor token False name else pure P.Visible
             pure (if alternate then P.AlternateValue name nullSensitive alternative else P.DefaultValue storage name nullSensitive assigning alternative)
-      Nothing -> do
-        literalTail <- maybe (reject token "parameter-pattern" "Parameter patterns and replacements must be literal") (pure . mconcat) (traverse parameterText remaining)
-        let modifier = suffix <> literalTail
-        case asum [(operation,) <$> T.stripPrefix spelling modifier | (spelling, operation) <- [("##", "trim-prefix-long"), ("#", "trim-prefix-short"), ("%%", "trim-suffix-long"), ("%", "trim-suffix-short")]] of
-          Just (operation, patternValue) -> do
-            when (T.any (`elem` ['[', '\\']) patternValue) (reject token "parameter-pattern" "Trim admits only literal bytes, star and question mark")
-            pure (P.ParameterTransform operation target patternValue "")
-          Nothing -> case T.stripPrefix "/" modifier of
-            Just replacementSpec -> do
-              let (operation, spec) = maybe ("replace-first", replacementSpec) ("replace-all",) (T.stripPrefix "/" replacementSpec)
-                  (needle, tailValue) = T.breakOn "/" spec
-                  replacement = fromMaybe "" (T.stripPrefix "/" tailValue)
-              when (T.null needle || T.any (`elem` ['*', '?', '[', '\\', '#', '%']) needle || T.any (`elem` ['&', '\\']) replacement) (reject token "parameter-replacement" "Replacement requires a nonempty literal needle and literal replacement bytes")
-              pure (P.ParameterTransform operation target needle replacement)
-            Nothing -> reject token "parameter" "Parameter modifier has no admitted scalar operation"
+      Nothing ->
+        case asum [(operation,) <$> T.stripPrefix spelling suffix | (spelling, operation) <- [("##", "trim-prefix-long"), ("#", "trim-prefix-short"), ("%%", "trim-suffix-long"), ("%", "trim-suffix-short")]] of
+          Just (operation, literalPrefix) -> P.ParameterPatternTransform operation target <$> normalizeTrimPattern token literalPrefix remaining
+          Nothing -> do
+            literalTail <- maybe (reject token "parameter-pattern" "Parameter replacements must be literal") (pure . mconcat) (traverse parameterText remaining)
+            case T.stripPrefix "/" (suffix <> literalTail) of
+              Just replacementSpec -> do
+                let (operation, spec) = maybe ("replace-first", replacementSpec) ("replace-all",) (T.stripPrefix "/" replacementSpec)
+                    (needle, tailValue) = T.breakOn "/" spec
+                    replacement = fromMaybe "" (T.stripPrefix "/" tailValue)
+                when (T.null needle || T.any (`elem` ['*', '?', '[', '\\', '#', '%']) needle || T.any (`elem` ['&', '\\']) replacement) (reject token "parameter-replacement" "Replacement requires a nonempty literal needle and literal replacement bytes")
+                pure (P.ParameterTransform operation target needle replacement)
+              Nothing -> reject token "parameter" "Parameter modifier has no admitted scalar operation"
   where
     positional :: Text -> Maybe Int
     positional name | T.all isDigit name, not (T.null name), Just index <- readMaybe (toString name), index > 0 = Just index
     positional _ = Nothing
 
+-- Parameter trim syntax keeps source backslashes in literal AST fragments.
+-- The runtime pattern tokenizer consumes them once; quotes instead protect the
+-- enclosed fragment, independently of outer quotes around the expansion.
+normalizeTrimPattern :: Token -> Text -> [Token] -> Normalize P.Pattern
+normalizeTrimPattern token leading rest = do
+  prefix <- active token (P.Literal leading)
+  P.MkPattern . (prefix <>) . concat <$> traverse fragment rest
+  where
+    fragment node = case node of
+      T_NormalWord _ values -> concat <$> traverse fragment values
+      T_Literal _ value -> active node (P.Literal (toText value))
+      T_Glob _ value -> active node (P.Literal (toText value))
+      T_ParamSubSpecialChar _ value -> active node (P.Literal (toText value))
+      T_SingleQuoted _ value -> pure [P.LiteralPattern (P.Literal (toText value))]
+      T_DoubleQuoted _ values -> (: []) . P.LiteralPattern . compact <$> traverse (normalizeScalarIn True) values
+      T_DollarSingleQuoted {} -> (: []) . P.LiteralPattern <$> normalizeScalar node
+      _ -> normalizeScalar node >>= active node
+    active node value = do
+      constants <- gets nConstants
+      numeric <- gets nNumeric
+      let safe = \case
+            P.Literal literal -> not (T.any (`elem` ("()" :: String)) literal)
+            P.Variable name -> maybe False (not . T.any (`elem` ("()" :: String))) (M.lookup name constants) || S.member name numeric
+            P.ArithmeticValue {} -> True
+            P.ArgumentCount -> True
+            P.LastStatus -> True
+            P.Concat values -> all safe values
+            _ -> False
+      unless (safe value) (reject node "parameter-pattern" "Active trim patterns require a proof excluding extended-pattern syntax")
+      pure [P.ActivePattern value]
+
+indexedParameter :: Text -> Maybe (Text, Int)
+indexedParameter value = do
+  let (name, rest) = T.breakOn "[" value
+  guard (validName name)
+  digits <- T.stripPrefix "[" rest >>= T.stripSuffix "]"
+  (name,) <$> decimalIndex digits
+
 -- Bash ANSI quotes are byte strings in the admitted C locale. NUL ends the
 -- scalar; non-ASCII Unicode escapes remain their canonical textual spelling.
-ansiBytes :: String -> Either Text ByteString
-ansiBytes input = BS.takeWhile (/= 0) . BS.concat <$> go input
+-- Pinned Nix Bash builds differ above the signed Unicode range. Retain both
+-- byte results so generated output selects by runtime target, not build host.
+ansiBytes :: Bool -> String -> Either Text ByteString
+ansiBytes darwin input = BS.takeWhile (/= 0) . BS.concat <$> go input
   where
     go :: String -> Either Text [ByteString]
     go [] = pure []
@@ -1157,7 +1688,7 @@ ansiBytes input = BS.takeWhile (/= 0) . BS.concat <$> go input
               width = if value <= 65535 then 4 else 8
               hex = map toUpper (showHex value "")
               rendered
-                | value > 2147483647 = BS.empty
+                | value > 2147483647 && not darwin = BS.empty
                 | value < 128 = BS.singleton (fromInteger value)
                 | otherwise = encodeUtf8 (toText ((if width == 4 then "\\u" else "\\U") <> replicate (max 0 (width - length hex)) '0' <> hex))
           if null digits then (encodeUtf8 (toText ['\\', code]) :) <$> go rest else (rendered :) <$> go remaining
@@ -1305,7 +1836,7 @@ normalizeStatements (token : remaining) = do
 -- Return edges carry only finite semantic facts; no executable syntax or
 -- continuation is retained. Source completion joins these with fallthrough.
 entryContext :: Normalization -> P.SourceEntryContext
-entryContext flow = P.SourceEntryContext (nDefinitions flow) (nVariables flow) (nConstants flow) (nLocals flow) (nNumeric flow) (nDirectoryFacts flow)
+entryContext flow = P.SourceEntryContext (nDefinitions flow) (nVariables flow) (nConstants flow) (nArrays flow) (nLocals flow) (nNumeric flow) (nDirectoryFacts flow)
 
 joinSourceExit :: Normalization -> P.SourceEntryContext -> Normalization
 joinSourceExit flow facts =
@@ -1319,6 +1850,7 @@ joinSourceExit flow facts =
           nLocalFunctions = nLocalFunctions flow `S.intersection` names,
           nFunctionBodies = M.restrictKeys (nFunctionBodies flow) names,
           nConstants = shared (nConstants flow) (P.sourceEntryConstants facts),
+          nArrays = joinArrayShapes (nArrays flow) (P.sourceEntryArrays facts),
           nVariables = nVariables flow `S.intersection` P.sourceEntryVariables facts,
           nLocals = nLocals flow `S.intersection` P.sourceEntryLocals facts,
           nNumeric = nNumeric flow `S.intersection` P.sourceEntryNumericVariables facts,
@@ -1333,8 +1865,9 @@ normalizeSourceCall token arguments = case arguments of
     when (T.null literal) (reject token "source-target" "Source requires a nonempty target")
     before <- get
     unless (nResolutionStable before || T.isPrefixOf "/" literal) (reject token "source-resolution-state" "Source resolution follows an unsupported environment mutation")
-    unless (null (nActive before)) (reject token "source-function-context" "Source in a function needs an invocation-time dependency context")
-    when (nChild before) (reject token "source-child-context" "Source in child execution needs an isolated dependency materialization")
+    unless
+      (null (nActive before) || T.isPrefixOf "/" literal)
+      (reject token "source-function-context" "A function source requires an absolute immutable target independent of invocation cwd")
     when
       (Directory.directoryLocation (nDirectoryFacts before) == Directory.UnknownDirectory && not (T.isPrefixOf "/" literal))
       (reject token "source-directory-state" "Relative source resolution requires a known execution cwd on this control edge")
@@ -1343,7 +1876,7 @@ normalizeSourceCall token arguments = case arguments of
     let Id ordinal = getId token
         entry = entryContext before
         request = P.SourceRequest ordinal range literal argvValue P.SharedSource (nSourceStack before) entry (case Directory.directoryLocation (nDirectoryFacts before) of Directory.KnownDirectory path -> Just path; Directory.RelativeDirectory path -> Just path; _ -> Nothing)
-    SourceDocument text parsed <- lift (NormalizationNeedsSource request NormalizationComplete)
+    SourceDocument text parsed origin <- lift (NormalizationNeedsSource request NormalizationComplete)
     let name = documentName parsed
     when (name `elem` nSourceStack before) (reject token "source-cycle" "Recursive source cycles are outside the initial envelope")
     root <- maybe (reject token "source-parse" "Dependency has no parse root") pure (prRoot parsed)
@@ -1352,6 +1885,7 @@ normalizeSourceCall token arguments = case arguments of
           s
             { nDocument = Just text,
               nPositions = prTokenPositions parsed,
+              nRuntimeOrigin = origin,
               nSourceStack = nSourceStack before <> [name],
               nInSource = True,
               nSourceArgvOwned = any P.guaranteesField argvValue,
@@ -1369,6 +1903,7 @@ normalizeSourceCall token arguments = case arguments of
           s
             { nDocument = nDocument before,
               nPositions = nPositions before,
+              nRuntimeOrigin = nRuntimeOrigin before,
               nSourceStack = nSourceStack before,
               nInSource = nInSource before,
               nSourceArgvOwned = nSourceArgvOwned before,
@@ -1381,6 +1916,7 @@ normalizeSourceCall token arguments = case arguments of
 
 numericScalar :: P.Scalar -> Bool
 numericScalar (P.ArithmeticValue {}) = True
+numericScalar P.LastBackgroundPid = True
 numericScalar value = maybe False numericLiteral (scalarLiteral value)
 
 numericLiteral :: Text -> Bool
@@ -1395,7 +1931,8 @@ normalizeArithmeticRegion :: Token -> Normalize ((ArithmeticSource.ArithmeticSit
 normalizeArithmeticRegion token = do
   expression <- either (reject token "arithmetic-shape") pure (A.normalizeArithmetic token)
   source <- gets nDocument >>= maybe (reject token "arithmetic-source" "Exact arithmetic errors require the immutable original source document") pure
-  positions <- gets nPositions
+  origin <- gets nRuntimeOrigin
+  positions <- gets (M.map (\(start, end) -> (start {posFile = toString origin}, end {posFile = toString origin})) . nPositions)
   commandLine <- gets nCommandLine
   site <- either (reject token "arithmetic-source") pure (ArithmeticSource.arithmeticSite commandLine source positions token expression)
   before <- get
@@ -1403,6 +1940,9 @@ normalizeArithmeticRegion token = do
   validate expression
   success <- get
   let potentialFailure = mayFail (freezeConstants (M.withoutKeys constants (writes expression)) expression)
+  when
+    (potentialFailure && not (null (nEvaluatedPrograms before)))
+    (reject token "eval-arithmetic-diagnostic" "Potential eval arithmetic errors need exact nested diagnostic source locations")
   when potentialFailure $ do
     after <- get
     -- A failed arithmetic command may continue its enclosing statement list.
@@ -1438,11 +1978,13 @@ normalizeArithmeticRegion token = do
       A.ArithmeticSequence expressions -> A.ArithmeticSequence (fmap (freezeConstants constants) expressions)
       other -> other
     readNumeric name = do
+      rejectArrayScalar token name
       readBinding token name
       known <- gets nNumeric
       unless (name == "#" || S.member name known) (reject token "arithmetic-binding" "Arithmetic variable values must be proven numeric, not runtime expression strings")
     written name = do
       checkedName token name
+      rejectArrayScalar token name
       modify' (\s -> s {nNumeric = S.insert name (nNumeric s), nVariables = S.insert name (nVariables s), nConstants = M.delete name (nConstants s), nResolutionStable = nResolutionStable s && name `notElem` resolutionVariables})
     validate = \case
       A.ArithmeticLocated _ expression -> validate expression

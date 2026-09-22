@@ -1,16 +1,100 @@
 # Translator redesign and release evidence
 
-Last refreshed: 2026-09-10. Implementation branch: `codex/principled-translator`.
-The 2026-09-09 conditional core is the frozen baseline for the approved
-[native runtime and coverage extension](../superpowers/plans/2026-09-10-native-runtime-coverage.md).
-Its historical [verification report](translator-verification.md) remains available;
-the new final-tree evidence is recorded separately in
-[native runtime verification](native-runtime-verification.md).
+Last refreshed: 2026-09-22. The current implementation follows the approved
+[portable exact-coverage plan](../superpowers/plans/2026-09-22-portable-exact.md)
+from base `c2bd371`. It extends the existing semantic architecture; historical
+checkpoints below retain their original evidence and dates.
 
-The [approved design](principled-translator-design.md) supersedes the earlier
-release-only backlog. Its [implementation plan](../superpowers/plans/2026-09-09-principled-translator.md)
-requires a working exact core, truthful exclusions, and safe publication before
-release readiness. Tagging and publishing are separate actions.
+## Portable coverage implementation, 2026-09-22
+
+| Area | Implemented behavior and boundary |
+| --- | --- |
+| Dependencies | Pinned IOHK haskell.nix; one Cabal project for devenv, CI and release outputs; GHC 9.14.1 default and 9.12.2 compatibility; Bash 5.3.9/Fish 4.6.0 plus locked newer Fish. |
+| Runtime ABI 2 | Native standalone entry captures streams before Fish startup; portable descriptor ownership, parent-prepared POSIX spawning, private versioned control transport, native target metadata and immutable provider capture. Linux musl and Apple Silicon macOS package definitions are separate from execution evidence. |
+| Selective supervision | Direct native Fish for proven scalar/control/function/external-pipeline programs. Standalone session owner for real process identities, waiting, descriptor tables, pipelines and background lifetime; control and shared variables stay in generated Fish. |
+| Input and arrays | Ordered opens, append, duplication/closure, compound scopes, here input, finite prefix assignments, byte `read`, dense indexed arrays and child snapshots. Unknown inherited descriptors, sparse arrays and session-only sourceable effects reject. |
+| Expansion | Composed quote-aware splitting/pathname expansion and parameter trimming, C-locale bracket classes, effect-preserving snapshots, safe literal rendering and single-operation pure arithmetic batching. |
+| Process substitution | Concurrent owned pipe endpoints, multiple substitutions, early close, explicit wait and independent status. Endpoints may not escape into arbitrary stored values or unowned consumers. |
+| Callbacks and finite code | Compiled standalone EXIT/ERR bodies with live reads and status/suppression rules; finite `eval`; immutable source bodies inside compatible owned functions and children. Arbitrary callbacks and runtime-generated programs remain excluded. Directory operations combined with EXIT/ERR traps reject until shared stdio error state across signal callbacks is modeled. |
+| Readability | Structural DSL and one semantic pipeline; native scalar storage/argv, status provenance, fewer snapshots, flattened standalone guards, concise literals and demand-driven support. External dispatch uses a replace-self native shim to preserve Bash launch diagnostics. Source output uses one shared native writer boundary to preserve write errors and SIGPIPE. |
+
+Fresh validation and outstanding gates are recorded in the
+[portable verification report](portable-runtime-verification.md). The
+[comparison report](../babelfish-comparison.md) preserves the 95-fixture
+denominator and reports filesystem, caller-state and process cohorts separately.
+The original Monk `58/58` translation-success figure is not an exactness target.
+The previous 45/95 (48 with stable directory contract) and Babelfish 26-match /
+32-mismatch counts below are historical Linux executions; matching all 304
+historical build-input hashes at the initial checkout did not rerun those tests.
+
+The planned helper-free greeting gate conflicts with an observed Fish/Bash
+semantic difference: with stdout initially closed, Bash `printf x` returns 1
+and diagnoses the failed write, while Fish returns 0 silently. With a pipe
+whose reader has closed, Bash terminates from SIGPIPE while Fish returns 1.
+Exact output therefore requires a shared native writer even for a greeting.
+The user-approved `monk-runtime --abi 2 launch FILE [ARGS...]` entry captures
+initial descriptor state before Fish can replace missing stdout with `/dev/null`;
+sourceable output retains its existing caller interface. Launcher-only runtime
+requirements capture a provider for managed silent programs without adding
+primitive calls or helpers to their Fish body.
+The compiler retains direct scalar/control expressions and avoids per-command
+operand/status snapshots; the writer owns one necessary status slot and actual
+signal termination. The original helper-free output criterion is not claimed
+as achieved, and the execution contract has not been narrowed to hide these
+counterexamples.
+
+Native Linux execution is explicitly deferred by the user. Source stays local;
+no Monk build or test ran on ccs-ci. This is an open platform acceptance gate,
+not a semantic mismatch or a substitute for native testing. Packaging, timing,
+compiler and quality claims require their own final-input receipts. Publishing,
+tagging and remote Git changes remain outside this implementation.
+
+## Fresh local acceptance evidence, 2026-09-22
+
+The final compiler/runtime bytes were checked with the pinned Nix reference
+on Apple Silicon macOS. The [verification report](portable-runtime-verification.md)
+and [comparison report](../babelfish-comparison.md) retain source identities,
+checksums, exact commands and the distinctions between successful snapshots.
+
+| Gate | Fresh local result |
+| --- | --- |
+| Frozen historic95, default contract | 74 exact matches, 21 explicit rejections, zero admitted mismatches. |
+| Frozen historic95, stable-directory contract | 77 exact matches, 18 explicit rejections, zero admitted mismatches. |
+| Independent providers, default contract | Original Monk: 71 matches/24 mismatches. Babelfish: 26 matches/32 mismatches/37 rejections. Current baseline: 23 matches/50 rejections/22 Darwin-unavailable cases; all executable baseline positives retained. |
+| Separate observational cohorts | Filesystem 1/1, sourceable caller 1/1, process lifetime 2/2; strengthened read/array controls 4 matches plus one explicit timing rejection. These do not enlarge historic95. |
+| Main integration suites | 980 tests pass on GHC 9.14.1 and GHC 9.12.2 with Bash 5.3.9/Fish 4.6.0. Fish 4.9.3 passes the prior full 978-test suite and the two subsequently added harness regressions. |
+| Native and release checks | Protocol, descriptors, streams, sessions, callbacks, managed launch, publication, public API boundaries, HLint, Ormolu, Haddock and unpacked source build/install checks pass. Receipts identify the exact executable bytes and distinguish test-only corrections from runtime changes. |
+| Apple Silicon package | Copied ABI 2 artifact executes outside the build shell and has only Apple system-library dependencies. Archive, binary checksums and macOS deployment target are recorded. |
+| Performance, runnable common14 | Final baseline/candidate aggregate medians: 171.476 ms / 621.447 ms, a 3.624 times regression. Candidate time is 38.7% below the pre-optimization run, but the 10% limit is not met. The other two common cases cannot run against the baseline on Darwin. |
+
+The environment snapshot harness now uses NUL framing: an exported multiline
+`DEVENV_CMDLINE` previously produced two false caller-state failures. Bash and
+Fish regressions reproduce that defect, and the full corrected suite passes
+with the original failing environment injected. The production-input scanner
+also includes this private harness module; its changed fingerprint is not
+misrepresented as a translator or runtime executable change.
+
+A measured runtime shutdown cost led to a narrow optimization: completed raw
+writers exit immediately; metadata output flushes before exiting; and native
+launch exits after its wait and all cleanup finish. Session and generic primitive
+shutdown paths retain their ownership behavior. Full native checks, the 980-test
+canonical suite, compatibility/moving-Fish checks and the rebuilt copied macOS
+package pass after this change. Both frozen95 comparison counts remain unchanged.
+
+The performance regression is an observed failure, not merely missing evidence.
+Three warmups and twenty alternating samples preserve Bash output/status for every
+measured sample. The full common16 cohort remains incomplete, all three original
+arithmetic inputs are unavailable, and targeted elapsed-time/launch-count gates
+remain unverified. The reduced teardown overhead does not establish overall
+performance acceptance.
+
+Remaining gates are explicit: native execution and static inspection of both
+Linux packages; execution at the declared minimum platform versions; the full
+common/arithmetic performance and measured-launch criteria; and the helper-free
+greeting criterion discussed above. Missing original arithmetic inputs and a
+Linux-only historical runtime prevent full local performance acceptance.
+Configured remote CI is not executed CI evidence. No publishing or remote Git
+operation is implied by these local results.
 
 ## Evidence policy
 
@@ -32,7 +116,7 @@ Both earlier branches are prototypes. The typed checkpoint `db0aed4` recorded
 Its source identity and execution-boundary ideas inform this redesign, but its
 failure backlog and overlapping analyses are not acceptance evidence.
 
-## Implementation gates
+## Historical architecture gates, 2026-09-10
 
 | Stage | Required outcome | Current evidence |
 | --- | --- | --- |
@@ -44,7 +128,7 @@ failure backlog and overlapping analyses are not acceptance evidence.
 | 6. Residual effects | Shared/child ownership and callback relevance; useful exact cases retained, other cases rejected with explanations. | Isolated substitutions, subshells and bounded pipelines, with large/invalid-byte and transitive closure tests. Background jobs, process substitution and traps explicitly reject. Superseded semantic walkers removed. |
 | 7. Publication/release | Immutable generations, atomic entry replacement, durable failure recovery, package/CI/docs consistency. | Managed pinned generations, typed recovery and retry durability; private failure injection and concurrent reader/publisher coverage. Final compiler/runtime/package gates recorded below. |
 
-## Native runtime and coverage acceptance, 2026-09-10
+## Historical native runtime and coverage acceptance, 2026-09-10
 
 The approved extension is implemented in the existing worktree. Its accepted
 304-file build-input manifest is
@@ -87,8 +171,8 @@ measurements. Earlier checkpoints remain historical evidence.
 - [ ] Remote CI acceptance remains unrun on this unpushed tree. Local results
   establish the verified candidate, not execution of the configured remote jobs.
 
-Bundled executables remain specific to the declared Linux platform and recorded
-dynamic libraries. Publishing, tagging and generation garbage collection are
+At that checkpoint, bundled executables were specific to the declared Linux
+platform and recorded dynamic libraries. Publishing, tagging and generation garbage collection are
 outside this implementation.
 
 ## Historical 2026-09-09 acceptance record

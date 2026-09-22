@@ -1,18 +1,12 @@
 # yaml-language-server: $schema=https://devenv.sh/devenv.schema.json
 inputs:
+  haskell-nix:
+    url: github:input-output-hk/haskell.nix/cc0be951a0041bb1c213b37858a51e1da2b5f689
   nixpkgs:
-    url: github:NixOS/nixpkgs/nixos-unstable
+    follows: haskell-nix/nixpkgs
+  nixpkgs-tools:
+    url: github:NixOS/nixpkgs/44a91898084f46797b5fac650c7e8c9ac38c43d4
+  nixpkgs-reference:
+    url: github:NixOS/nixpkgs/c5f167527b44a51c1e8cdd0e519040092ad31b8f
 
-# If you're using non-OSS software, you can set allow_unfree to true.
 allow_unfree: true
-
-# If you're not willing to allow unsupported packages:
-# allow_unsupported_system: false
-
-# If you're willing to use a package that's vulnerable
-# permitted_insecure_packages:
-#  - "openssl-1.1.1w"
-
-# If you have more than one devenv you can merge them
-#imports:
-# - ./backend

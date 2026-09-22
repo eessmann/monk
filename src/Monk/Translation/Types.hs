@@ -10,6 +10,8 @@ module Monk.Translation.Types
   ( TranslateConfig (..),
     TranslationPolicy (..),
     TranslationStatistics (..),
+    ExecutionStrategy (..),
+    executionStrategyFor,
     Approximation (..),
     TargetProfile (..),
     EntryMode (..),
@@ -57,6 +59,7 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.DSL (SourceRange)
+import Monk.Runtime.NativeTarget (runtimeABI)
 
 -- | Translation is exact under the selected profile and caller contract.
 -- A migration policy permits only individually selected approximations.
@@ -78,10 +81,28 @@ data TranslationStatistics = MkTranslationStatistics
   { statisticsHelperDefinitions :: !Int,
     statisticsHelperCallSites :: !Int,
     statisticsNativeCallSites :: !Int,
-    statisticsRenderedFishBytes :: !Int
+    statisticsRenderedFishBytes :: !Int,
+    statisticsStatementSites :: !Int,
+    statisticsTemporaryBindings :: !Int,
+    statisticsStatusCaptures :: !Int,
+    statisticsExternalCallSites :: !Int
   }
   deriving stock (Show, Eq, Generic)
   deriving anyclass (ToJSON, FromJSON)
+
+-- | Direct Fish can use bounded primitive helpers. Supervised execution also
+-- gives a native owner authority over process lifetimes and descriptors.
+data ExecutionStrategy = DirectExecution | SupervisedExecution
+  deriving stock (Show, Eq, Ord, Generic)
+  deriving anyclass (ToJSON, FromJSON)
+
+executionStrategyFor :: [RuntimeRequirement] -> ExecutionStrategy
+executionStrategyFor requirements
+  | any supervised requirements = SupervisedExecution
+  | otherwise = DirectExecution
+  where
+    supervised (MkRuntimeRequirement (RequiresNativeRuntime _ _ operations) _) = Set.member NativeSession operations
+    supervised _ = False
 
 data TranslationPolicy
   = ExactOnly
@@ -106,18 +127,26 @@ data EntryMode = Standalone | Sourceable
 data RuntimeSelection = RuntimeOnPath | RuntimePath FilePath | RuntimeGeneration FilePath
   deriving stock (Show, Eq, Ord)
 
--- | Closed primitive capabilities of native runtime ABI 1.
+-- | Closed primitive capabilities of native runtime ABI 2.
 data NativeOperation
   = NativeInteger
   | NativeSplit
   | NativeArgv
   | NativeEcho
   | NativePattern
+  | NativePatternParts
+  | NativePlatformBytes
   | NativeGlob
   | NativeChildRun
   | NativeChildCapture
   | NativeDescriptorState
   | NativeDirectory
+  | NativeSession
+  | NativeExec
+  | NativeWrite
+  | NativeLaunch
+  | NativeExpansion
+  | NativePipePaths
   deriving stock (Show, Eq, Ord, Enum, Bounded)
 
 nativeOperationName :: NativeOperation -> Text
@@ -127,15 +156,23 @@ nativeOperationName = \case
   NativeArgv -> "argv"
   NativeEcho -> "echo"
   NativePattern -> "pattern"
+  NativePatternParts -> "pattern-parts"
+  NativePlatformBytes -> "bytes-platform"
   NativeGlob -> "glob"
   NativeChildRun -> "child-run"
   NativeChildCapture -> "child-capture"
   NativeDescriptorState -> "descriptor-state"
   NativeDirectory -> "directory"
+  NativeSession -> "session"
+  NativeExec -> "exec-site"
+  NativeWrite -> "write-builtin"
+  NativeLaunch -> "launch"
+  NativeExpansion -> "expansion"
+  NativePipePaths -> "pipe-paths"
 
 nativeRuntimeRequirement :: NativeOperation -> Text -> RuntimeRequirement
 nativeRuntimeRequirement operation reason =
-  MkRuntimeRequirement (RequiresNativeRuntime 1 Bash53Signed64Fish46 (Set.singleton operation)) (MkRequirementUse reason Nothing :| [])
+  MkRuntimeRequirement (RequiresNativeRuntime runtimeABI Bash53Signed64Fish46 (Set.singleton operation)) (MkRequirementUse reason Nothing :| [])
 
 -- | Caller declarations are semantic obligations, not proofs about arbitrary
 -- Fish functions. Admission checks supported shapes; runtime guards check only
@@ -284,14 +321,18 @@ profileSupportsFishFeature Bash53Signed64Fish46 FunctionScopeSharing = True
 profileSupportsFishFeature Bash53Signed64Fish46 NulDelimitedCapture = True
 
 -- | Platform behavior consumed by a materialized runtime boundary.
-data PlatformCapability = Linux64DescriptorFilesystem
+data PlatformCapability = Linux64DescriptorFilesystem | PosixOwnedDescriptors | PipeDescriptorPaths
   deriving stock (Show, Eq, Ord)
 
 platformCapabilityName :: PlatformCapability -> Text
 platformCapabilityName Linux64DescriptorFilesystem = "linux-64-descriptor-filesystem"
+platformCapabilityName PosixOwnedDescriptors = "posix-owned-descriptors"
+platformCapabilityName PipeDescriptorPaths = "pipe-descriptor-paths"
 
 profileSupportsPlatformCapability :: TargetProfile -> PlatformCapability -> Bool
 profileSupportsPlatformCapability Bash53Signed64Fish46 Linux64DescriptorFilesystem = True
+profileSupportsPlatformCapability Bash53Signed64Fish46 PosixOwnedDescriptors = True
+profileSupportsPlatformCapability Bash53Signed64Fish46 PipeDescriptorPaths = True
 
 data RequirementUse = MkRequirementUse
   { requirementReason :: Text,

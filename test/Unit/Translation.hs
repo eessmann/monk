@@ -46,8 +46,21 @@ statisticsTests :: TestTree
 statisticsTests =
   testGroup
     "materialization statistics"
-    [ H.testCase "user literal python is not a native call site" $ do
-        result <- admitted "printf '%s\\n' 'python3 __monk_native'"
+    [ H.testCase "native scalar output shares one required writer status slot" $ do
+        result <- admitted "x=$1; printf '%s' \"$x\""
+        let stats = translationStatistics result
+        H.assertEqual "required writer status slot" 1 (statisticsStatusCaptures stats)
+        H.assertBool "no operand snapshots" (not ("_field_" `T.isInfixOf` renderTranslation result)),
+      H.testCase "external-only pipeline uses native Fish" $ do
+        result <- admitted "cat /dev/null | wc -c"
+        let stats = translationStatistics result
+        H.assertEqual "two replace-self exec primitives" 2 (statisticsNativeCallSites stats)
+        H.assertEqual "external stages" 2 (statisticsExternalCallSites stats),
+      H.testCase "native external dispatch is structurally counted" $ do
+        result <- admitted "command cat; command wc"
+        H.assertEqual "external invocations" 2 (statisticsExternalCallSites (translationStatistics result)),
+      H.testCase "user literal python is not a native call site" $ do
+        result <- admitted "x='python3 __monk_native'"
         let stats = translationStatistics result
         H.assertEqual "literal words are data" 0 (statisticsNativeCallSites stats)
         H.assertEqual "rendered UTF-8 bytes" (BS.length (encodeUtf8 (renderTranslation result))) (statisticsRenderedFishBytes stats),
@@ -60,8 +73,8 @@ statisticsTests =
         H.assertBool "call sites preserved" (statisticsHelperCallSites repeated > statisticsHelperCallSites single)
         H.assertBool "native operation dispatcher reached" (statisticsNativeCallSites repeated > 0),
       H.testCase "embedded child counts come from its pre-rendering structure" $ do
-        plain <- translationStatistics <$> admitted "(printf x)"
-        native <- translationStatistics <$> admitted "(echo -e 'x\\ny')"
+        plain <- translationStatistics <$> admitted "(true)"
+        native <- translationStatistics <$> admitted "(printf x)"
         H.assertBool "child native operation is counted" (statisticsNativeCallSites native > statisticsNativeCallSites plain),
       H.testCase "copied functions retain nested child native sites" $ do
         direct <- translationStatistics <$> admitted "f() { (echo -e 'x\\ny'); }; f"

@@ -1,5 +1,6 @@
 module SourceTestSupport (withSources, requireGraph, renderGraph, assertSourceEquivalent) where
 
+import Data.List qualified as List
 import Monk.Output
 import Monk.Source
 import Monk.Translation
@@ -45,9 +46,11 @@ assertSourceEquivalent path environment graph arguments = do
     Right () -> do
       generated <- renderGraph graph
       baseEnv <- prepareEnv
-      let run command args =
+      let environmentPath = List.intercalate ":" (sourceSearchPath environment <> maybeToList (List.lookup "PATH" baseEnv))
+          executionEnv = ("PATH", environmentPath) : filter ((/= "PATH") . fst) baseEnv
+          run command args =
             readCreateProcessWithExitCode
-              (proc command args) {cwd = Just (sourceWorkingDirectory environment), env = Just baseEnv}
+              (proc command args) {cwd = Just (sourceWorkingDirectory environment), env = Just executionEnv}
               ""
       bash <- run "bash" (["--noprofile", "--norc", path] <> arguments)
       fish <- run "fish" (["--no-config", "-c", toString generated] <> arguments)

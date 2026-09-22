@@ -82,7 +82,7 @@ materializeArithmetic nativeHelper prefix getter setter expression
     lower :: Maybe ArithmeticOrigin -> ArithmeticExpr -> State.State Int ([FishStatement], FishExpr TStr)
     lower origin candidate
       | Just count <- pureCost candidate,
-        count >= 2 = do
+        count >= 1 = do
           (before, frames) <- pureFrames origin candidate
           (after, result) <- operation origin "batch" frames
           pure (before <> after, result)
@@ -162,7 +162,7 @@ materializeArithmetic nativeHelper prefix getter setter expression
                             False
                             []
                             (Stmt (Decorated DecBuiltin (Command "printf" [ExprVal (ExprLiteral "%s\\0"), ExprVal (ExprVariable (VarAll "argv"))])))
-                            [PipeTo [] (Stmt (Command nativeHelper [ExprVal (ExprLiteral "--abi"), ExprVal (ExprLiteral "1"), ExprVal (ExprLiteral "integer")]))]
+                            [PipeTo [] (Stmt (Command nativeHelper [ExprVal (ExprLiteral "--abi"), ExprVal (ExprLiteral "2"), ExprVal (ExprLiteral "integer")]))]
                             False
                         )
                     )

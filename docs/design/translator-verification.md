@@ -49,7 +49,7 @@ tests exercise script, parse-result and source-graph APIs.
 ## Reproduction
 
 Use a supported GHC and install the pinned runtime with
-`bash scripts/install-ci-runtimes.sh "$PWD/artifacts/runtime" pinned`.
+`bash scripts/install-ci-runtimes.sh "$PWD/artifacts/runtime" pinned`. This compatibility entry point now selects the locked upstream Nix packages through standalone devenv; it does not download or compile private Bash/Fish sources.
 Place its `bin` directory first in PATH, then run:
 
 ```bash

@@ -20,11 +20,11 @@ unitApi04Tests =
         reviewRisk [diagnostic {diagnosticRisk = Unsafe}] @?= Unsafe,
       H.testCase "an exact primitive declares its bounded native runtime" $ do
         translated <- accepted strictConfig "x=value; echo \"$x\""
-        H.assertBool "missing native operation requirement" (RequiresNativeRuntime 1 Bash53Signed64Fish46 (Set.singleton NativeEcho) `elem` programs translated),
+        H.assertBool "missing native operation requirement" (RequiresNativeRuntime 2 Bash53Signed64Fish46 (Set.singleton NativeWrite) `elem` programs translated),
       H.testCase "deduplicated requirements retain every operation and range" $ do
         translated <- accepted strictConfig "x=one; echo \"$x\"\necho \"$x\""
         H.assertBool "missing native provider pathname capability producer" (RequiresFishFeature NulDelimitedCapture `elem` programs translated)
-        case find ((== RequiresNativeRuntime 1 Bash53Signed64Fish46 (Set.singleton NativeEcho)) . requirementProgram) (translationRuntimeRequirements translated) of
+        case find ((== RequiresNativeRuntime 2 Bash53Signed64Fish46 (Set.singleton NativeWrite)) . requirementProgram) (translationRuntimeRequirements translated) of
           Nothing -> H.assertFailure "missing native operation requirement"
           Just requirement -> do
             let uses = toList (requirementUses requirement)
@@ -40,7 +40,7 @@ unitApi04Tests =
           RequiresFishFeature feature -> H.assertBool "unsupported materialization capability" (profileSupportsFishFeature Bash53Signed64Fish46 feature)
           RequiresCommand _ -> pure ()
           RequiresNativeRuntime abi profile _ -> do
-            abi @?= 1
+            abi @?= 2
             profile @?= Bash53Signed64Fish46
           RequiresPlatformCapability capability -> H.assertBool "unsupported platform capability" (profileSupportsPlatformCapability Bash53Signed64Fish46 capability),
       H.testCase "NUL capture capability has an actual materialized producer" $ do
@@ -48,11 +48,11 @@ unitApi04Tests =
         H.assertBool "capture capability missing" (RequiresFishFeature NulDelimitedCapture `elem` programs translated),
       H.testCase "owned child transport declares its descriptor platform contract" $ do
         translated <- accepted strictConfig "x=\"$(printf child)\""
-        H.assertBool "missing typed platform producer" (RequiresPlatformCapability Linux64DescriptorFilesystem `elem` programs translated)
-        H.assertBool "missing descriptor platform requirement" (any (T.isInfixOf "platform:linux-64-descriptor-filesystem" . renderRuntimeRequirement) (translationRuntimeRequirements translated)),
+        H.assertBool "missing typed platform producer" (RequiresPlatformCapability PosixOwnedDescriptors `elem` programs translated)
+        H.assertBool "missing descriptor platform requirement" (any (T.isInfixOf "platform:posix-owned-descriptors" . renderRuntimeRequirement) (translationRuntimeRequirements translated)),
       H.testCase "normal and strict defaults reject unsupported semantics without a script" $
         forM_ [defaultConfig, strictConfig] $
-          \config -> forM_ ["coproc echo hi", "eval 'echo unsafe'", "echo +([ab])"] $ \source -> assertRejected config source,
+          \config -> forM_ ["coproc echo hi", "eval \"$1\"", "echo +([ab])"] $ \source -> assertRejected config source,
       H.testCase "readonly approximation is never selected implicitly" $
         forM_ [defaultConfig, strictConfig] $
           \config -> assertRejected config "readonly x=one; x=two; printf '%s\\n' \"$x\"",
@@ -66,7 +66,7 @@ unitApi04Tests =
       H.testCase "readonly opt-in does not change multiple-operand evaluation order" $
         assertRejected (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "x=outer; readonly x=inner y=\"$x\"",
       H.testCase "an approximation selection does not permit unrelated eval" $
-        assertRejected (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "eval 'echo unsafe'",
+        assertRejected (defaultConfig {translationPolicy = Migration (Set.singleton ReadonlyUnchecked)}) "eval \"$1\"",
       H.testCase "syntax-only arithmetic cannot claim original spelling evidence" $ do
         parsed <- parseBashScript "spec.bash" "printf '%s\\n' \"$((1/0))\""
         case translateParseResult strictConfig parsed of

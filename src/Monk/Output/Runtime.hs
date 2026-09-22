@@ -6,6 +6,7 @@ module Monk.Output.Runtime
     nativeImageOperations,
     nativeImageABI,
     nativeImageProfile,
+    nativeImageTarget,
     captureNativeRuntime,
     validateNativeRuntimeFile,
   )
@@ -17,6 +18,7 @@ import Data.Set qualified as S
 import GHC.Show qualified as GHC
 import Monk.Runtime.Compatibility (checkRuntimeFile)
 import Monk.Runtime.Digest (sha256)
+import Monk.Runtime.NativeTarget (runtimeABI, runtimeTarget)
 import Monk.Translation.Types
 import System.Directory (findExecutable, getTemporaryDirectory, makeAbsolute, removeFile)
 import System.IO qualified as IO
@@ -39,10 +41,14 @@ nativeImageOperations :: NativeRuntimeImage -> S.Set NativeOperation
 nativeImageOperations (MkNativeRuntimeImage _ _ operations) = operations
 
 nativeImageABI :: NativeRuntimeImage -> Int
-nativeImageABI _ = 1
+nativeImageABI _ = runtimeABI
 
 nativeImageProfile :: NativeRuntimeImage -> TargetProfile
 nativeImageProfile _ = Bash53Signed64Fish46
+
+-- | Target of the validated native image, distinct from shell semantics.
+nativeImageTarget :: NativeRuntimeImage -> Text
+nativeImageTarget _ = toText runtimeTarget
 
 captureNativeRuntime :: RuntimeSelection -> S.Set NativeOperation -> IO (Either Text NativeRuntimeImage)
 captureNativeRuntime selection operations = do

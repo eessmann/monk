@@ -334,3 +334,69 @@ Two earlier candidate observations are explicitly superseded and excluded from
 these figures. Documentation/evidence additions follow the compiled-source
 freeze; no commit or publication is implied. Broader release validation remains
 in the [verification record](design/native-runtime-verification.md).
+
+## 2026-09-22 portable candidate verification
+
+Final local comparisons use the locked upstream Nix `bashNonInteractive` 5.3p9
+package (Bash 5.3.9), Fish 4.6.0 and Babelfish 1.2.1. The
+[reference receipt](evidence/portable-exact-reference-2026-09-22.json) records
+actual hashes and behavior; earlier private-Bash observations are historical.
+
+The [frozen manifest](evidence/portable-exact-cohorts-2026-09-22.json) preserves
+the original 95 source hashes. Original Monk (`2bc0e72`), unchanged current
+baseline (`c2bd371`), candidate and Babelfish each have an independent Bash
+oracle. The baseline's Linux-only native runtime is explicitly unavailable on
+Darwin, never counted as a match.
+
+| Historic95 provider/lane | Match | Mismatch | Rejection | Unsupported native platform |
+| --- | ---: | ---: | ---: | ---: |
+| Original Monk | 71 | 24 | 0 | 0 |
+| Current baseline, default | 23 | 0 | 50 | 22 |
+| Candidate, default | 74 | 0 | 21 | 0 |
+| Babelfish | 26 | 32 | 37 | 0 |
+| Current baseline, stable directory | 23 | 0 | 47 | 25 |
+| Candidate, stable directory | 77 | 0 | 18 | 0 |
+
+The final [default](evidence/portable-exact-comparison-optimized-default-2026-09-22.json)
+and [stable-directory](evidence/portable-exact-comparison-optimized-stable-2026-09-22.json)
+receipts bind captured executables to final production fingerprint
+`15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63`.
+The test-support NUL-framing correction preserved both product hashes; the later
+bounded leaf-termination optimization changed the runtime while preserving compiler
+bytes. Fresh comparisons above include that runtime. The
+[final verification ledger](evidence/portable-exact-final-verification-2026-09-22.json)
+records both transitions and retains earlier full-input receipts as snapshots.
+
+All 23 locally executable baseline positives remain candidate matches. In the
+default lane, separate filesystem/mode, caller-state and process cohorts match
+1/1, 1/1 and 2/2. The strengthened cohort matches four cases and explicitly rejects
+visible timing. These nine cases never enlarge historic95. Stable-directory
+historic95 is a separate lane; its incompatible sourceable-caller option is not a
+replacement for the default caller-state result.
+
+Strengthened observations consume populated `read -a` values with nonempty IFS,
+EOF without newline, NUL and invalid bytes, dense-array append/quoted expansion,
+and deterministic `TIMEFORMAT=measured` timing output. Standalone candidate runs
+use `monk-runtime --abi 2 launch SCRIPT ARGS`; the sourceable caller retains its
+Fish wrapper, and historical providers retain their original entry paths.
+
+Linux execution was deferred by the user, and the original arithmetic3 source
+inputs could not be recovered. Historical Linux timings above cannot establish
+the portable candidate's performance gates. Fresh serial subset measurements,
+complete-cohort gaps, unchanged-binary provenance and package/compiler evidence
+are recorded in the [portable verification report](design/portable-runtime-verification.md).
+The helper-free greeting/conditional criterion remains unmet because exact
+output uses the native writer and the user-approved pre-Fish launcher.
+
+The preserved [pre-optimization timing receipt](evidence/portable-exact-performance-final-2026-09-22.json)
+measured the surviving common14 subset at 154.864 ms baseline versus 1013.566 ms
+candidate (median summed time), a **6.545× regression**. Common16 remains incomplete
+because two baseline cases cannot execute on Darwin; arithmetic3 is missing and
+all targeted-native cases are unavailable. These limitations do not conceal the
+observed subset regression, and no performance acceptance gate is claimed passed.
+
+The [optimized runtime timing receipt](evidence/portable-exact-performance-optimized-2026-09-22.json)
+records the same common14 subset at 171.476 ms baseline versus 621.447 ms candidate,
+**3.624× baseline time**. The candidate summed median is 38.7% lower than the
+pre-optimization run, but remains a substantial regression. Complete-cohort and
+process-tracing gaps are unchanged; performance is not accepted.

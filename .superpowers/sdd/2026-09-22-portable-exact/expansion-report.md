@@ -1,0 +1,11 @@
+# Composed scalar expansion runtime
+
+`Monk.Runtime.Expansion.expandWords` consumes IFS followed by mode/value pairs. `q` preserves quoted bytes and quoted empty positions, `l` marks unquoted literal glob syntax without splitting, and `e` performs unquoted expansion splitting and globbing. Fields are composed before splitting; a quoted empty fragment between two delimiter-bearing expansions can create its own empty field. Outputs retain per-byte quote activity until pathname expansion.
+
+`Pattern` now tokenizes byte bracket expressions, negation, ranges, C-locale POSIX classes and single-byte collating/equivalence elements in addition to star/question. Quoted metacharacters and unquoted expansion backslashes are composed before pattern tokenization. Unmatched brackets remain literal; invalid range-to-class expressions never match. Pathname brackets cannot absorb slash. Dot-file and spelling/separator behavior remains explicit.
+
+Validation used an isolated temporary Haskell driver importing the actual runtime modules, compiled with GHC9.14.1 and9.12.2, `-XGHC2024 -Wall -Werror`; both compiled. Ormolu formatted both owned modules. The GHC9.14.1 driver passed 1515 deterministic/exhaustive composed IFS and quote cases, pathname/quote/bracket/C-class cases, and malformed frame rejection against the pinned custom Bash5.3.9. The oracle passes bytes through argv and the runtime through NUL frames; no runtime Bash subprocess or source parsing is introduced.
+
+The Darwin filesystem rejects invalid UTF-8 names (EILSEQ). Those two filename creation checks are explicitly reported as platform gaps, while invalid UTF-8 expansion values are covered independently. Additional direct parameter-pattern checks cover invalid high-byte bracket subjects without filesystem support.
+
+The permanent oracle is `runtime-test/expansion.py RUNTIME`. It is wired into canonical integration and copied-package CI checks. Full executable registration and capability enumeration are owned by the portable-runtime agent; root owns typed frontend/materialization. Final integration still requires the complete canonical build and test run after those changes land. Linux execution remains deferred by the user.

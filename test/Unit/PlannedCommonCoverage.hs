@@ -16,6 +16,7 @@ import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO (withBinaryFile)
 import System.IO.Temp (withSystemTempDirectory)
+import System.Info (os)
 import System.Process (CreateProcess (env, std_err, std_in, std_out), StdStream (NoStream, UseHandle), proc, waitForProcess, withCreateProcess)
 import System.Timeout qualified as Timeout
 import Test.Tasty (TestTree, testGroup)
@@ -82,7 +83,9 @@ unitPlannedCommonCoverageTests =
       rejected "numeric test does not reinterpret octal as decimal" "test 010 -eq 8",
       exact "single quotes inside quoted alternate stay literal" "x=set; printf '<%s>' \"${x:+'a b'}\"" "<'a b'>",
       exact "single quotes inside unquoted assignment alternate quote the operand" "x=set; y=${x:+'a b'}; printf '<%s>' \"$y\"" "<a b>",
-      exact "ANSI unknown Unicode beyond Bash range emits nothing" "printf '<%s>' $'\\Uffffffffz\\?'" "<z?>",
+      exact "ANSI out of range Unicode follows runtime target" "printf '<%s>' $'\\Uffffffffz\\?'" (if os == "darwin" then "<\\UFFFFFFFFz?>" else "<z?>"),
+      exact "ANSI target-dependent empty result retains one word" "printf '<%s>' $'\\U80000000'" (if os == "darwin" then "<\\U80000000>" else "<>"),
+      exact "ANSI NUL terminates before target-dependent escapes" "printf '<%s>' $'\\0\\Uffffffff'" "<>",
       exact "positional alternates distinguish empty and missing values" "f() { printf '<%s:%s>' \"${1+set}\" \"${1:+nonempty}\"; }; f ''; f" "<set:><:>",
       H.testCase "field fast path does not assume IFS after a function call" $ do
         let source = "f() { IFS=a; }; f; x=abc; printf '<%s>' $x"
@@ -129,7 +132,7 @@ unitPlannedCommonCoverageTests =
       exact "single bracket negates empty scalar" "if [ ! \"\" ]; then printf yes; fi" "yes",
       exact "single bracket negates nonempty scalar" "if [ ! x ]; then printf bad; else printf yes; fi" "yes",
       testGroup "fixed test file size and symlink predicates" [differentialWithSetup mode filePredicateSource (Just "1010000011110000") | mode <- [Standalone, Sourceable]],
-      rejected "array append remains excluded" "a=(); a+=(x)",
+      rejected "sparse array construction remains excluded" "a=([4]=x)",
       rejected "computed parameter pattern remains excluded" "x=word; printf '%s' \"${x#$1}\""
     ]
 

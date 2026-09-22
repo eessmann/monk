@@ -38,6 +38,24 @@ operations needing exact error spelling. Use `translateBashScript` or
 literal dependencies. Tests that deliberately construct parser nodes can still
 exercise syntax admission through the limited entry.
 
+## Standalone execution
+
+Use the native launcher for generated standalone output:
+
+```sh
+monk input.bash --strict > translated.fish
+monk-runtime --abi 2 launch ./translated.fish arg1 arg2
+```
+
+The launcher must run before Fish so it can record initially closed standard
+streams. Fish otherwise replaces them with read/write `/dev/null`, losing the
+information needed for Bash-compatible errors. The entry preserves argv and
+original file identity and executes generated Fish only. Its reserved
+`MONK_LAUNCH_ORIGINAL`/`MONK_LAUNCH_WRAPPER` markers are not user variables.
+This applies even to a silent body that needs no primitive helper. Sourceable
+output still enters through the declared Fish caller contract rather than this
+standalone command. Select the runtime for the deployment's native target.
+
 ## Sourceable caller contract
 
 `--entry sourceable` requires `--caller-contract FILE`. A contract is rejected
@@ -85,7 +103,8 @@ mutation and unsupported nonlocal exits are initially excluded.
 ## Results and output
 
 `TranslationResult` is opaque. Use `translationScript`,
-`translationDiagnostics`, `translationRuntimeRequirements`, and
+`translationDiagnostics`, `translationRuntimeRequirements`,
+`translationExecutionStrategy`, and
 `renderTranslation` to inspect it. They are ordinary functions, so record
 updates cannot forge a new result. General `Monk.AST` / `Language.Fish.DSL`
 construction remains supported, but arbitrary scripts cannot become certified
@@ -95,9 +114,10 @@ inspection accessors and authoritative planners on the same principle.
 Diagnostics have parse, translate, source and output phases. `PhaseRuntime`
 is removed. `RequiresFishFeature` takes a typed capability instead of free text.
 Consumers should pattern-match the capability or call `fishFeatureName`.
-`RequiresPlatformCapability Linux64DescriptorFilesystem` has a child producer,
-a profile admission check and a runtime descriptor preflight; use
-`platformCapabilityName` for display.
+New child ownership uses `PosixOwnedDescriptors`; streaming process endpoints
+add `PipeDescriptorPaths`. Both have concrete runtime checks. The legacy
+`Linux64DescriptorFilesystem` constructor remains for compatibility, but new
+child transport does not require procfs. Use `platformCapabilityName` for display.
 
 Separate bundles migrate from direct root/child writes to managed immutable
 generations and one atomic entry loader. Rendered inspection output is not a
@@ -114,8 +134,9 @@ cycles require manual restructuring.
 
 Keep exact positive examples alongside exclusions. Test stdout, stderr, exit
 status, argument boundaries, filesystem changes and declared caller updates
-against the selected Bash profile. Arrays, runtime expression-string arithmetic,
-recursion, unknown dynamic dispatch and arbitrary eval need explicit redesign
+against the selected Bash profile. Sparse/associative arrays, runtime
+expression-string arithmetic, recursion, unknown dynamic dispatch and arbitrary
+eval need explicit redesign
 rather than disabling diagnostics.
 
 Both `planCombinedOutputBundle` and `planSeparateOutputBundle` return their
@@ -127,12 +148,20 @@ back the entry. Separate rendered inspection files include the entry loader
 and pinned generation members. There is no helper extraction pass after
 admission and no unversioned child path to overwrite in place.
 
-General file redirection is now an explicit exclusion: an access check followed
-by native Fish reopening would introduce races and different failure behavior.
-The admitted standard descriptor and `/dev/null` forms preserve ordering and
-function invocation timing. Literal source dependencies can repeat under one
-compatible entry context; a second call after incompatible binding/definition
-changes rejects rather than reusing stale analysis.
+General file redirection and byte read now use owned descriptor scopes in
+standalone execution. There is no permission precheck followed by a separate
+Fish reopen. Ordered opens/duplication, compound scope and failure diagnostics
+belong to the native owner. Effectful ordinary path expressions and unproved
+redirected assignment expressions still reject. Extra inherited user descriptors
+are not assumed owned; open them within the translated program.
+
+Standalone dense arrays, finite eval, immutable function/child source calls,
+owned jobs, streaming process substitution and literal EXIT/ERR callbacks now
+have bounded implementations. This does not admit arbitrary eval, sparse arrays,
+job-control syntax or arbitrary callbacks. Process endpoint paths cannot escape
+through scalar storage or arbitrary consumers. The sourceable scalar contract
+has not been broadened to these session operations. Consult the
+[admission table](design/translator-audit.md) when restructuring a rejection.
 
 The bake-off now executes standalone output and records `ShellRunExec`; legacy
 fixture `.mode` sidecars no longer select sourcing for that runner. Use the
@@ -191,14 +220,15 @@ version. Relative sources require a known execution cwd on their actual
 control edge: `cd /known/path && source ./dependency.bash` may establish that
 fact, while `cd /known/path; source ./dependency.bash` cannot assume cd succeeds.
 
-The bounded Linux directory envelope limits each UTF-8 path component to 255
+The lexical directory envelope limits each UTF-8 path component to 255
 bytes and the operand to 4095 bytes. These are lexical admission limits, not
 filesystem existence checks. Longer operands reject because Fish can emit its
 ENAMETOOLONG diagnostic outside the builtin stderr stream that the parent
 operation captures. Control-byte and non-ASCII operands within the envelope
 use Bash ANSI-C diagnostic quoting.
 
-The resolved logical directory path must also remain shorter than 4096 bytes.
+The resolved logical directory path is additionally limited to 1023 bytes on
+Darwin and 4095 bytes on Linux.
 A pure lexical runtime check enforces that obligation before parent cd, using
 the actual PWD and operand; a violation returns/exits with status 125 before
 the attempted directory operation. This guard performs no filesystem target
@@ -210,7 +240,7 @@ Install both executables with `cabal install exe:monk exe:monk-runtime`.
 Generated support no longer uses Python. Combined/stdout output needs a
 compatible installed runtime when its typed requirements include native
 operations. `--runtime FILE` overrides PATH lookup; the provider must remain
-immutable and compatible during execution. Entries check ABI/profile/operations
+immutable and compatible during execution. Entries check ABI/profile/native-target/operations
 before body effects and return 125 with `monk.runtime` on incompatibility.
 
 ```bash
@@ -237,3 +267,42 @@ artifact constructors remain private.
 use `nativeOperationName` for display. `translationStatistics`,
 `sourceGraphStatistics`, and `generatedStatistics` expose structural counts.
 Static native-call sites are not a measurement of launched processes.
+
+
+ABI 2 uses shell profile `bash53-i64` independently of the native target.
+Rebuild/reselect providers for the executing target; an ABI 1 provider cannot
+satisfy an ABI 2 output requirement. Existing immutable generations retain their
+captured providers and are not rewritten. `nativeImageTarget` reports the
+validated image target. Supported target declarations cover x86_64 Linux,
+aarch64 Linux and Apple Silicon Darwin, with actual verification tracked
+separately in the roadmap.
+
+`translationExecutionStrategy`, `sourceGraphExecutionStrategy` and
+`generatedExecutionStrategy` distinguish direct Fish from native-supervised
+execution. Direct output may still use bounded primitives. Supervised output
+uses a native owner for process/descriptor lifetime while executing generated
+Fish semantic regions. The selection does not enable source interpretation or
+change the public invocation into a Bash fallback.
+
+Do not use implementation identity/depth inspection as an ordinary environment
+comparison: direct or indirect reads of `SHLVL`, private helpers or transport
+state are outside the profile. This restriction leaves ordinary exported
+variables, explicit job PIDs and declared user descriptor effects observable.
+
+
+Direct external calls use a bounded `exec-site` primitive that replaces itself
+with the requested OS executable. This preserves the actual process identity
+and source diagnostics without starting a persistent session for ordinary
+external calls. Missing commands and permission changes during execution are
+still observable failures. Binaries and shebang scripts are supported executable
+dependencies; implicit Bash interpretation after ENOEXEC is deliberately absent.
+Combining directory operations and EXIT/ERR registration currently rejects with
+`directory-trap-signal` until shared stdio failure state is represented.
+
+
+Direct output-only translations now require the native writer capability.
+In addition to standalone entry, printf/echo greetings need bounded
+support to preserve Bash's closed-stream errors and real SIGPIPE termination.
+This does not select a session owner or narrow the permitted initial streams.
+Retain the captured provider alongside deployed output as for other ABI2
+operations; missing write-builtin capability fails before source effects.

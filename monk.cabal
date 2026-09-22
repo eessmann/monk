@@ -22,7 +22,13 @@ extra-doc-files:     README.md
                      docs/design/*.md
                      docs/evidence/*.json
                      docs/superpowers/plans/*.md
-extra-source-files:  runtime-cbits/*.c
+extra-source-files:  cabal.project
+                     devenv.nix
+                     devenv.yaml
+                     devenv.lock
+                     nix/*.nix
+                     nix/*.md
+                     runtime-cbits/*.c
                      runtime-test/*.py
                      test/native/*.sh
                      test/fixtures/**/*.bash
@@ -119,7 +125,10 @@ library
                      , unix >= 2.8 && < 2.9
                      , directory ^>= 1.3
                      , filepath ^>= 1.5
-  other-modules:       Language.Fish.Translator.NativeRuntime
+  other-modules:       Language.Fish.Translator.Traps
+                     , Language.Fish.Translator.Session
+                     , Language.Fish.Translator.Native
+                     , Language.Fish.Translator.NativeRuntime
                      , Language.Fish.Translator.Statistics
                      , Language.Fish.Translator.Directory
                      , Monk.Output.Runtime
@@ -257,6 +266,10 @@ test-suite monk-test
                      , Unit.PlannedWordContexts
                      , Unit.PlannedCommonCoverage
                      , Unit.PlannedDirectory
+                     , Unit.PlannedInput
+                     , Unit.PlannedTraps
+                     , Unit.PlannedArrays
+                     , Unit.PlannedEval
                      , Unit.PlannedPrimitives
                      , Unit.PlannedRedirects
                      , Unit.PlannedArithmetic
@@ -329,7 +342,22 @@ library monk-runtime-core
   visibility:          private
   hs-source-dirs:      runtime-src
   c-sources:          runtime-cbits/descriptors.c
-  exposed-modules:     Monk.Runtime.Descriptors
+                     runtime-cbits/session.c
+                     runtime-cbits/spawn.c
+  exposed-modules:     Monk.Runtime.Expansion
+                     , Monk.Runtime.DescriptorTable
+                     , Monk.Runtime.Read
+                     , Monk.Runtime.Printf
+                     , Monk.Runtime.Session
+                     , Monk.Runtime.Spawn
+                     , Monk.Runtime.Exec
+                     , Monk.Runtime.Launch
+                     , Monk.Runtime.DirectOutput
+                     , Monk.Runtime.PipePaths
+                     , Monk.Runtime.Session.Capsule
+                     , Monk.Runtime.Session.Transport
+                     , Monk.Runtime.NativeTarget
+                     , Monk.Runtime.Descriptors
                      , Monk.Runtime.Digest
                      , Monk.Runtime.Protocol
                      , Monk.Runtime.Integer

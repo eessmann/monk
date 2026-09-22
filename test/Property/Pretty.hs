@@ -31,6 +31,30 @@ propertyPrettyTests =
                 result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment output [] "")
                 QCM.monitor (QC.counterexample ("rendered: " <> toString output))
                 QCM.assert (rrStdout result == value && T.null (rrStderr result)),
+      QC.testProperty "Concatenated literal and variable fragments preserve bytes and argument count" $
+        QC.withMaxSuccess 50 $
+          QC.forAll ((,,) <$> genShellScalar <*> genShellScalar <*> genShellScalar) $ \(prefix, value, suffix) -> QCM.monadicIO $ do
+            readiness <- QCM.run shouldRunIntegration
+            case readiness of
+              Left reason -> QCM.monitor (QC.label ("SKIPPED: " <> reason)) >> QCM.assert True
+              Right () -> do
+                environment <- QCM.run prepareEnv
+                let joined = concatStr (str prefix) (concatStr (var "value") (concatStr (str "") (str suffix)))
+                    output = renderDsl (script [stmt (set [] "value" (list [str value])), stmt (command "printf" [arg (str "<%s>"), arg joined, arg (str "tail")])])
+                result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment output [] "")
+                QCM.monitor (QC.counterexample ("rendered: " <> toString output))
+                QCM.assert (rrStdout result == "<" <> prefix <> value <> suffix <> "><tail>" && T.null (rrStderr result)),
+      QC.testProperty "Quoted controls and metacharacters stay literal in multiple arguments" $ QC.once $ QCM.monadicIO $ do
+        readiness <- QCM.run shouldRunIntegration
+        case readiness of
+          Left reason -> QCM.monitor (QC.label ("SKIPPED: " <> reason)) >> QCM.assert True
+          Right () -> do
+            environment <- QCM.run prepareEnv
+            let values = ["", "'", "\\", "\n", "a\nb\n", "\t\r\x1b", "$value", "*?[]{}", ";&|<>()", "#comment", "~", "if", "and", "not", "time", "command", "builtin", "exec", "x=y"]
+                output = renderDsl (script [stmt (command "printf" (arg (str "<%s>") : map (arg . str) values))])
+            result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment output [] "")
+            QCM.monitor (QC.counterexample ("rendered: " <> toString output))
+            QCM.assert (rrStdout result == "<><'><\\><\n><a\nb\n><\t\r\x1b><$value><*?[]{}><;&|<>()><#comment><~><if><and><not><time><command><builtin><exec><x=y>" && T.null (rrStderr result)),
       QC.testProperty "Pipeline renders N pipes for N continuations" $ \(QC.NonNegative n) ->
         let stages = NE.fromList (replicate (n + 1) (stage (command "true" [])))
             out = renderDsl (script [stmt (pipeline stages)])

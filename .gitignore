@@ -53,4 +53,24 @@ TAGS
 
 # other
 .DS_Store
+
+# Local devenv state and validation artifacts
 .devenv
+.direnv/
+artifacts/
+result
+result-*
+__pycache__/
+
+# Copied executable providers for local immutable comparison runs
+.superpowers/sdd/*/comparison-*/providers/
+.superpowers/sdd/*/performance-*/providers/
+
+# Local raw verification products; compact manifests live in docs/evidence.
+.superpowers/sdd/*/comparison-*/
+.superpowers/sdd/*/performance-*/
+.superpowers/sdd/*/verify-*/
+.superpowers/sdd/*/package-*/
+
+.superpowers/sdd/*/final-*/
+.superpowers/sdd/*/documentation-closure/

@@ -1,61 +1,73 @@
-{-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
--- | Linux byte transport for already materialized Fish children. No source
+-- | Portable byte transport for already materialized Fish children. No source
 -- language expressions are accepted or interpreted by this module.
-module Monk.Runtime.Child (dispatchChild) where
+module Monk.Runtime.Child (dispatchChild, dispatchChildInSession) where
 
-import Control.Exception (IOException, bracket, catch, finally, onException)
-import Control.Monad (forM_, unless, void, when)
+import Control.Concurrent (myThreadId, throwTo)
+import Control.Exception (IOException, bracket, bracketOnError, catch, onException)
+import Control.Monad (filterM, forM, forM_, unless, void, when)
 import Data.Bits (testBit)
 import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as C
-import Foreign.C.Error (throwErrnoIfMinus1)
-import Foreign.C.Types (CInt (..))
-import Monk.Runtime.Descriptors (initialDescriptorOpen)
-import System.Directory (getTemporaryDirectory, listDirectory, removeFile)
+import Data.Map.Strict qualified as M
+import GHC.Foreign qualified as Foreign
+import GHC.IO.Encoding (getFileSystemEncoding)
+import Monk.Runtime.Descriptors (duplicatePrivate, initialDescriptorOpen)
+import Monk.Runtime.Session (dispatchSessionChild)
+import Monk.Runtime.Spawn (initialSignalIgnored, spawnProcess)
+import System.Directory (getTemporaryDirectory, removeDirectoryRecursive)
+import System.Environment (getExecutablePath)
 import System.Exit (ExitCode (..), exitWith)
 import System.IO (Handle, hClose, hFlush, openBinaryTempFile, stdin, stdout)
 import System.Posix.Env.ByteString (getEnvironment)
-import System.Posix.Files (deviceID, fileID, getFdStatus, getFileStatus)
-import System.Posix.IO (FdOption (CloseOnExec), closeFd, createPipe, dupTo, fdToHandle, handleToFd, setFdOption)
-import System.Posix.Process (ProcessStatus (..), exitImmediately, forkProcess, getProcessStatus)
-import System.Posix.Process.ByteString (executeFile)
-import System.Posix.Signals (Handler (Default), fullSignalSet, installHandler, sigCHLD, sigINT, sigPIPE, sigQUIT, sigTERM, sigTSTP, sigTTIN, sigTTOU, unblockSignals)
+import System.Posix.IO (closeFd, createPipe, fdToHandle)
+import System.Posix.Process (ProcessStatus (..), getProcessStatus)
+import System.Posix.Signals (Handler (Catch), installHandler, sigHUP, sigINT, sigKILL, sigPIPE, sigQUIT, sigTERM, signalProcess)
+import System.Posix.Temp (mkdtemp)
 import System.Posix.Types (Fd (..), ProcessID)
 import Text.Read (readMaybe)
-
-foreign import ccall unsafe "fcntl" duplicateAbove :: CInt -> CInt -> CInt -> IO CInt
 
 -- | The first four NUL-terminated frames are diagnostic bytes, descriptor mask, Fish script,
 -- and SHLVL. The remaining bytes are the child's NUL-framed scalar/argv state.
 dispatchChild :: Bool -> IO ()
-dispatchChild capture = run `catch` failure
+dispatchChild = dispatchChildWith False
+
+dispatchChildInSession :: Bool -> IO ()
+dispatchChildInSession = dispatchChildWith True
+
+dispatchChildWith :: Bool -> Bool -> IO ()
+dispatchChildWith supervised capture = run `catch` failure
   where
     run = do
-      bytes <- B.hGetContents stdin
-      (warning, descriptorMask, script, level, state) <- either (ioError . userError) pure (decode bytes)
-      originalInput <- initialDescriptorOpen 3
-      when (testBit descriptorMask 0 && not originalInput) (ioError (userError "missing original stdin descriptor"))
-      environment <- getEnvironment
-      let childEnvironment = ("SHLVL", C.pack (show level)) : filter ((/= "SHLVL") . fst) environment
-      bracket (anonymous (restoreClosedStreams capture descriptorMask script)) closeFd $ \scriptFd ->
-        bracket (anonymous state) closeFd $ \stateFd -> do
-          checkIdentity scriptFd
-          checkIdentity stateFd
-          descriptors <- privateDescriptors
-          if capture
-            then bracket capturePipe (\(r, w) -> closeQuiet r >> closeQuiet w) $ \(readFd, writeFd) -> do
-              pid <- forkProcess (child descriptorMask scriptFd stateFd childEnvironment descriptors (Just (readFd, writeFd)))
-              closeFd writeFd
-              output <- bracket (fdToHandle readFd) hClose (drainCapture (testBit descriptorMask 2) warning)
-              code <- waitChild pid
-              packet "ok" code (B.dropWhileEnd (== 10) output)
-            else do
-              pid <- forkProcess (child descriptorMask scriptFd stateFd childEnvironment descriptors Nothing)
-              code <- waitChild pid
-              exitWith (if code == 0 then ExitSuccess else ExitFailure code)
+      (code, output) <- withOwnerSignals $ do
+        bytes <- B.hGetContents stdin
+        (warning, descriptorMask, script, level, state) <- either (ioError . userError) pure (decode bytes)
+        originalInput <- initialDescriptorOpen 3
+        when (testBit descriptorMask 0 && not originalInput) (ioError (userError "missing original stdin descriptor"))
+        if supervised
+          then dispatchSessionChild capture warning descriptorMask script level state
+          else do
+            environment <- getEnvironment
+            let childEnvironment = ("SHLVL", C.pack (show level)) : filter ((/= "SHLVL") . fst) environment
+            directory <- getTemporaryDirectory
+            bracket (mkdtemp (directory <> "/monk-child-XXXXXX")) removeDirectoryRecursive $ \workspace -> do
+              scriptPath <- transportFile workspace (restoreClosedStreams capture descriptorMask script)
+              statePath <- transportFile workspace state
+              if capture
+                then bracket capturePipe (\(r, w, _) -> closeHandleQuiet r >> closeHandleQuiet w) $ \(reader, writer, writeFd) ->
+                  bracketOnError (spawnChild supervised descriptorMask scriptPath statePath childEnvironment (Just writeFd)) terminateChild $ \pid -> do
+                    hClose writer
+                    output <- drainCapture (testBit descriptorMask 2) warning reader
+                    code <- waitChild pid
+                    pure (code, B.dropWhileEnd (== 10) output)
+                else bracketOnError (spawnChild supervised descriptorMask scriptPath statePath childEnvironment Nothing) terminateChild $ \pid -> do
+                  code <- waitChild pid
+                  pure (code, B.empty)
+      -- Publish only after owned transport resources have been released. A
+      -- reader closing the packet pipe must not strand private files.
+      if capture then packet "ok" code output else exitWith (if code == 0 then ExitSuccess else ExitFailure code)
     failure (_ :: IOException) =
       if capture
         then packet "error" 125 "child-transport-failure" `catch` (\(_ :: IOException) -> exitWith (ExitFailure 125))
@@ -77,62 +89,60 @@ decode input = do
       (part, tailBytes) | not (B.null tailBytes) -> Right (part, B.tail tailBytes)
       _ -> Left "missing frame"
 
--- Private files are unlinked before use, and moved above the standard streams
--- and fd3 even when the caller deliberately closed a standard descriptor.
-anonymous :: B.ByteString -> IO Fd
-anonymous bytes = do
-  directory <- getTemporaryDirectory
-  bracket (openBinaryTempFile directory "monk-child") (\(path, handle) -> closeHandleQuiet handle >> (removeFile path `catch` ignore)) $ \(path, handle) -> do
-    removeFile path
+-- Files live inside a mode-0700 mkdtemp directory, and openBinaryTempFile
+-- creates each mode-0600 file. The owning bracket removes the directory after
+-- wait, including exceptions. Fish opens its own independent offset-zero file
+-- descriptions; neither /proc nor /dev/fd reopening is part of the ABI.
+transportFile :: FilePath -> B.ByteString -> IO B.ByteString
+transportFile directory bytes = do
+  path <- bracket (openBinaryTempFile directory "transport") (closeHandleQuiet . snd) $ \(path, handle) -> do
     B.hPut handle bytes
     hFlush handle
-    fd <- handleToFd handle
-    -- Reopening through /dev/fd gives the child an independent offset at zero.
-    promote fd `finally` closeFd fd
+    pure path
+  -- FilePath can contain surrogate escapes for non-UTF-8 native path bytes.
+  encoding <- getFileSystemEncoding
+  Foreign.withCString encoding path B.packCString
 
-promote :: Fd -> IO Fd
-promote (Fd fd) = do
-  result <- Fd <$> throwErrnoIfMinus1 "fcntl(F_DUPFD)" (duplicateAbove fd 0 10)
-  setFdOption result CloseOnExec True
-  pure result
-
-capturePipe :: IO (Fd, Fd)
+capturePipe :: IO (Handle, Handle, Fd)
 capturePipe = bracket createPipe (\(r, w) -> closeQuiet r >> closeQuiet w) $ \(r, w) -> do
-  r' <- promote r
-  w' <- promote w `onException` closeFd r'
-  pure (r', w')
+  r' <- duplicatePrivate r
+  w' <- duplicatePrivate w `onException` closeFd r'
+  reader <- fdToHandle r' `onException` (closeFd r' >> closeFd w')
+  writer <- fdToHandle w' `onException` (hClose reader >> closeFd w')
+  pure (reader, writer, w')
 
-checkIdentity :: Fd -> IO ()
-checkIdentity fd = do
-  actual <- getFileStatus (descriptorPath fd)
-  expected <- getFdStatus fd
-  unless (deviceID actual == deviceID expected && fileID actual == fileID expected) (ioError (userError "descriptor filesystem identity mismatch"))
+-- Prepare every descriptor and argv in the parent. The spawn implementation
+-- performs only native file/signal actions before exec, never Haskell after fork.
+spawnChild :: Bool -> Int -> B.ByteString -> B.ByteString -> [(B.ByteString, B.ByteString)] -> Maybe Fd -> IO ProcessID
+spawnChild supervised descriptorMask scriptPath statePath environment output = do
+  let input = [(0, Fd 3) | testBit descriptorMask 0]
+      standardOutput = maybe [(1, Fd 1) | testBit descriptorMask 1] (\fd -> [(1, fd)]) output
+      diagnostic = [(2, Fd 2) | testBit descriptorMask 2]
+      descriptors = M.fromList (input <> standardOutput <> diagnostic)
+  if supervised
+    then do
+      runtimePath <- getExecutablePath
+      encoding <- getFileSystemEncoding
+      runtime <- Foreign.withCString encoding runtimePath B.packCString
+      spawnProcess descriptors Nothing environment runtime ["--abi", "2", "session-run", scriptPath, statePath]
+    else spawnProcess descriptors Nothing environment "fish" ["--no-config", scriptPath, statePath]
 
-descriptorPath :: Fd -> FilePath
-descriptorPath (Fd fd) = "/dev/fd/" <> show fd
+-- The owner receives cleanup exceptions rather than abandoning transport
+-- resources on termination. Its direct child is reaped before files disappear.
+withOwnerSignals :: IO a -> IO a
+withOwnerSignals action = do
+  owner <- myThreadId
+  let install signal = do
+        previous <- installHandler signal (Catch (throwTo owner (ExitFailure (128 + fromIntegral signal)))) Nothing
+        pure (signal, previous)
+      restore handlers = forM_ handlers $ \(signal, previous) -> void (installHandler signal previous Nothing)
+  signals <- filterM (fmap not . initialSignalIgnored) [sigHUP, sigINT, sigQUIT, sigTERM, sigPIPE]
+  bracket (forM signals install) restore (const action)
 
-privateDescriptors :: IO [Fd]
-privateDescriptors = do
-  names <- listDirectory "/proc/self/fd"
-  pure [Fd fd | name <- names, Just fd <- [readMaybe name], fd > 2]
-
-child :: Int -> Fd -> Fd -> [(B.ByteString, B.ByteString)] -> [Fd] -> Maybe (Fd, Fd) -> IO ()
-child descriptorMask scriptFd stateFd environment descriptors output = launch `catch` (\(_ :: IOException) -> exitImmediately (ExitFailure 125))
-  where
-    launch = do
-      -- GHC ignores SIGPIPE and owns several other dispositions. A shell child
-      -- must receive the ordinary exec signal contract, including SIGPIPE.
-      forM_ [sigPIPE, sigINT, sigQUIT, sigTERM, sigCHLD, sigTSTP, sigTTIN, sigTTOU] $ \signal -> void (installHandler signal Default Nothing)
-      unblockSignals fullSignalSet
-      if testBit descriptorMask 0 then void (dupTo (Fd 3) (Fd 0)) else closeQuiet (Fd 0)
-      case output of
-        Nothing -> pure ()
-        Just (r, w) -> closeFd r >> void (dupTo w (Fd 1)) >> closeFd w
-      -- Preserve only the two anonymous transport descriptors across exec;
-      -- fd3 and inherited provider/private descriptors are not child-owned.
-      forM_ descriptors $ \fd -> when (fd /= scriptFd && fd /= stateFd) (setFdOption fd CloseOnExec True `catch` ignore)
-      forM_ [scriptFd, stateFd] $ \fd -> setFdOption fd CloseOnExec False
-      executeFile "fish" True ["--no-config", C.pack (descriptorPath scriptFd), C.pack (descriptorPath stateFd)] (Just environment)
+terminateChild :: ProcessID -> IO ()
+terminateChild pid = do
+  signalProcess sigKILL pid `catch` ignore
+  void (waitChild pid) `catch` ignore
 
 -- Fish repairs absent standard streams at startup. Reapply the original
 -- closures inside its script so builtin writes and external children observe
@@ -169,7 +179,7 @@ packet :: B.ByteString -> Int -> B.ByteString -> IO ()
 packet tag code bytes = B.hPut stdout (tag <> "\0" <> C.pack (show code) <> "\0" <> bytes <> "\0") >> hFlush stdout
 
 writeDiagnostic :: B.ByteString -> IO ()
-writeDiagnostic bytes = (do fd <- promote (Fd 2); bracket (fdToHandle fd) hClose (\handle -> B.hPut handle bytes >> hFlush handle)) `catch` ignore
+writeDiagnostic bytes = (do fd <- duplicatePrivate (Fd 2); bracket (fdToHandle fd) hClose (\handle -> B.hPut handle bytes >> hFlush handle)) `catch` ignore
 
 closeHandleQuiet :: Handle -> IO ()
 closeHandleQuiet handle = hClose handle `catch` ignore

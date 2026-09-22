@@ -21,14 +21,18 @@ import Unit.Inline
 import Unit.OutputBundle
 import Unit.Pipefail
 import Unit.PlannedArithmetic
+import Unit.PlannedArrays
 import Unit.PlannedCommonCoverage
 import Unit.PlannedDirectory
 import Unit.PlannedEnvironment
+import Unit.PlannedEval
 import Unit.PlannedFlowFacts
+import Unit.PlannedInput
 import Unit.PlannedIsolation
 import Unit.PlannedPrimitives
 import Unit.PlannedRedirects
 import Unit.PlannedSourceable
+import Unit.PlannedTraps
 import Unit.PlannedWordContexts
 import Unit.Pretty
 import Unit.Refactor
@@ -70,12 +74,16 @@ tests =
       unitPlannedPrimitivesTests,
       unitPlannedRedirectTests,
       unitPlannedArithmeticTests,
+      unitPlannedArrayTests,
+      unitPlannedEvalTests,
       unitPlannedCommonCoverageTests,
       unitPlannedDirectoryTests,
       unitPlannedEnvironmentTests,
       unitPlannedFlowFactTests,
       unitPlannedIsolationTests,
+      unitPlannedInputTests,
       plannedSourceableTests,
+      unitPlannedTrapTests,
       unitContractTests,
       unitTranslatorMonadTests,
       unitPipefailTests,

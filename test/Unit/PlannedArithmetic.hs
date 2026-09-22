@@ -17,7 +17,16 @@ unitPlannedArithmeticTests :: TestTree
 unitPlannedArithmeticTests =
   testGroup
     "Planned integer arithmetic"
-    [ exact "large numeric scalar crosses no executable argument boundary" ("n=" <> "1" <> T.replicate 200000 "0" <> "; printf '%s\\n' \"$((n+1))\"") "1\n",
+    [ H.testCase "single pure integer operation uses one batched call" $ do
+        translated <- translateBashScript strictConfig "single-operation.bash" "if test -n \"$1\"; then n=7; else n=9; fi; printf '%s\\n' \"$((n+1))\""
+        case translated of
+          Left failure -> H.assertFailure (show failure)
+          Right result -> do
+            let output = renderTranslation result
+            H.assertEqual "one batched primitive" 1 (T.count "_integer batch " output)
+            H.assertEqual "no separate operand read" 0 (T.count "_integer read " output),
+      exact "single pure integer operation preserves signed wrapping" "if false; then n=1; else n=9223372036854775807; fi; printf '%s:%s\\n' \"$((n+1))\" \"$((~n))\"" "-9223372036854775808:-9223372036854775808\n",
+      exact "large numeric scalar crosses no executable argument boundary" ("n=" <> "1" <> T.replicate 200000 "0" <> "; printf '%s\\n' \"$((n+1))\"") "1\n",
       rejected "leading zero base prefix is not a Bash integer" "02#10",
       rejected "long leading zero base prefix is not a Bash integer" (T.replicate 5000 "0" <> "64#_"),
       exact "arithmetic assignment retains inherited export on unset local" "export x=outer; f() { local x; ((x=3)); printenv x; }; f; printf '%s\\n' \"$x\"" "3\nouter\n",

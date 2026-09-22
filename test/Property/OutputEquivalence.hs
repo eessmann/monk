@@ -29,9 +29,9 @@ propertyOutputEquivalenceTests =
       exactCases "positional argument round trip" genArgvRoundTrip,
       exactCases "lazy case glob selection" genCaseGlob,
       excludedCases "indexed arrays require storage plans" genArrayIndex,
-      excludedCases "read requires a byte and binding primitive" genReadSplit,
-      excludedCases "temporary environment assignments require binding lifetime" genTempEnv,
-      excludedCases "here strings require owned input redirection" genHereString
+      exactCases "owned read preserves split fields" genReadSplit,
+      exactCases "temporary environment assignments preserve binding lifetime" genTempEnv,
+      exactCases "here strings preserve owned input redirection" genHereString
     ]
 
 exactCases :: String -> QC.Gen ScriptCase -> TestTree

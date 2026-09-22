@@ -4,6 +4,7 @@ module Monk.Source.Environment
   ( SourceEnvironment (..),
     captureSourceEnvironment,
     resolveSourcePathIn,
+    resolveSourcePathAndOriginIn,
     SourceSnapshot,
     readSourceSnapshot,
     snapshotPath,
@@ -45,7 +46,12 @@ captureSourceEnvironment = do
   pure (MkSourceEnvironment cwd search True)
 
 resolveSourcePathIn :: SourceEnvironment -> Text -> IO (Either Diagnostic FilePath)
-resolveSourcePathIn environment target
+resolveSourcePathIn environment target = fmap (fmap fst) (resolveSourcePathAndOriginIn environment target)
+
+-- | Canonical identity and Bash's occurrence-specific diagnostic spelling.
+-- The selected PATH entry remains lexical, including symlink and dot aliases.
+resolveSourcePathAndOriginIn :: SourceEnvironment -> Text -> IO (Either Diagnostic (FilePath, Text))
+resolveSourcePathAndOriginIn environment target
   | T.null target || T.any (== '\0') target = pure (Left (sourceError "invalid-path" "A source path must be nonempty and contain no NUL"))
   | not (isAbsolute (sourceWorkingDirectory environment)) = pure (Left (sourceError "invalid-environment" "Source discovery requires an absolute execution cwd"))
   | otherwise = do
@@ -59,12 +65,12 @@ resolveSourcePathIn environment target
     name = toString target
     atCwd path = if isAbsolute path then path else cwd </> path
     candidates
-      | pathSeparator `elem` name || not (sourcePathSearch environment) = [atCwd name]
-      | otherwise = [atCwd dir </> name | dir <- sourceSearchPath environment] <> [atCwd name]
+      | pathSeparator `elem` name || not (sourcePathSearch environment) = [name]
+      | otherwise = [(if null dir then "." else dir) </> name | dir <- sourceSearchPath environment] <> [name]
     firstExisting [] = pure Nothing
     firstExisting (path : rest) = do
-      exists <- doesFileExist path
-      if exists then Just <$> canonicalizePath path else firstExisting rest
+      exists <- doesFileExist (atCwd path)
+      if exists then Just . (,toText path) <$> canonicalizePath (atCwd path) else firstExisting rest
 
 -- | The bytes are owned by the graph even if the source later changes on disk.
 -- The fingerprint is an inspection label, not authority: graph reuse is keyed

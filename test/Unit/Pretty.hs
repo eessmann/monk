@@ -17,7 +17,28 @@ unitPrettyTests :: TestTree
 unitPrettyTests =
   testGroup
     "Pretty printing"
-    [ H.testCase "Redirection embedding" $ do
+    [ H.testCase "Safe literal words omit unnecessary quotes" $ do
+        renderDsl (script [stmt (command "printf" (map (arg . str) ["%s", "hello", "--local", "/tmp/out", "a_b-2.txt"]))])
+          @?= "printf '%s' hello --local /tmp/out a_b-2.txt",
+      H.testCase "Literal concatenation renders one canonical word" $ do
+        let value = concatStr (str "") (concatStr (str "hel") (concatStr (str "") (str "lo")))
+        renderDsl (script [stmt (command "printf" [arg value])]) @?= "printf hello",
+      H.testCase "Empty concatenation still renders one empty word" $ do
+        renderDsl (script [stmt (command "printf" [arg (concatStr (str "") (str ""))])]) @?= "printf ''",
+      H.testCase "Newline boundaries omit redundant empty quote fragments" $ do
+        renderDsl (script [stmt (command "printf" (map (arg . str) ["%s\n", "\nhead", "\n\n", ""]))])
+          @?= "printf '%s'\\n \\n'head' \\n\\n ''",
+      H.testCase "Literal suffix cannot extend a variable name" $ do
+        renderDsl (script [stmt (command "printf" [arg (concatStr (var "name") (concatStr (str "") (str "suffix")))])])
+          @?= "printf $name'suffix'",
+      H.testCase "Fish keywords and assignment-looking words remain quoted" $ do
+        renderDsl (script [stmt (command "printf" (map (arg . str) ["if", "and", "not", "time", "command", "builtin", "exec", "x=y"]))])
+          @?= "printf 'if' 'and' 'not' 'time' 'command' 'builtin' 'exec' 'x=y'",
+      H.testCase "Concatenated switch patterns retain literal wildcard bytes" $ do
+        let item = caseItem (concatStr (str "") (concatStr (str "a") (str "*")) NE.:| []) (block (stmt (command "true" []) NE.:| []))
+        renderDsl (script [stmt (switch (str "a*") (item NE.:| []) [])])
+          @?= "switch 'a*'\n  case 'a*'\n    true\nend",
+      H.testCase "Redirection embedding" $ do
         let fishScript =
               script
                 [ stmt
@@ -29,7 +50,7 @@ unitPrettyTests =
                     )
                 ]
             actual = renderDsl fishScript
-            expected = "echo 'Hello' > '/dev/null'"
+            expected = "echo Hello > /dev/null"
         actual @?= expected,
       H.testCase "Redirect stdout+stderr to file" $ do
         let fishScript =
@@ -43,7 +64,7 @@ unitPrettyTests =
                     )
                 ]
             actual = renderDsl fishScript
-            expected = "echo 'Hello' > '/tmp/out' 2>&1"
+            expected = "echo Hello > /tmp/out 2>&1"
         actual @?= expected,
       H.testCase "Exit with code" $ do
         let fishScript = script [stmt (exit (Just (int 42)))]
@@ -67,7 +88,7 @@ unitPrettyTests =
       H.testCase "Read with flags and vars" $ do
         let fishScript = script [stmt (read_ [ReadPrompt "Name:", ReadLocal] ["name"])]
             actual = renderDsl fishScript
-            expected = "read --prompt 'Name:' --local name"
+            expected = "read --prompt Name: --local name"
         actual @?= expected,
       H.testCase "Glob brace pattern" $ do
         let fishScript =
@@ -97,7 +118,7 @@ unitPrettyTests =
                     )
                 ]
             actual = renderDsl fishScript
-            expected = "grep 'foo' | wc '-l'"
+            expected = "grep foo | wc -l"
         actual @?= expected,
       H.testCase "Job conjunction (or)" $ do
         let job1 = pipelineValue (stage (command "false" []) NE.:| [])
@@ -105,7 +126,7 @@ unitPrettyTests =
             conj = jobConjunction Nothing job1 [orElse job2]
             fishScript = script [stmt (job conj)]
             actual = renderDsl fishScript
-            expected = "false\nor echo 'ok'"
+            expected = "false\nor echo ok"
         actual @?= expected,
       H.testCase "Begin block" $ do
         let body = NE.fromList [stmt (command "echo" [arg (str "A")])]
@@ -115,7 +136,7 @@ unitPrettyTests =
               T.intercalate
                 "\n"
                 [ "begin",
-                  "  echo 'A'",
+                  "  echo A",
                   "end"
                 ]
         actual @?= expected,
@@ -134,8 +155,8 @@ unitPrettyTests =
               T.intercalate
                 "\n"
                 [ "begin",
-                  "  echo 'B'",
-                  "end > '/dev/null'"
+                  "  echo B",
+                  "end > /dev/null"
                 ]
         actual @?= expected,
       H.testCase "If then else" $ do
@@ -161,11 +182,11 @@ unitPrettyTests =
             expected =
               T.intercalate
                 "\n"
-                [ "switch 'x'",
-                  "  case 'foo'",
-                  "    echo 'a'",
-                  "  case 'bar'",
-                  "    echo 'b'",
+                [ "switch x",
+                  "  case foo",
+                  "    echo a",
+                  "  case bar",
+                  "    echo b",
                   "end"
                 ]
         actual @?= expected,
@@ -182,7 +203,7 @@ unitPrettyTests =
               T.intercalate
                 "\n"
                 [ "function greet",
-                  "  echo 'hi'",
+                  "  echo hi",
                   "end"
                 ]
         actual @?= expected

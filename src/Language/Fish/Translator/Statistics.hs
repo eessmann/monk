@@ -22,29 +22,29 @@ import Monk.Translation.Types (TranslationStatistics (..))
 -- definition, whether reached or not. They never represent execution counts.
 materializationStatistics :: Text -> Text -> Script -> TranslationStatistics
 materializationStatistics prefix provider script@(MkScript statements) =
-  let Sites definitions calls native = collectSites provider statements
+  let Sites definitions calls native bindings nodes captures external = collectSites provider statements
       owned name = not (T.null prefix) && T.isPrefixOf prefix name
-   in MkTranslationStatistics (length (filter owned definitions)) (length (filter owned calls)) native (BS.length (encodeUtf8 (renderScript script)))
+   in MkTranslationStatistics (length (filter owned definitions)) (length (filter owned calls)) native (BS.length (encodeUtf8 (renderScript script))) nodes (length (filter owned bindings)) captures external
 
 -- | Literal command identities in the structural tree, including substitutions
 -- and function bodies. Expression data is never interpreted as source.
 commandReferences :: [FishStatement] -> Set Text
-commandReferences statements = let Sites _ calls _ = collectSites "" statements in S.fromList calls
+commandReferences statements = let Sites _ calls _ _ _ _ _ = collectSites "" statements in S.fromList calls
 
 collectSites :: Text -> [FishStatement] -> Sites
 collectSites provider = foldMap statement
   where
     statement = \case
-      Stmt cmd -> command cmd
+      Stmt cmd -> Sites [] [] 0 [] 1 0 0 <> command cmd
       StmtList items -> foldMap statement items
       Comment _ -> mempty
       EmptyStmt -> mempty
     command :: FishCommand t -> Sites
     command = \case
-      Command name arguments -> Sites [] [name] (if name == provider then 1 else 0) <> foldMap argument arguments
-      CommandExpr headExpr arguments -> expression headExpr <> foldMap argument arguments
-      Set _ _ value -> expression value
-      Function function -> Sites [funcName function] [] 0 <> foldMap statement (funcBody function)
+      Command name arguments -> Sites [] [name] (if name == provider then 1 else 0) [] 0 0 0 <> foldMap argument arguments
+      CommandExpr headExpr arguments -> Sites [] [] (nativePathCall headExpr arguments) [] 0 0 0 <> expression headExpr <> foldMap argument arguments
+      Set _ name value -> Sites [] [] 0 [name] 0 (statusCapture value) 0 <> expression value
+      Function function -> Sites [funcName function] [] 0 [] 0 0 0 <> foldMap statement (funcBody function)
       For _ values body redirects -> expression values <> foldMap statement body <> foldMap argument redirects
       While condition body redirects -> jobs condition <> foldMap statement body <> foldMap argument redirects
       Begin body redirects -> foldMap statement body <> foldMap argument redirects
@@ -65,8 +65,24 @@ collectSites provider = foldMap statement
       Not value -> command value
       Background value -> command value
       Wait value -> foldMap expression value
-      Exec value arguments -> expression value <> foldMap argument arguments
+      Exec value arguments -> Sites [] [] (nativePathCall value arguments) [] 0 0 0 <> expression value <> foldMap argument arguments
+      Decorated DecCommand value -> Sites [] [] 0 [] 0 0 (externalDispatch value) <> command value
       Decorated _ value -> command value
+    runtimePath :: FishExpr TStr -> Bool
+    runtimePath (ExprQuotedVariable (VarScalar name)) = not (T.null provider) && name == provider <> "_path"
+    runtimePath _ = False
+    operationName :: [ExprOrRedirect] -> Maybe Text
+    operationName (ExprVal (ExprLiteral "--abi") : ExprVal (ExprLiteral _) : ExprVal (ExprLiteral operation) : _) = Just operation
+    operationName _ = Nothing
+    nativePathCall :: FishExpr TStr -> [ExprOrRedirect] -> Int
+    nativePathCall headExpr arguments = if runtimePath headExpr && isJust (operationName arguments) then 1 else 0
+    externalDispatch :: FishCommand t -> Int
+    externalDispatch (CommandExpr headExpr arguments)
+      | runtimePath headExpr = if operationName arguments == Just "exec-site" then 1 else 0
+    externalDispatch _ = 1
+    statusCapture :: FishExpr t -> Int
+    statusCapture (ExprListLiteral [ExprQuotedVariable (VarScalar "status")]) = 1
+    statusCapture _ = 0
     expression :: FishExpr t -> Sites
     expression = \case
       ExprLiteral _ -> mempty
@@ -106,10 +122,10 @@ collectSites provider = foldMap statement
     conjunction value = pipeline (jcJob value) <> foldMap (\case JCAnd job -> pipeline job; JCOr job -> pipeline job) (jcContinuations value)
     jobs (MkFishJobList values) = foldMap conjunction values
 
-data Sites = Sites [Text] [Text] Int
+data Sites = Sites [Text] [Text] Int [Text] Int Int Int
 
 instance Semigroup Sites where
-  Sites a b c <> Sites d e f = Sites (a <> d) (b <> e) (c + f)
+  Sites a b c d e f g <> Sites h i j k l m n = Sites (a <> h) (b <> i) (c + j) (d <> k) (e + l) (f + m) (g + n)
 
 instance Monoid Sites where
-  mempty = Sites [] [] 0
+  mempty = Sites [] [] 0 [] 0 0 0

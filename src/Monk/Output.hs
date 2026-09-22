@@ -10,6 +10,7 @@ module Monk.Output
     generatedDiagnostics,
     generatedRuntimeRequirements,
     generatedStatistics,
+    generatedExecutionStrategy,
     OutputBundle,
     bundleUserFiles,
     NativeRuntimeImage,
@@ -19,6 +20,7 @@ module Monk.Output
     runtimeArtifactImage,
     runtimeArtifactMode,
     nativeImageBytes,
+    nativeImageTarget,
     nativeImageDigest,
     nativeImageOperations,
     nativeImageABI,
@@ -105,6 +107,9 @@ generatedDiagnostics (MkGeneratedFile _ _ diagnostics _ _) = diagnostics
 
 generatedRuntimeRequirements :: GeneratedFile -> [RuntimeRequirement]
 generatedRuntimeRequirements (MkGeneratedFile _ _ _ requirements _) = requirements
+
+generatedExecutionStrategy :: GeneratedFile -> ExecutionStrategy
+generatedExecutionStrategy = executionStrategyFor . generatedRuntimeRequirements
 
 generatedStatistics :: GeneratedFile -> TranslationStatistics
 generatedStatistics (MkGeneratedFile _ _ _ _ statistics) = statistics

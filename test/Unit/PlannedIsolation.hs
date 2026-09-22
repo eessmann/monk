@@ -22,7 +22,29 @@ unitPlannedIsolationTests :: TestTree
 unitPlannedIsolationTests =
   testGroup
     "Planned child isolation"
-    [ sourceableExact
+    [ testGroup
+        "Owned background jobs"
+        [ exact "wait returns the selected child status" "false & wait \"$!\"; printf '%s' \"$?\"" "1",
+          exact "wait without operands waits for all jobs and succeeds" "false & true & wait; printf '%s' \"$?\"" "0",
+          exact "wait with multiple PIDs returns the last operand status" "sh -c 'exit 3' & first_pid=$!; sh -c 'exit 7' & second_pid=$!; wait \"$first_pid\" \"$second_pid\"; printf '%s' \"$?\"" "7",
+          exact "background scalar writes stay isolated" "x=parent; { x=child; printf '%s' \"$x\"; } & wait \"$!\"; printf ':%s' \"$x\"" "child:parent",
+          exact "background snapshots caller locals" "f() { local x=inner; printf '%s' \"$x\" & wait \"$!\"; }; f" "inner",
+          exact "background launch establishes zero status" "false; true & printf '%s' \"$?\"; wait" "0",
+          exact "last background PID before launch is one empty scalar" "printf '<%s>' \"$!\"" "<>",
+          differentialWithInput "background inherits null stdin in noninteractive execution" "cat & wait" (Just "") "must remain unread\n",
+          differential "wait before launch diagnoses an empty PID" "wait \"$!\"" Nothing,
+          differential "wait zero diagnoses a nonchild PID" "wait 0" Nothing,
+          differential "wait unknown PID diagnoses the original source" "wait 999999" Nothing,
+          differential "wait out of range PID diagnoses a non-PID operand" "wait 999999999999999999999999999999" Nothing,
+          differential "wait accepts decimal leading zero syntax" "wait 0000" Nothing,
+          exact "wait retains completed child status for repeated operands" "false & pid=$!; wait \"$pid\"; wait \"$pid\"; printf '%s' \"$?\"" "1",
+          H.testCase "sourceable jobs remain outside the session envelope" $
+            forM_ ["true &", "wait", "printf '%s' \"$!\""] $ \source -> do
+              let cfg = strictConfig {entryMode = Sourceable, callerContract = emptyCallerContract {callerAmbientEffects = NoRelevantAmbientEffects}}
+              translated <- translateBashScript cfg "sourceable-job.bash" source
+              H.assertBool "sourceable job was admitted" (isLeft translated)
+        ],
+      sourceableExact
         "repeated source creates scalar output despite Fish PATH suffix"
         (emptyCallerContract {callerAmbientEffects = NoRelevantAmbientEffects, callerVariables = M.singleton "NEWPATH" (ScalarBinding OutputBinding GlobalBinding UnexportedBinding)})
         "NEWPATH='a:b'"
@@ -44,7 +66,7 @@ unitPlannedIsolationTests =
         ". \"$1\"; greet first; greet second"
         "source \"$argv[1]\"; greet first; greet second"
         "first\nsecond\n",
-      rejected "nondraining pipeline rejects builtin SIGPIPE lifetime" ("{ printf '%s' '" <> largeValue <> "'; printf continued; } | head -c 1"),
+      exact "nondraining pipeline owns builtin SIGPIPE lifetime" ("{ printf '%s' '" <> largeValue <> "'; printf continued; } | head -c 1") "x",
       differentialWithInput "substitution preserves original stdin independently of metadata" "x=\"$(cat)\"; printf '<%s>\\n' \"$x\"" (Just "<original stdin>\n") "original stdin\n",
       exact "unset local slot shadows outer scalar in child snapshot" "v=outer; f() { local v; x=\"$(printf '%s' \"${v-fallback}\")\"; printf '%s:%s\\n' \"$x\" \"${v-fallback}\"; }; f; printf '%s\\n' \"$v\"" "fallback:fallback\nouter\n",
       exact "large exported scalar reaches child via framed state" ("v='" <> largeValue <> "'; export v; x=\"$(printf small)\"; printf '%s:%s' \"$x\" \"$v\"") ("small:" <> largeBytes),
@@ -61,6 +83,9 @@ unitPlannedIsolationTests =
       exact "substitution clears inherited errexit under the selected profile" "set -e; x=\"$(false; printf yes)\"; printf 'after:%s\\n' \"$x\"" "after:yes\n",
       exact "substitution exit does not exit the parent" "v=outer; x=\"$(v=child; exit 7)\"; printf '%s:%s:%s\\n' \"$?\" \"$v\" \"$x\"" "7:outer:\n",
       exact "nested child reads the enclosing child snapshot" "v=outer; x=\"$(v=inner; printf '%s' \"$(printf '%s' \"$v\")\")\"; printf '%s:%s\\n' \"$v\" \"$x\"" "outer:inner\n",
+      exact "child owns an unconditional function definition" "(visit() { local x=\"two words\"; printf \"<%s>\" \"$x\"; }; visit)" "<two words>",
+      exact "child function replacement retains call order and parent definition" "f() { printf old; }; (f; f() { printf new; }; f); f" "oldnewold",
+      exact "nested input and background launch preserve runtime lifetime" "( read -r item <<< ''; printf '<%s>\\n' \"$item\"; printf '%s\\n' \"$(( (-2) / 2 * 2))\"; ( (exit 1) & task=$!; wait \"$task\"; printf 'job:%s\\n' \"$?\"; printf '%s\\n' \"$(( (2) / 3 * 3))\" ) ); visit() { local x='two words'; printf '<%s>\\n' \"$x\"; }; visit" "<>\n-2\njob:1\n0\n<two words>\n",
       exact "child owns a definite function closure" "v=outer; f() { printf '%s' \"$v\"; }; x=\"$(v=child; f)\"; printf '%s:%s\\n' \"$v\" \"$x\"" "outer:child\n",
       exact "child snapshots visible caller locals" "f() { local v=inner; x=\"$(v=child; printf '%s' \"$v\")\"; printf '%s:%s\\n' \"$v\" \"$x\"; }; f" "inner:child\n",
       exact "child argv changes stay isolated" "set -- a b; x=\"$(set -- c; printf '%s:%s' \"$#\" \"$1\")\"; printf '%s:%s:%s\\n' \"$#\" \"$1\" \"$x\"" "2:a:1:c\n",
@@ -108,13 +133,6 @@ sourceableExact name contract source bashCaller fishCaller expected = H.testCase
       fish <- runBytes directory "fish" ["--no-config", fishEntry, fishPath] environment ""
       H.assertEqual "sourceable stdout/stderr/status" bash fish
       bytesEqual "independent sourceable stdout" expected (outBytes bash)
-
-rejected :: String -> Text -> TestTree
-rejected name source = H.testCase name $ do
-  result <- translateBashScript strictConfig "planned-isolation.bash" source
-  case result of
-    Left failure -> H.assertBool "missing specific pipeline lifetime rejection" (any ((== "monk.semantic.pipeline-signal-lifetime") . diagnosticCodeText . diagnosticCode) (failureDiagnostics failure))
-    Right _ -> H.assertFailure "nondraining builtin pipeline was admitted without an owned signal lifetime"
 
 largeValue :: Text
 largeValue = T.replicate 200000 "x"

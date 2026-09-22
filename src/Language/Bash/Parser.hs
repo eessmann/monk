@@ -1,5 +1,6 @@
 module Language.Bash.Parser
   ( parseBashScript,
+    parseBashFragment,
     parseBashFile,
   )
 where
@@ -32,9 +33,13 @@ parseBashScript ::
   -- | Script contents
   Text ->
   IO ParseResult
-parseBashScript fileName scriptText = do
-  -- Prepare a default system interface. In real code you might want
-  -- to customize how source lookups behave or pass -x style logic.
+parseBashScript fileName scriptText = pure (parseBashFragment fileName scriptText)
+
+-- | Parse proved program text without filesystem or configuration access.
+-- Used only during normalization; no parser is shipped into generated Fish.
+parseBashFragment :: FilePath -> Text -> ParseResult
+parseBashFragment fileName scriptText = runIdentity $ do
+  -- ShellCheck's default interface supplies no filesystem/config callbacks.
   let si = newSystemInterface
 
       ps =
@@ -49,7 +54,7 @@ parseBashScript fileName scriptText = do
             psIgnoreRC = True -- ignore .shellcheckrc
           }
 
-  parseScript si ps -- returns IO ParseResult
+  parseScript si ps
 
 --------------------------------------------------------------------------------
 

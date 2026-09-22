@@ -1,0 +1,2477 @@
+{
+  "schema": 1,
+  "timestamp": "2026-09-22T18:13:35.631957+00:00",
+  "build_receipt_sha256": "bc55257b5b5f64a16f7175f633f9292c8561d983e2a33df34d419c0efdb19b6e",
+  "source_fingerprint": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5",
+  "verification_input_fingerprint": "da6ec17a7bfcd5d84dbc34f1b11f7762a595d8e9e4457cef310f80776cc7ff35",
+  "manifest_sha256": "957adb809c5bd0b967ff17e2aa05e5823e6c1f9a34a9f06376ab32eb258370f5",
+  "providers": {
+    "baseline": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+      "sha256": "7b74170f88cf651ecb2c015165e96cf268c135c0b2eecb1627c3aae1913286ea"
+    },
+    "candidate": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+      "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4"
+    },
+    "baseline_runtime": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime",
+      "sha256": "1a53be0bc1cd4961929cbbad7baba986c20d4287e727c0be88d0f4ede897e859"
+    },
+    "runtime": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+      "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91"
+    },
+    "bash": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+      "sha256": "c76a7b7482203eb6d4108271500848f121364b2898e7febaefbd458714c8f56e"
+    },
+    "fish": {
+      "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+      "sha256": "241c9c36726193c252a8e3b58c1233edf2b192c3b4ae07b71077e04e52c33640"
+    }
+  },
+  "candidate_entry": "runtime --abi 2 launch SCRIPT ARGS",
+  "protocol": {
+    "warmups": 3,
+    "samples": 20,
+    "alternating_order": true,
+    "serial": true
+  },
+  "process_launches": {
+    "status": "unverified",
+    "reason": "No process tracing collected; static call counts are not launches."
+  },
+  "fixtures": [
+    {
+      "fixture": "benchmark/fixtures/small.bash",
+      "cohort": "common16",
+      "input_sha256": "6426bfdf1ebf4bc9b4144d5aa9ec37fa8d0f5565e142db2f08c88ae16e25ed75",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/benchmark/fixtures/small.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 10,
+          "sha256": "477361d9604d4aa5c760f1da9b7840c8843ec502045e4fba6b31cbaa6824a655"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/000/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 125,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 53,
+            "sha256": "f8d7d2b9a9718c567eae6c22a218d6edd4ac1a24b01bdf00566601aff9a34b2f"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/benchmark/fixtures/small.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 4179,
+          "sha256": "117b987792358e6e5c77e3b58b1c72765ee5c19cbc501189027af84566d4aa59"
+        },
+        "stderr": {
+          "bytes": 490,
+          "sha256": "00717fc14a7ea1d6ae709de50d17996529ba88689c103a1c5a71e4a669f9821e"
+        }
+      },
+      "status": "unsupported-native-platform",
+      "reason": "Unchanged baseline requires Linux; user deferred Linux execution."
+    },
+    {
+      "fixture": "test/fixtures/corpus/if-then.bash",
+      "cohort": "common16",
+      "input_sha256": "c2bfb34a8661d353c8a8b8b3daa17d59a2990f2ea9bcfc16b5c8b93c4a2f8769",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/if-then.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 4,
+          "sha256": "5040625b1fb6fa4af07226683f6e6003b29e5e70b16f8cfb24be7a752393f0ee"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/001/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 4,
+            "sha256": "5040625b1fb6fa4af07226683f6e6003b29e5e70b16f8cfb24be7a752393f0ee"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/001/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 4,
+            "sha256": "5040625b1fb6fa4af07226683f6e6003b29e5e70b16f8cfb24be7a752393f0ee"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/if-then.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 904,
+          "sha256": "773950784dbc07a507dcf01c16917c02889128dd7003a34cd69faeaf0e9e7567"
+        },
+        "stderr": {
+          "bytes": 282,
+          "sha256": "791f8b1d82c02ab333554d7956f6c6b9d233aac9342f33d34b5d1b86df2e36dc"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/if-then.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2814,
+          "sha256": "7503f60026f9eac65b8e8532ef51476991df977fe2b375caa975629f063da0c2"
+        },
+        "stderr": {
+          "bytes": 463,
+          "sha256": "16a1ca42513378e143e200c625e268a9d8e396c40c2eec0c58d047750f5235d0"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10569041,
+          11106958,
+          10544292,
+          10638917,
+          10217750,
+          11121458,
+          10672416,
+          10721667,
+          10350500,
+          10951667,
+          10584458,
+          10521208,
+          11091166,
+          10466500,
+          11445416,
+          10294791,
+          10582250,
+          10873125,
+          10625709,
+          10262625
+        ],
+        "candidate": [
+          72312500,
+          60991000,
+          65384459,
+          71942083,
+          71018916,
+          69552542,
+          70649958,
+          78119958,
+          62495375,
+          73228708,
+          78950875,
+          79649459,
+          76903000,
+          65560833,
+          64320667,
+          66013083,
+          64269208,
+          73749041,
+          73217917,
+          69590500
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/corpus/simple-echo.bash",
+      "cohort": "common16",
+      "input_sha256": "5dbad7dd0b9b122dcd9956884390f4aac4738caba8ff53498a7ab6718b176c30",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/simple-echo.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 6,
+          "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/002/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 6,
+            "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/002/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 6,
+            "sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/simple-echo.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 685,
+          "sha256": "746048eca4ae4514b294b48ddbdef3338a81f25fd836e8c9a5cb6b5f176913ae"
+        },
+        "stderr": {
+          "bytes": 286,
+          "sha256": "efc2842cf6d53633d44dc869d68ea1917f3be5bfd332d155b64e2964e772c7b2"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/corpus/simple-echo.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2590,
+          "sha256": "9cb74ac1a556d7a4d2a005e6d0dc6cc9ef9f5f30c76d6c853fe3288b0ccd6a8d"
+        },
+        "stderr": {
+          "bytes": 467,
+          "sha256": "c0bb1a462b020636cc4ca51aacfd4169ab66cb5f771078bd50527f1bd49896a8"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10432125,
+          10562667,
+          11074083,
+          11058542,
+          10485375,
+          10506792,
+          10378583,
+          10549292,
+          10350500,
+          10680042,
+          11216250,
+          11041500,
+          10739917,
+          10446209,
+          10891083,
+          11195291,
+          10610500,
+          10544583,
+          10786708,
+          10696792
+        ],
+        "candidate": [
+          70204000,
+          65518042,
+          70759250,
+          71980750,
+          70261666,
+          70302541,
+          66167000,
+          65812583,
+          67785209,
+          69431417,
+          67360084,
+          65633583,
+          64349041,
+          72695541,
+          69847542,
+          67903666,
+          69414458,
+          69294958,
+          67307000,
+          63931125
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/golden/double-bracket-eq.bash",
+      "cohort": "common16",
+      "input_sha256": "aaa160e1e7e8c0aa0cd8c36207daae84664efc939518a9f057c945fcb5f8822c",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/double-bracket-eq.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/003/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/003/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/double-bracket-eq.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2127,
+          "sha256": "ba322260291aea4576324528c40b6fed29b9dfa57114d97249da897a60676b57"
+        },
+        "stderr": {
+          "bytes": 292,
+          "sha256": "3e1d3ae095d23880471e5ef8f87ef5749ed28c08cceb03bfb3d6e8fd46840d47"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/double-bracket-eq.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 3768,
+          "sha256": "1887c687a1e37a2f7c6782cc71902818442ea687a1ff114480ad298435c220cd"
+        },
+        "stderr": {
+          "bytes": 600,
+          "sha256": "8fe0af4e394e33e555495cc50bdcefe047e8b8c979efcdd146b7dbe792f2b111"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10560000,
+          11088000,
+          10482792,
+          11210292,
+          11432458,
+          11148583,
+          10765166,
+          11130792,
+          10628916,
+          10790333,
+          10718917,
+          10500167,
+          11161083,
+          10775625,
+          10910167,
+          10816000,
+          10609334,
+          10720792,
+          10927333,
+          10791458
+        ],
+        "candidate": [
+          49720083,
+          50993291,
+          47331417,
+          52546750,
+          54754417,
+          47067666,
+          45916625,
+          54708583,
+          48005042,
+          48033083,
+          48149084,
+          51243834,
+          54525625,
+          50701833,
+          49048833,
+          50915958,
+          47762916,
+          48732167,
+          46150959,
+          46702708
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/golden/echo-echo.bash",
+      "cohort": "common16",
+      "input_sha256": "8fbd898964b46b848cdaf6415e3c2bfdb27138b822f33b51e9b9bc786c2a3b4f",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-echo.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 12,
+          "sha256": "f2418b602a5ce63b7d4c57b63abab4fd3aeaa0cfa6a9b2ca32c2d310ddce6a69"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/004/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 12,
+            "sha256": "f2418b602a5ce63b7d4c57b63abab4fd3aeaa0cfa6a9b2ca32c2d310ddce6a69"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/004/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 12,
+            "sha256": "f2418b602a5ce63b7d4c57b63abab4fd3aeaa0cfa6a9b2ca32c2d310ddce6a69"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-echo.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 768,
+          "sha256": "0976c75ef299474d262fa5489d1a653f6d10beb632c5d16d8607cd00bf43b768"
+        },
+        "stderr": {
+          "bytes": 284,
+          "sha256": "0e9d12bcb0a924a4b7a2e43af85a86ff5817ae00845bbe41f1512e963334c9fe"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-echo.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2794,
+          "sha256": "0734e8d92b0fa851199f384c809245b7c709ffdd179d6b349751cfaeae9425dd"
+        },
+        "stderr": {
+          "bytes": 465,
+          "sha256": "2b3d801b0299741c2cd91ce9374a5b120119e5cf7c056b450fa8f0c1d4428322"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10543917,
+          10568834,
+          10160167,
+          10643375,
+          11251584,
+          10544458,
+          10468000,
+          10757334,
+          10493625,
+          10743750,
+          10374167,
+          10524750,
+          10600417,
+          10653583,
+          10356708,
+          10909584,
+          11254208,
+          10633709,
+          10409875,
+          10503791
+        ],
+        "candidate": [
+          99502791,
+          93550959,
+          89029125,
+          84318625,
+          93203500,
+          96507708,
+          88725250,
+          81862917,
+          88760000,
+          79006167,
+          82676208,
+          88639583,
+          88793166,
+          92949875,
+          99790958,
+          96816750,
+          102228750,
+          94644958,
+          91697084,
+          84047792
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/golden/echo-exit.bash",
+      "cohort": "common16",
+      "input_sha256": "0821a309875879bf7c1d69d5994179d9f1172bbd87da77a781127986fd39eff7",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-exit.bash"
+        ],
+        "status": "completed",
+        "exit": 2,
+        "stdout": {
+          "bytes": 3,
+          "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/005/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 2,
+          "stdout": {
+            "bytes": 3,
+            "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/005/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 2,
+          "stdout": {
+            "bytes": 3,
+            "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-exit.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 703,
+          "sha256": "aa98fedc131edf60d2642e76e12c1f832b0b6cdfc2b9c895c809a3d9afe2cd3d"
+        },
+        "stderr": {
+          "bytes": 284,
+          "sha256": "567349ee6958a6787d22d7bd2f04ec1caed25852ce265c84f9e89bbdd629bc2a"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/golden/echo-exit.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2600,
+          "sha256": "29f759a9317d6b2af46c2697d5212a1d1827298356b0528702bdc1be78652d39"
+        },
+        "stderr": {
+          "bytes": 465,
+          "sha256": "69fc57a810894d2a0e05af26b72adb3f64ae1defa281bf8568e2bbf3d3d67ef2"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10822333,
+          11453000,
+          11058625,
+          11402459,
+          10733833,
+          10740084,
+          11375334,
+          10700208,
+          11005167,
+          11092792,
+          11490416,
+          11389708,
+          11027791,
+          11355084,
+          11006875,
+          10951375,
+          10847084,
+          10649291,
+          10472042,
+          10871917
+        ],
+        "candidate": [
+          64673375,
+          65438375,
+          70693583,
+          78916833,
+          80259250,
+          73119916,
+          63007292,
+          74539625,
+          67132541,
+          76488208,
+          81316333,
+          73596250,
+          64819500,
+          67271333,
+          65572708,
+          72175667,
+          67419000,
+          70956459,
+          65734959,
+          78507708
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/integration/source-recursive-child.bash",
+      "cohort": "common16",
+      "input_sha256": "6a94934f2f96fa981fa225f92646685f99ab6472811e3cee426d12a32b4a5f0d",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/source-recursive-child.bash"
+        ],
+        "status": "completed",
+        "exit": 7,
+        "stdout": {
+          "bytes": 7,
+          "sha256": "c91153712e6bd911470030e7a6227228b14fc24df6414d4827da54241b906caa"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/006/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 7,
+          "stdout": {
+            "bytes": 7,
+            "sha256": "c91153712e6bd911470030e7a6227228b14fc24df6414d4827da54241b906caa"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/006/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 7,
+          "stdout": {
+            "bytes": 7,
+            "sha256": "c91153712e6bd911470030e7a6227228b14fc24df6414d4827da54241b906caa"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/source-recursive-child.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 6831,
+          "sha256": "592723c2ba7f5885ad6abacbac55f3f4851f455ce78da055d89af73910dda2a5"
+        },
+        "stderr": {
+          "bytes": 405,
+          "sha256": "ba5f3d13e32fc933b7d5a3821a263547f78f05e595a5ceb9b822a786cd2c7ce6"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/source-recursive-child.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 4927,
+          "sha256": "a7d4e1f1cea7752596099ce746f7588096d82f1f5e73a29ab57b85ced752e5d4"
+        },
+        "stderr": {
+          "bytes": 612,
+          "sha256": "0edba0ab57ac823cbf1b6c58926287cedaed58fb7256311e6bd6e2f0ad3e5fe8"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          15464166,
+          14731500,
+          14784417,
+          14714917,
+          15143500,
+          15583458,
+          15695792,
+          14698291,
+          15476625,
+          15153667,
+          15087250,
+          15426250,
+          14509208,
+          14444917,
+          14551041,
+          15333416,
+          14665208,
+          15004625,
+          14637625,
+          15095834
+        ],
+        "candidate": [
+          78371917,
+          86911125,
+          81040333,
+          82572375,
+          82388792,
+          90776167,
+          78279208,
+          87194917,
+          79647208,
+          80748375,
+          87077500,
+          93889417,
+          82757750,
+          80468208,
+          91827584,
+          78257042,
+          76080541,
+          77873500,
+          86866750,
+          76388083
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/integration/stdout-stderr-exit.bash",
+      "cohort": "common16",
+      "input_sha256": "53dc798a65cb94f64ee3e93dd202fd67815a7cfe5d93bbe9d97d59fac79d2c3e",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/stdout-stderr-exit.bash"
+        ],
+        "status": "completed",
+        "exit": 7,
+        "stdout": {
+          "bytes": 4,
+          "sha256": "54034ac5c6e9ea95734ec2b729fd6d62abf64af34a9f9ce5d466cb788191a73d"
+        },
+        "stderr": {
+          "bytes": 4,
+          "sha256": "2ccde4875ec595757efdf23d7b1336fcd69cf0fb869310b12a0d219c52817b20"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/007/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 125,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 53,
+            "sha256": "f8d7d2b9a9718c567eae6c22a218d6edd4ac1a24b01bdf00566601aff9a34b2f"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/stdout-stderr-exit.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2398,
+          "sha256": "0b4f1e8434d01e6c46428568657cde272a27f56721ad2d336c44343c8a9ceda3"
+        },
+        "stderr": {
+          "bytes": 586,
+          "sha256": "24a82d2621f0a878a3d569f83e3ff65f02049a25a106fd6341b859d244a09860"
+        }
+      },
+      "status": "unsupported-native-platform",
+      "reason": "Unchanged baseline requires Linux; user deferred Linux execution."
+    },
+    {
+      "fixture": "test/fixtures/integration/syntax-standalone-negation.bash",
+      "cohort": "common16",
+      "input_sha256": "8ecb4a0fdedcb2b3705e537c5be0e9b7091069d1de6fd5949572d5247ea94a1c",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/syntax-standalone-negation.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 15,
+          "sha256": "e9cbacaf3210aa3ab2c90a9589dd94bcd7f0a2e176c5dcb7e6cc44608ae6c29e"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/008/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 15,
+            "sha256": "e9cbacaf3210aa3ab2c90a9589dd94bcd7f0a2e176c5dcb7e6cc44608ae6c29e"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/008/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 15,
+            "sha256": "e9cbacaf3210aa3ab2c90a9589dd94bcd7f0a2e176c5dcb7e6cc44608ae6c29e"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/syntax-standalone-negation.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 1390,
+          "sha256": "7d46b6d1b702149c779dd033668fca307c6f2e2094d8cf01270db02c11ab1a9a"
+        },
+        "stderr": {
+          "bytes": 306,
+          "sha256": "9823fdf8ab319b8d3e42cf9201dc5e5b0dd9c1df7fdf8ce532e4be2d005406a0"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/integration/syntax-standalone-negation.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2916,
+          "sha256": "3a4bc15559714b1d2ecbf61ebafedaf89873199b89578e14a8ee2ba91e187aa5"
+        },
+        "stderr": {
+          "bytes": 487,
+          "sha256": "5d1d709c9a80829f0a43cd1678f4d883c35c8bbf16b4fa3f47889c0e4024efbd"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10772166,
+          11144375,
+          10986625,
+          10611875,
+          10185000,
+          10605625,
+          11095459,
+          11249417,
+          10830833,
+          10786333,
+          11030125,
+          11203042,
+          10741209,
+          10598041,
+          10587458,
+          10481042,
+          10351584,
+          10851041,
+          10352625,
+          10591250
+        ],
+        "candidate": [
+          96006708,
+          87312917,
+          92013042,
+          94575750,
+          86959250,
+          90370875,
+          86970625,
+          94705167,
+          80947292,
+          89200708,
+          84445916,
+          91742625,
+          98924959,
+          104805792,
+          89038834,
+          84839750,
+          87541083,
+          88591208,
+          88867541,
+          91990708
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/realworld/hello-world.bash",
+      "cohort": "common16",
+      "input_sha256": "1ccab3b9173ef2c9f4c42bc3c36546afcb7456ab7dc035aa0cb38a3367c9ed27",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/realworld/hello-world.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 13,
+          "sha256": "03ba204e50d126e4674c005e04d82e84c21366780af1f43bd54a37816b6ab340"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/009/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 13,
+            "sha256": "03ba204e50d126e4674c005e04d82e84c21366780af1f43bd54a37816b6ab340"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/009/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 13,
+            "sha256": "03ba204e50d126e4674c005e04d82e84c21366780af1f43bd54a37816b6ab340"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/realworld/hello-world.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 692,
+          "sha256": "14049918b2e997643448869689c7817c76fff38bd26a53439b1fd7a4e0a7f0ad"
+        },
+        "stderr": {
+          "bytes": 289,
+          "sha256": "5ba2a8b3666c322d6b2ba3c64bb771333a3280e1cfdd2bb0fbacf03143a8317a"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/realworld/hello-world.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2600,
+          "sha256": "e1425d815c62bea9635fdd3354eccc0d156c2ef0346cb86282d6187c2585e0ee"
+        },
+        "stderr": {
+          "bytes": 470,
+          "sha256": "da452a4d8602dea1fc7efebfccc45aacca26ba67020281265bbf86c8a2673d33"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10459709,
+          10462000,
+          10495583,
+          10779250,
+          10517291,
+          10795125,
+          10459250,
+          10776333,
+          11315875,
+          10793083,
+          10643875,
+          11255500,
+          11465000,
+          10960959,
+          10723166,
+          10450083,
+          11188291,
+          10898167,
+          11020708,
+          11218166
+        ],
+        "candidate": [
+          72541042,
+          66830750,
+          73407625,
+          67057375,
+          76601625,
+          67792500,
+          67726166,
+          74266125,
+          68392125,
+          73622708,
+          62586666,
+          69809541,
+          63118458,
+          68871375,
+          67157625,
+          68868792,
+          76305375,
+          68636542,
+          65173750,
+          67690250
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/dynamic-command.bash",
+      "cohort": "common16",
+      "input_sha256": "cbd17ff66411a76ace3c615a49350965de23345972647d8226e50440911cc343",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/dynamic-command.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 3,
+          "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/010/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 3,
+            "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/010/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 3,
+            "sha256": "98ea6e4f216f2fb4b69fff9b3a44842c38686ca685f3f55dc48c5d3fb1107be4"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/dynamic-command.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2317,
+          "sha256": "3ffbb9c2559750513dc7bd6e25f901faafae9a218624ca5e8b524dae6453e2d0"
+        },
+        "stderr": {
+          "bytes": 292,
+          "sha256": "aa08e4e8143997bef65a1aec83874452aace4f68cf229c936b83ab1f91f9a4d4"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/dynamic-command.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 3453,
+          "sha256": "66fa7ce092631ed91d4426ffa9b65c8dbe9142b1fb332d660f42c9308f3ecad8"
+        },
+        "stderr": {
+          "bytes": 473,
+          "sha256": "6b2a7b2a98934551efd37d68ad6aba0cf2a6aa6bfa9ff2c06f47379021f0f0f1"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          11386125,
+          10741583,
+          10319750,
+          10975792,
+          10387833,
+          11120583,
+          11037000,
+          10663583,
+          11247209,
+          10905625,
+          10707208,
+          10799000,
+          11698125,
+          10595000,
+          10283000,
+          10492333,
+          10657750,
+          10463834,
+          10342042,
+          10621792
+        ],
+        "candidate": [
+          73204791,
+          68292375,
+          67984667,
+          72807000,
+          67519500,
+          73743167,
+          70366625,
+          66353041,
+          79512791,
+          69274416,
+          76567375,
+          69496375,
+          71898667,
+          69472833,
+          68870000,
+          65049792,
+          69472083,
+          66021333,
+          75319292,
+          71730708
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/positive-control-flow.bash",
+      "cohort": "common16",
+      "input_sha256": "2f530d9c0ab587967c5b062d4f37ff2c5430c2a1ff46ba40a3a85dc99c8cbab5",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-control-flow.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 6,
+          "sha256": "55c97802b397ef4da0d8e2ecf4a8fa33c1f4755da0eacec54c62cacbbcfd9713"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/011/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 6,
+            "sha256": "55c97802b397ef4da0d8e2ecf4a8fa33c1f4755da0eacec54c62cacbbcfd9713"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/011/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 6,
+            "sha256": "55c97802b397ef4da0d8e2ecf4a8fa33c1f4755da0eacec54c62cacbbcfd9713"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-control-flow.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 910,
+          "sha256": "b612fd9dd7183760d965a999e9fb55a45e39a99120b0cd97142c5e56a9a12eb2"
+        },
+        "stderr": {
+          "bytes": 298,
+          "sha256": "3dd5971148c9f51213c17deea2d84e54c2ed013458c5169f18858066e193c63d"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-control-flow.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2852,
+          "sha256": "00f2d6bb7ebcf5186d8b1eb7883cbba9efd243225a243ce41c540977e065d2d9"
+        },
+        "stderr": {
+          "bytes": 479,
+          "sha256": "a55bf74a30b53b9688ab1e1ed263ddd23c69467f08a7a78e52f4c105f96fe3ed"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10595333,
+          10541042,
+          11097875,
+          11329291,
+          10708917,
+          10680041,
+          11106417,
+          10722334,
+          10281875,
+          10657916,
+          10933542,
+          10699209,
+          11165417,
+          10438042,
+          10939709,
+          10656875,
+          10222167,
+          10767875,
+          10279208,
+          10643083
+        ],
+        "candidate": [
+          69021583,
+          76741041,
+          76706875,
+          76559500,
+          63711000,
+          68140625,
+          68983209,
+          69496375,
+          63095083,
+          62810875,
+          78916416,
+          69583042,
+          75435917,
+          67806500,
+          78432458,
+          61104000,
+          78094250,
+          68752583,
+          77839417,
+          66453583
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/positive-function-call.bash",
+      "cohort": "common16",
+      "input_sha256": "1821648fa47501703a254e51a554b657b5001d0963074fd40ddfc93b844171c4",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-function-call.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 12,
+          "sha256": "3c28242016f983f0d9e53a153367afc40de31cab9992f7e059b52d98f7df3268"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/012/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 12,
+            "sha256": "3c28242016f983f0d9e53a153367afc40de31cab9992f7e059b52d98f7df3268"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/012/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 12,
+            "sha256": "3c28242016f983f0d9e53a153367afc40de31cab9992f7e059b52d98f7df3268"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-function-call.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 1808,
+          "sha256": "098a6105262f511760f9f1fbf943cc956f88eacd84dcd3281c99d01807fdf7dd"
+        },
+        "stderr": {
+          "bytes": 363,
+          "sha256": "ca1ac7ef52c2a4a528a3f6165d8c29fa9accad21af773014fbe0e4b097a08380"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-function-call.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2660,
+          "sha256": "7178dee746157c0690f35f31e4c468fac70d1ce63e8ab5326b395aca2e0917f5"
+        },
+        "stderr": {
+          "bytes": 480,
+          "sha256": "6f8d7eccb05e33d4dd87e99a61b179997ffbd61b4001454f212f4fde0b0f6ca8"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10732416,
+          10841041,
+          10646416,
+          10731416,
+          10350000,
+          10542583,
+          10365042,
+          10716666,
+          10419833,
+          10914417,
+          10387625,
+          10523917,
+          10554250,
+          11234667,
+          10545416,
+          11330125,
+          10701708,
+          11000459,
+          11060292,
+          10900708
+        ],
+        "candidate": [
+          65813708,
+          72013334,
+          78768917,
+          58632958,
+          69308083,
+          62670667,
+          69688958,
+          67992375,
+          71904958,
+          72439667,
+          61174333,
+          73283541,
+          77940500,
+          62195208,
+          66194208,
+          67525584,
+          74856459,
+          69527291,
+          70213917,
+          64069375
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/positive-simple-command.bash",
+      "cohort": "common16",
+      "input_sha256": "171fd2d1fc83b02d193f80757c6e59a1284f0f5433be2d19517f0b4b7729a554",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-simple-command.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 8,
+          "sha256": "4abfae8c45d73878892aa44e513ad824529f3fa89ce2107c16decc654c92d565"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/013/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 8,
+            "sha256": "4abfae8c45d73878892aa44e513ad824529f3fa89ce2107c16decc654c92d565"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/013/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 8,
+            "sha256": "4abfae8c45d73878892aa44e513ad824529f3fa89ce2107c16decc654c92d565"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-simple-command.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 686,
+          "sha256": "a316c20e99a5c3d9a424f427cbfda9654d53997c8d1f52f56a4d054033c79c03"
+        },
+        "stderr": {
+          "bytes": 300,
+          "sha256": "abf878f1b15f22982604272779c70386c91c689147a8fbc85bb1deeb3f9fd42d"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/positive-simple-command.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2606,
+          "sha256": "fa78bdc20aad2cb32638eb8c33c959bfc2bfff6aa998ae4c71b588a462c53eda"
+        },
+        "stderr": {
+          "bytes": 481,
+          "sha256": "6e8b3a9a44bf669998734c0b5792467b0a452845768af38efb8b0074e5a7c845"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          11022875,
+          11080000,
+          10476333,
+          11106500,
+          11319334,
+          10853333,
+          10490583,
+          11019750,
+          10099416,
+          10844791,
+          10854375,
+          10904042,
+          11275166,
+          10729917,
+          10441333,
+          10588917,
+          9837375,
+          10207708,
+          10281833,
+          9939666
+        ],
+        "candidate": [
+          69556958,
+          65251625,
+          71930125,
+          69891291,
+          81051083,
+          69504667,
+          72367917,
+          73703875,
+          73676333,
+          67697750,
+          63503041,
+          68955500,
+          73002917,
+          73247625,
+          59800042,
+          72239209,
+          69643125,
+          69368417,
+          67305125,
+          66094625
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/uncalled-option-function.bash",
+      "cohort": "common16",
+      "input_sha256": "94920e9574926a5b221721bcec018b81b963a2000acdd233cdb92877cd0903a7",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/uncalled-option-function.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 9,
+          "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/014/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 9,
+            "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/014/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 9,
+            "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/uncalled-option-function.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 1629,
+          "sha256": "1ef1f135f7a6ff37f0c280d202c8205ce7b798c544cb2eb3f41141539abc626a"
+        },
+        "stderr": {
+          "bytes": 365,
+          "sha256": "95509dbb2db9c09ca81ea4c728078f5f33ed7472417cf2d7fc30184447b8d487"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/uncalled-option-function.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 3531,
+          "sha256": "2d7879f5458cbbe3710c52ab2990c9dbb545bc81fa556345472a6341b88f4799"
+        },
+        "stderr": {
+          "bytes": 609,
+          "sha256": "129fb2b2c3e9327b191a8fc01c68174719d1f4e12cba5c4bd2ab8db03a686011"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          11075917,
+          10363542,
+          10532042,
+          11426959,
+          10981083,
+          10497209,
+          10465417,
+          11043792,
+          10452541,
+          10689209,
+          11028209,
+          10615292,
+          10370459,
+          10372792,
+          10544708,
+          10439417,
+          11209291,
+          11041209,
+          11443667,
+          10861333
+        ],
+        "candidate": [
+          67675417,
+          63767042,
+          69540625,
+          65311834,
+          70347667,
+          81169000,
+          67412125,
+          70669958,
+          67312459,
+          68709416,
+          64249167,
+          73042500,
+          69940833,
+          72022875,
+          66460000,
+          61355000,
+          72129666,
+          65603584,
+          69496500,
+          69041958
+        ]
+      }
+    },
+    {
+      "fixture": "test/fixtures/semantic/untaken-option.bash",
+      "cohort": "common16",
+      "input_sha256": "bc4c4da43c08912924ac39eca3b06a0b45b405b6c68ffdcc27eaf9fbb30828fc",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/untaken-option.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 9,
+          "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/015/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 9,
+            "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "candidate": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime",
+            "--abi",
+            "2",
+            "launch",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/015/candidate.fish"
+          ],
+          "status": "completed",
+          "exit": 0,
+          "stdout": {
+            "bytes": 9,
+            "sha256": "304b524de1a79904aaf8295a0986f8c03dd0d1d26d25902da057b47277147297"
+          },
+          "stderr": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/untaken-option.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 1676,
+          "sha256": "8eb396ebc9251bd322576826328dcc78ac43ce3e1488f5436538649f4c01f100"
+        },
+        "stderr": {
+          "bytes": 291,
+          "sha256": "98c49133e39e97dd99eb1be28e93e5f1d66905fa8529e5581d1554aee0c223b5"
+        }
+      },
+      "candidate_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/candidate",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/test/fixtures/semantic/untaken-option.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 3558,
+          "sha256": "c4acd9e671f427ea90bb3417ae7ac1c1ed94179fcb4cc6cae7dcdf3f62205505"
+        },
+        "stderr": {
+          "bytes": 599,
+          "sha256": "3600ef34488e65eb077b3934f717774938678be519b71c75c4b62c4271cbb93a"
+        }
+      },
+      "status": "measured",
+      "samples_ns": {
+        "baseline": [
+          10664083,
+          11135292,
+          10462083,
+          10808708,
+          10553708,
+          10610667,
+          10586792,
+          10375500,
+          11116666,
+          11167583,
+          11052000,
+          10811333,
+          10640500,
+          10940250,
+          10824042,
+          10497834,
+          10546292,
+          11110917,
+          11138541,
+          10683500
+        ],
+        "candidate": [
+          64919291,
+          73675292,
+          64380541,
+          74449583,
+          74800916,
+          70462958,
+          72862416,
+          69178583,
+          67616875,
+          66547000,
+          62704542,
+          68928708,
+          66126667,
+          65538083,
+          70710959,
+          63539500,
+          71987291,
+          65858625,
+          77999583,
+          69169334
+        ]
+      }
+    },
+    {
+      "fixture": ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-add.bash",
+      "cohort": "arithmetic3",
+      "input_sha256": "4d628e47a518cf3972aa1bc14da7b5f191b91144ddd670f78e0af67377f23718",
+      "status": "missing-frozen-input",
+      "reason": "Original frozen arithmetic input is absent locally; hash retained, no substitute generated."
+    },
+    {
+      "fixture": ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-multiply.bash",
+      "cohort": "arithmetic3",
+      "input_sha256": "301b9591f7ba61631fd3774d31d769d19386edf704aad32f401913b7071d1ade",
+      "status": "missing-frozen-input",
+      "reason": "Original frozen arithmetic input is absent locally; hash retained, no substitute generated."
+    },
+    {
+      "fixture": ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-mixed.bash",
+      "cohort": "arithmetic3",
+      "input_sha256": "ead2c8fef41078a9419aa51015fae1eb7f73306dfbd824b06164f030c5e5418a",
+      "status": "missing-frozen-input",
+      "reason": "Original frozen arithmetic input is absent locally; hash retained, no substitute generated."
+    },
+    {
+      "fixture": "performance/field-splitting.bash",
+      "cohort": "targeted-native",
+      "input_sha256": "4beb558b0820bcb7644b17a3c358352ba4f287825706ba95cdbbff37ea14ec94",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/field-splitting.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 20,
+          "sha256": "36afa8fbc5b399af831e7ad26c3955a0299da69227c5cce82f4d9443d7c12863"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/019/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 125,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 53,
+            "sha256": "f8d7d2b9a9718c567eae6c22a218d6edd4ac1a24b01bdf00566601aff9a34b2f"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/field-splitting.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 4380,
+          "sha256": "8beb5604722f14157b018a3be6a0f406ff442d7a9901f3020852074e8efe2294"
+        },
+        "stderr": {
+          "bytes": 494,
+          "sha256": "b8fb608e7c3242ce9b4ab79de0d293c54a647c0d54b436544c3f0f1d85af73f7"
+        }
+      },
+      "status": "unsupported-native-platform",
+      "reason": "Unchanged baseline requires Linux; user deferred Linux execution."
+    },
+    {
+      "fixture": "performance/escaped-echo.bash",
+      "cohort": "targeted-native",
+      "input_sha256": "fb45ea6863c40343dc1ea15273a82a1a9b171231d8bdc889e06537145ca0b9b5",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/escaped-echo.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 8,
+          "sha256": "1fa99f5d84061b4f9b19b55858b9c4277b3b9897d38cdc1c1131386f980f639d"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {
+        "baseline": {
+          "command": [
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/fish",
+            "--no-config",
+            "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/020/baseline.fish"
+          ],
+          "status": "completed",
+          "exit": 125,
+          "stdout": {
+            "bytes": 0,
+            "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "stderr": {
+            "bytes": 53,
+            "sha256": "f8d7d2b9a9718c567eae6c22a218d6edd4ac1a24b01bdf00566601aff9a34b2f"
+          }
+        }
+      },
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/escaped-echo.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 2282,
+          "sha256": "5c4e828e7438d6c639b26a80fcf1db0aa2c18ca4ea504d2b307b0fbad392b990"
+        },
+        "stderr": {
+          "bytes": 490,
+          "sha256": "c75200e2797086f399c71aed2cf64739675dfcd13a941c8a87656e84d628f295"
+        }
+      },
+      "status": "unsupported-native-platform",
+      "reason": "Unchanged baseline requires Linux; user deferred Linux execution."
+    },
+    {
+      "fixture": "performance/composed-words.bash",
+      "cohort": "targeted-native",
+      "input_sha256": "bd163efcbe7e76eb8b0d1d5e89ae4bf06a902ee54e36488cf072314f8c4df0c0",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/composed-words.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 19,
+          "sha256": "01618e752cdcd868a1bbe78f3ecbb339e81e215d130e753f40ac80e6da370474"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {},
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/composed-words.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 1,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes": 278,
+          "sha256": "1e0de49394a5a5ccd61f652ca9d803d905832bd11276a7afbae631e0d7189f64"
+        }
+      },
+      "status": "translation-unavailable",
+      "provider": "baseline"
+    },
+    {
+      "fixture": "performance/checked-printf.bash",
+      "cohort": "targeted-native",
+      "input_sha256": "f577e89d58693d584a82906d02afc485c360916e9d22c4b8e432a16f56d0c40d",
+      "reference": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/bash",
+          "--noprofile",
+          "--norc",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/checked-printf.bash"
+        ],
+        "status": "completed",
+        "exit": 0,
+        "stdout": {
+          "bytes": 15,
+          "sha256": "ff59695689cc7d9df610948942af65a4cb790f0948251a9d61255cf1fef06b4e"
+        },
+        "stderr": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "first_run": {},
+      "baseline_translation": {
+        "command": [
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-frozen-v2/inputs/performance/checked-printf.bash",
+          "--runtime",
+          "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime"
+        ],
+        "status": "completed",
+        "exit": 1,
+        "stdout": {
+          "bytes": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "stderr": {
+          "bytes": 277,
+          "sha256": "025249cedd70eec8d2b4c721dfa10f367d0100441ad39fcc83df01bc4521cb6b"
+        }
+      },
+      "status": "translation-unavailable",
+      "provider": "baseline"
+    }
+  ],
+  "baseline_probe": {
+    "command": [
+      "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/providers/baseline_runtime",
+      "--describe"
+    ],
+    "status": "completed",
+    "exit": 125,
+    "stdout": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "stderr": {
+      "bytes": 57,
+      "sha256": "5813ebb30374a47097a3b06b1734801b233f64c74a9a19e2dae64290ead7e5bc"
+    }
+  },
+  "cohorts": {
+    "common16": {
+      "status": "unverified",
+      "unavailable": [
+        "benchmark/fixtures/small.bash",
+        "test/fixtures/integration/stdout-stderr-exit.bash"
+      ],
+      "expected": 16,
+      "measured": 14
+    },
+    "arithmetic3": {
+      "status": "unverified",
+      "unavailable": [
+        ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-add.bash",
+        ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-multiply.bash",
+        ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-mixed.bash"
+      ],
+      "expected": 3,
+      "measured": 0
+    },
+    "targeted-native": {
+      "status": "unverified",
+      "unavailable": [
+        "performance/field-splitting.bash",
+        "performance/escaped-echo.bash",
+        "performance/composed-words.bash",
+        "performance/checked-printf.bash"
+      ],
+      "expected": 4,
+      "measured": 0
+    }
+  },
+  "acceptance": {
+    "status": "unverified",
+    "reason": "Timing cohorts must all be complete and targeted process-launch reduction must be measured."
+  },
+  "raw_report": {
+    "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/.superpowers/sdd/2026-09-22-portable-exact/performance-final/report.json",
+    "sha256": "600b14435851f1c24e1874db3ddab8df384a52923e06cae6f7f353bf0cf39b80",
+    "scope": "Complete raw streams and per-sample observations are retained locally; this summary preserves hashes, outcomes and sample timings."
+  }
+}

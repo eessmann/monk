@@ -2,7 +2,7 @@
 
 -- | Bounded conversion of the actual Fish cd diagnostic. This operation never
 -- probes the requested path and never changes its own or its parent's cwd.
-module Monk.Runtime.Directory (directoryDiagnostic, physicalDirectory, directoryStack, validateDirectories, initialOldpwdValid, directoryPathBound) where
+module Monk.Runtime.Directory (directoryDiagnostic, formatDirectoryDiagnostic, physicalDirectory, directoryStack, validateDirectories, initialOldpwdValid, directoryPathBound) where
 
 import Control.Exception (IOException, try)
 import Data.ByteString (ByteString)
@@ -12,6 +12,7 @@ import Data.Either (fromRight)
 import Monk.Runtime.Protocol (protocolFailure)
 import Numeric (showOct)
 import System.IO (stderr)
+import System.Info (os)
 import System.Posix.Directory.ByteString qualified as Posix
 import System.Posix.Files.ByteString qualified as Files
 
@@ -28,15 +29,18 @@ physicalDirectory :: IO ()
 physicalDirectory = Posix.getWorkingDirectory >>= B.putStr . (<> "\n")
 
 directoryDiagnostic :: ByteString -> IO ()
-directoryDiagnostic input = case metadata 4 input of
+directoryDiagnostic input = either protocolFailure (\(_, _, _, message) -> B.hPut stderr message) (formatDirectoryDiagnostic input)
+
+formatDirectoryDiagnostic :: ByteString -> Either ByteString (ByteString, ByteString, ByteString, ByteString)
+formatDirectoryDiagnostic input = case metadata 4 input of
   Just ([origin, line, operation, operand], actual)
     | operation `elem` ["cd", "pushd", "popd"] ->
         if B.null actual
-          then pure ()
+          then Right (origin, line, operation, B.empty)
           else case reason operand actual of
-            Just message -> B.hPut stderr (origin <> ": line " <> line <> ": " <> operation <> ": " <> bashDiagnosticPath operand <> ": " <> message <> "\n")
-            Nothing -> protocolFailure "unrecognized Fish 4.6 C-locale cd diagnostic"
-  _ -> protocolFailure "invalid directory diagnostic metadata"
+            Just message -> Right (origin, line, operation, origin <> ": line " <> line <> ": " <> operation <> ": " <> bashDiagnosticPath operand <> ": " <> message <> "\n")
+            Nothing -> Left "unrecognized Fish 4.6 C-locale cd diagnostic"
+  _ -> Left "invalid directory diagnostic metadata"
   where
     metadata :: Int -> ByteString -> Maybe ([ByteString], ByteString)
     metadata 0 rest = Just ([], rest)
@@ -63,7 +67,7 @@ validateDirectories (pwd : stack)
       pure (fromRight False result)
   | otherwise = pure False
   where
-    ordinary path = not (B.null path) && B.head path == 47 && B.length path <= 4095 && all ((<= 255) . B.length) (B.split 47 path) && all (`notElem` [".", ".."]) (B.split 47 path)
+    ordinary path = not (B.null path) && B.head path == 47 && B.length path <= (if os == "darwin" then 1023 else 4095) && all ((<= 255) . B.length) (B.split 47 path) && all (`notElem` [".", ".."]) (B.split 47 path)
 validateDirectories _ = pure False
 
 -- Bash startup retains inherited OLDPWD only when it names a directory.
@@ -105,4 +109,4 @@ directoryPathBound cwd operand =
       component prior "." = prior
       component prior ".." = drop 1 prior
       component prior part = part : prior
-   in B.length (prefix <> B.intercalate "/" parts) <= 4095
+   in B.length (prefix <> B.intercalate "/" parts) <= (if os == "darwin" then 1023 else 4095)

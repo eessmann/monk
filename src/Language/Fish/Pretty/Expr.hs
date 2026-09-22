@@ -10,6 +10,7 @@ module Language.Fish.Pretty.Expr
   )
 where
 
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
 import Language.Fish.AST
@@ -29,7 +30,11 @@ prettyFishExprWith prettyStmt = go
       ExprVariable varRef -> prettyVarRef varRef
       ExprQuotedVariable varRef -> "\"" <> prettyVarRef varRef <> "\""
       ExprSpecialVar sv -> prettySpecialVar sv
-      ExprStringConcat e1 e2 -> go e1 <> go e2
+      expression@(ExprStringConcat _ _) ->
+        case concatParts expression of
+          [] -> escapeFishString ""
+          [part] -> go part
+          parts -> hcat (map prettyConcatPart parts)
       ExprStringOp op e -> parens (prettyStringOp op <+> go e)
       ExprJoinList e ->
         parens
@@ -60,6 +65,12 @@ prettyFishExprWith prettyStmt = go
       ExprListConcat a b -> go a <+> go b
       ExprGlob g -> prettyGlob g
       ExprProcessSubst stmts -> prettyProcessSubst stmts
+
+    -- Literal runs form one word. In mixed words, retain a quote boundary so
+    -- a suffix cannot become part of the preceding variable's identifier.
+    prettyConcatPart :: FishExpr TStr -> Doc ann
+    prettyConcatPart (ExprLiteral value) = quoteFishString value
+    prettyConcatPart other = go other
 
     nonemptyStatement EmptyStmt = False
     nonemptyStatement (StmtList []) = False
@@ -123,15 +134,39 @@ prettyFishExprWith prettyStmt = go
             xs -> "begin" <> hardline <> indent 2 (vsep (map prettyStmt xs)) <> hardline <> "end"
        in parens (docBody <+> "|" <+> "psub")
 
--- | Escape strings for Fish shell.
--- Prefers single quotes. Uses double quotes if single quotes are present.
--- Escapes relevant characters inside double quotes.
+-- | Merge adjacent literal fragments structurally, preserving dynamic order.
+-- An entirely empty concatenation still renders as one empty argument.
+concatParts :: FishExpr TStr -> [FishExpr TStr]
+concatParts expression = filter nonempty (merge (flatten expression []))
+  where
+    flatten :: FishExpr TStr -> [FishExpr TStr] -> [FishExpr TStr]
+    flatten (ExprStringConcat left right) rest = flatten left (flatten right rest)
+    flatten part rest = part : rest
+    merge :: [FishExpr TStr] -> [FishExpr TStr]
+    merge (ExprLiteral left : ExprLiteral right : rest) = merge (ExprLiteral (left <> right) : rest)
+    merge (part : rest) = part : merge rest
+    merge [] = []
+    nonempty :: FishExpr TStr -> Bool
+    nonempty (ExprLiteral value) = not (T.null value)
+    nonempty _ = True
+
+-- | Escape a complete literal word, omitting quotes only for a conservative
+-- ASCII subset. Keywords stay quoted even in command position; assignment
+-- prefixes, expansions, glob syntax and control operators never pass through.
 escapeFishString :: Text -> Doc ann
 escapeFishString s
+  | not (T.null s), T.all safeCharacter s, s `notElem` keywords = pretty s
+  | otherwise = quoteFishString s
+  where
+    safeCharacter c = isAsciiLower c || isAsciiUpper c || isDigit c || c `elem` ("_./-:+@" :: String)
+    keywords = ["and", "begin", "break", "builtin", "case", "command", "continue", "else", "end", "exec", "for", "function", "if", "in", "not", "or", "return", "switch", "then", "time", "while"]
+
+quoteFishString :: Text -> Doc ann
+quoteFishString s
   -- Literal line breaks in a Doc acquire layout indentation inside a block.
   -- Fish's unquoted escaped newline joins adjacent quoted fragments into the
   -- same word without exposing its contents to layout or expansion.
-  | T.any (== '\n') s = hcat (punctuate "\\n" (map escapeFishString (T.splitOn "\n" s)))
+  | T.any (== '\n') s = hcat (punctuate "\\n" (map (\part -> if T.null part then mempty else quoteFishString part) (T.splitOn "\n" s)))
   | T.any (`elem` ("\\\\'" :: String)) s = doubleQuoted s
   | otherwise = singleQuoted s
   where

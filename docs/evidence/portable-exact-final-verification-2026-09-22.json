@@ -1,0 +1,861 @@
+{
+  "schema": 1,
+  "scope": "Local final verification; no remote execution or CI pass implied. Failed receipts remain failed; completed subcommands are listed separately.",
+  "receipts": {
+    "final-build-v3": {
+      "timestamp": "2026-09-22T17:20:10.914418+00:00",
+      "exit": 0,
+      "elapsed_seconds": 28.561595291997946,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail; cabal build all --builddir=dist-ghc9141 --offline; runtime=$(cabal list-bin exe:monk-runtime --builddir=dist-ghc9141); monk=$(cabal list-bin exe:monk --builddir=dist-ghc9141); export PATH=\"$(dirname \"$runtime\"):$PATH\"; dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/t/monk-test/build/monk-test/monk-test -p '/Golden translations/'; python3 runtime-test/callback-diagnostics.py \"$runtime\" \"$monk\""
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+          "bytes": 27265136
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "2f619c830efe2b0c02d7b076c0ac5fb339bd050ab12dbad52158dab2d279a108",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-build-v3/receipt.json",
+      "receipt_sha256": "0a584e761b65239190aee943770a9661409106cf14d7c2fce737f479b905f551",
+      "full_input_sha256": "434daeb6c81a60a23152ee5d83f27f8dd0f2f0a12ea0b6ff78f2aa76f06f769f",
+      "production_sha256": "ebad27c97225ecf2306d50dcc671ddbd966b8e8e659c0322f32af258a85c48a1"
+    },
+    "final-canonical-harness": {
+      "timestamp": "2026-09-22T17:51:52.618641+00:00",
+      "exit": 1,
+      "elapsed_seconds": 307.8320853330006,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nghc --numeric-version\ncabal --numeric-version\nbash --version | head -1\nfish --version\ncabal build all --builddir=dist-ghc9141 --offline\nexport MONK_NATIVE_TEST_BINARY=\"$(cabal list-bin exe:monk --builddir=dist-ghc9141)\"\nexport MONK_NATIVE_RUNTIME=\"$(cabal list-bin exe:monk-runtime --builddir=dist-ghc9141)\"\nexport PATH=\"$(dirname \"$MONK_NATIVE_RUNTIME\"):$PATH\"\nMONK_INTEGRATION=1 cabal test all --builddir=dist-ghc9141 --offline --test-show-details=direct\nfor suite in protocol portable printf expansion session descriptors read process-substitution pattern-parts exec signals; do\n  python3 \"runtime-test/$suite.py\" \"$MONK_NATIVE_RUNTIME\"\ndone\npython3 runtime-test/digest.py \"$(cabal list-bin test:runtime-test --builddir=dist-ghc9141)\"\npython3 runtime-test/callback-diagnostics.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\"\npython3 runtime-test/native-launcher.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\"\npython3 runtime-test/direct-output.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\"\npython3 runtime-test/directory-signals.py \"$MONK_NATIVE_TEST_BINARY\" \"$MONK_NATIVE_RUNTIME\"\nbash test/native/child-transport.sh \"$MONK_NATIVE_RUNTIME\"\npython3 scripts/test_native_publication.py\ncabal exec --builddir=dist-ghc9141 -- python3 scripts/check-public-boundaries.py --plan dist-ghc9141/cache/plan.json --report artifacts/final-launcher-public-boundaries.json\nmonk-quality\npython3 scripts/test_runtime_package.py\npython3 scripts/test_portable_comparison.py\npython3 scripts/test_portable_performance.py\npython3 scripts/test_verification_evidence.py"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": false,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+          "bytes": 27265136
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "8e74dd3aad66435371ea8fefb630f7bc3034f09504ca0ecbf0aa0b6e720402d1",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-canonical-harness/receipt.json",
+      "receipt_sha256": "1fb2a15a46c9e756111430424499e2c4ecb7550e4fe0728286a0db154d5f80d5",
+      "full_input_sha256": "e37c8b9eb9367008aa179d5be62e4ae8a4c02d9a8cf543e69dd20c6f55f67b4b",
+      "production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5"
+    },
+    "final-canonical-followup": {
+      "timestamp": "2026-09-22T18:08:52.224897+00:00",
+      "exit": 0,
+      "elapsed_seconds": 132.41204616599862,
+      "command": [
+        "bash",
+        "/tmp/monk-focused-final.sh"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+          "bytes": 27265136
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "b8080e4ce1be318e616feeab4a7305b08ff87abe573409f081546246b86998e5",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-canonical-followup/receipt.json",
+      "receipt_sha256": "bc55257b5b5f64a16f7175f633f9292c8561d983e2a33df34d419c0efdb19b6e",
+      "full_input_sha256": "da6ec17a7bfcd5d84dbc34f1b11f7762a595d8e9e4457cef310f80776cc7ff35",
+      "production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5"
+    },
+    "final-compatibility-v3": {
+      "timestamp": "2026-09-22T17:20:04.902997+00:00",
+      "exit": 0,
+      "elapsed_seconds": 187.1905911670001,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail; ghc --numeric-version; cabal build all --builddir=dist-ghc9122-final --offline; export MONK_NATIVE_TEST_BINARY=\"$(cabal list-bin exe:monk --builddir=dist-ghc9122-final)\"; export MONK_NATIVE_RUNTIME=\"$(cabal list-bin exe:monk-runtime --builddir=dist-ghc9122-final)\"; export PATH=\"$(dirname \"$MONK_NATIVE_RUNTIME\"):$PATH\"; MONK_INTEGRATION=1 cabal test all --builddir=dist-ghc9122-final --offline --test-show-details=direct; python3 runtime-test/native-launcher.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\"; python3 runtime-test/direct-output.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\"; python3 runtime-test/callback-diagnostics.py \"$MONK_NATIVE_RUNTIME\" \"$MONK_NATIVE_TEST_BINARY\""
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "bb99e912538d430fbc592b2f019c10f80daf97029bacaf863030bc2cb66d4f0a",
+          "bytes": 74600216
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "61739648c29986b04381375cf1658e56fb6cfa1cbe115e49cb67c7148d68a7d1",
+          "bytes": 26473328
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/dzw0qmp8gckn49kday1k8c0gknfkphsn-ghc-shell-for-packages-ghc-9.12.2-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "1482e7c5bc8cd54fa187d47238cc83eed08c2001534991e6f14ceb6ada4f5465",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-compatibility-v3/receipt.json",
+      "receipt_sha256": "7a3fbb032b263a63d705d247843214859c92675536d14b23dace08fe958dd77e",
+      "full_input_sha256": "434daeb6c81a60a23152ee5d83f27f8dd0f2f0a12ea0b6ff78f2aa76f06f769f",
+      "production_sha256": "ebad27c97225ecf2306d50dcc671ddbd966b8e8e659c0322f32af258a85c48a1"
+    },
+    "final-compatibility-harness": {
+      "timestamp": "2026-09-22T17:52:22.081294+00:00",
+      "exit": 0,
+      "elapsed_seconds": 162.12765020799998,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail; ghc --numeric-version; cabal build all --builddir=dist-ghc9122-final --offline; export MONK_NATIVE_TEST_BINARY=\"$(cabal list-bin exe:monk --builddir=dist-ghc9122-final)\"; export MONK_NATIVE_RUNTIME=\"$(cabal list-bin exe:monk-runtime --builddir=dist-ghc9122-final)\"; export PATH=\"$(dirname \"$MONK_NATIVE_RUNTIME\"):$PATH\"; MONK_INTEGRATION=1 cabal test all --builddir=dist-ghc9122-final --offline --test-show-details=direct"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "bb99e912538d430fbc592b2f019c10f80daf97029bacaf863030bc2cb66d4f0a",
+          "bytes": 74600216
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "61739648c29986b04381375cf1658e56fb6cfa1cbe115e49cb67c7148d68a7d1",
+          "bytes": 26473328
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/dzw0qmp8gckn49kday1k8c0gknfkphsn-ghc-shell-for-packages-ghc-9.12.2-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "504eeeb5293dba2094f0871f5358e85de11fb255551b7cf6759d598aebd530ab",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-compatibility-harness/receipt.json",
+      "receipt_sha256": "662569e93b37fb57d20eeac848a7c9d31bd2a25125f69fad2b96b24efcf73275",
+      "full_input_sha256": "e37c8b9eb9367008aa179d5be62e4ae8a4c02d9a8cf543e69dd20c6f55f67b4b",
+      "production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5"
+    },
+    "final-moving-fish-v3": {
+      "timestamp": "2026-09-22T17:24:37.642662+00:00",
+      "exit": 0,
+      "elapsed_seconds": 147.52906387500116,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nghc --version\ncabal --version\nbash --version\nfish --version\n'/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/t/monk-test/build/monk-test/monk-test'\npython3 runtime-test/native-launcher.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\npython3 runtime-test/direct-output.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\npython3 runtime-test/callback-diagnostics.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\n"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+          "bytes": 27265136
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/t/monk-test/build/monk-test/monk-test",
+          "sha256": "95723f72a0c894f5ad17fa4d617b271fb11150a55671b2a527849f647b973d7b",
+          "bytes": 83874872
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/8wk68bcp5i5lks85mjcrhq9a9py6y2hl-fish-4.9.3/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "bbe2122e749218cc7aaf68b7269dbb3fef71e773b86144d88645e8269637d552",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-moving-fish-v3/receipt.json",
+      "receipt_sha256": "5255af40a3fdf78faad4ba5f09a06483f2f0b09deabd92f8651512b6a3c74012",
+      "full_input_sha256": "434daeb6c81a60a23152ee5d83f27f8dd0f2f0a12ea0b6ff78f2aa76f06f769f",
+      "production_sha256": "ebad27c97225ecf2306d50dcc671ddbd966b8e8e659c0322f32af258a85c48a1"
+    },
+    "final-moving-fish-harness": {
+      "timestamp": "2026-09-22T17:54:51.221959+00:00",
+      "exit": 0,
+      "elapsed_seconds": 0.26436666599693126,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nexport TMPDIR=/private/tmp\nexport MONK_INTEGRATION=1\nexport PATH='/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime':\"$PATH\"\nghc --numeric-version\nbash --version | head -1\nfish --version\ncommand -v env\n'/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/t/monk-test/build/monk-test/monk-test' -p '/environment snapshots preserve framed values/'\n"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+          "bytes": 27265136
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/8wk68bcp5i5lks85mjcrhq9a9py6y2hl-fish-4.9.3/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "b4a1746915628f5b9f017dab5928a5bfd518e0fbfe96a3f15187ff5a71937bd5",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-moving-fish-harness/receipt.json",
+      "receipt_sha256": "1b1e07c862e2dcef289fb387b423cf635839e041a59cd0218856c01cae9baa0e",
+      "full_input_sha256": "e37c8b9eb9367008aa179d5be62e4ae8a4c02d9a8cf543e69dd20c6f55f67b4b",
+      "production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5"
+    },
+    "final-publication-harness": {
+      "timestamp": "2026-09-22T17:51:54.839611+00:00",
+      "exit": 0,
+      "elapsed_seconds": 318.96444320799856,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail; monk-quality; python3 scripts/test_runtime_package.py; python3 scripts/test_portable_comparison.py; python3 scripts/test_portable_performance.py; python3 scripts/test_verification_evidence.py; cabal haddock all --builddir=dist-haddock-final --offline; MONK_CABAL_OFFLINE=1 bash scripts/check-source-distribution.sh artifacts/final-sdist-harness"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "c9a56e0f24ed02c057834427609ea07b44ca0795918488304b7275694ea58112",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-publication-harness/receipt.json",
+      "receipt_sha256": "2779666b2b9ff2237631ec3763d55365db16c3a27bede87770fde3c14c99b41c",
+      "full_input_sha256": "e37c8b9eb9367008aa179d5be62e4ae8a4c02d9a8cf543e69dd20c6f55f67b4b",
+      "production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5"
+    },
+    "final-package": {
+      "timestamp": "2026-09-22T16:59:54.748311+00:00",
+      "exit": 0,
+      "elapsed_seconds": 139.60053129200242,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nmkdir -p artifacts\nnix build --out-link artifacts/runtime-release-final --option builders \"\" --option substituters \"https://cache.nixos.org https://cache.iog.io\" --extra-trusted-public-keys hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ= /nix/store/b3f5224vikzjpa1c6fywmi3k0vchaa0j-monk-runtime-aarch64-darwin.drv^out\nset -euo pipefail\ncp -R artifacts/runtime-release-final/ artifacts/runtime-final\nruntime=\"$PWD/artifacts/runtime-final/bin/monk-runtime\"\nreference_path=\"$(dirname \"$(command -v bash)\"):$(dirname \"$(command -v fish)\"):$(dirname \"$(command -v python3)\"):$(dirname \"$(command -v sha256sum)\"):/usr/bin:/bin\"\nenv -i PATH=\"$reference_path\" LC_ALL=C LANG=C TMPDIR=/private/tmp \"$runtime\" --describe > artifacts/runtime-final-description.txt\npython3 scripts/verify-runtime-package.py \"$runtime\" --target aarch64-darwin --description-file artifacts/runtime-final-description.txt --report artifacts/runtime-final-inspection.json\nfor suite in protocol portable printf expansion session descriptors read process-substitution pattern-parts exec signals direct-output native-launcher; do\n  env -i PATH=\"$reference_path\" LC_ALL=C LANG=C TMPDIR=/private/tmp python3 \"runtime-test/$suite.py\" \"$runtime\"\ndone\nenv -i PATH=\"$reference_path\" LC_ALL=C LANG=C TMPDIR=/private/tmp bash test/native/child-transport.sh \"$runtime\"\npython3 - <<'PY'\nimport json,hashlib\nfrom pathlib import Path\nreport=json.loads(Path('artifacts/runtime-final-inspection.json').read_text())\nbinary=Path('artifacts/runtime-final/bin/monk-runtime')\nassert hashlib.sha256(binary.read_bytes()).hexdigest()==report['sha256']\nreport['execution_verified']=True\nreport['execution_checks']=['describe','protocol','portable','printf','expansion','session','descriptors','read','process-substitution','pattern-parts','exec','signals','direct-output','native-launcher','child-transport']\nPath('artifacts/runtime-final-execution.json').write_text(json.dumps(report,indent=2)+'\\n')\nprint(json.dumps(report,indent=2))\nPY"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/artifacts/runtime-final/bin/monk-runtime",
+          "sha256": "4dda9b6ef51d3d8da04c16c5319700b721db400c59afde0e2724472188aa9ea7",
+          "bytes": 27439520
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "31db78eed7ef7f976e86557e2e934f70a88d3e691fb0837dae869fe9f2948d49",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-package/receipt.json",
+      "receipt_sha256": "cf2ffa5a04b4c113f390ea95a7ee84ec6e796d3389d34cffde7f196b17a534e5",
+      "full_input_sha256": "1604b8c47c45f2f2f7cb8cf6300d879fb175b570ef015d9c2851a5e044f11fda",
+      "production_sha256": "39d284d5ca3da7d84c4a8832f97e670a222fef9d158780f538f96bc627332f76"
+    },
+    "final-optimized-runtime": {
+      "timestamp": "2026-09-22T18:32:03.541590+00:00",
+      "exit": 0,
+      "elapsed_seconds": 248.9077937080001,
+      "command": [
+        "bash",
+        "/tmp/monk-runtime-optimized-gates.sh"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "069d8c65809e22c0ed6ed91ea806c87d501dbd7ffcbf9db140a7f8442bd6353a",
+          "bytes": 27261744
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "5ab94b94d32d3f3a2c86838ba20ada906f300e74bd7812ab43f32f65c7986598",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-optimized-runtime/receipt.json",
+      "receipt_sha256": "beba19c637aaef6723bfc47c489e02ce09f1ec34cf11a983569d3fcf15f9f5be",
+      "full_input_sha256": "d420f86fc524bfb8c2bea19da1ae57fa0a96c60dcd1535e2ed310251ef73a47d",
+      "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63"
+    },
+    "final-optimized-compatibility": {
+      "timestamp": "2026-09-22T18:33:14.769226+00:00",
+      "exit": 1,
+      "elapsed_seconds": 31.54923279200011,
+      "command": [
+        "bash",
+        "/tmp/monk-optimized-compat.sh"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": false,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "bb99e912538d430fbc592b2f019c10f80daf97029bacaf863030bc2cb66d4f0a",
+          "bytes": 74600216
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "fa01326ec4256c5a0bbcfc68db5765cdf707de5c58e5158de73165602e9c2ef9",
+          "bytes": 26469056
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/dzw0qmp8gckn49kday1k8c0gknfkphsn-ghc-shell-for-packages-ghc-9.12.2-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "54ef16816a11e6ca55f2dadd9c05e34b31cc231d1545fe8cb816a22843f91be6",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-optimized-compatibility/receipt.json",
+      "receipt_sha256": "bbc1b8c933e10e1c195f556344eb6cc6621ce69d4f50d4f91e088f57283e0436",
+      "full_input_sha256": "d420f86fc524bfb8c2bea19da1ae57fa0a96c60dcd1535e2ed310251ef73a47d",
+      "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63"
+    },
+    "final-optimized-compatibility-path": {
+      "timestamp": "2026-09-22T18:35:26.409257+00:00",
+      "exit": 0,
+      "elapsed_seconds": 29.440556249999645,
+      "command": [
+        "bash",
+        "/tmp/monk-optimized-compat.sh"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "bb99e912538d430fbc592b2f019c10f80daf97029bacaf863030bc2cb66d4f0a",
+          "bytes": 74600216
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9122-final/build/aarch64-osx/ghc-9.12.2/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "fa01326ec4256c5a0bbcfc68db5765cdf707de5c58e5158de73165602e9c2ef9",
+          "bytes": 26469056
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/dzw0qmp8gckn49kday1k8c0gknfkphsn-ghc-shell-for-packages-ghc-9.12.2-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "91220d295de4f7e2491433fa465b71257a0591adc3da52c86f8e9ee5240c607b",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-optimized-compatibility-path/receipt.json",
+      "receipt_sha256": "a5ad87dd2f8bb8c4748c11de7e99b3e42bf6f562aba07c2d64945b0914a2b168",
+      "full_input_sha256": "d420f86fc524bfb8c2bea19da1ae57fa0a96c60dcd1535e2ed310251ef73a47d",
+      "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63"
+    },
+    "final-optimized-moving": {
+      "timestamp": "2026-09-22T18:33:14.655662+00:00",
+      "exit": 0,
+      "elapsed_seconds": 25.802726750000147,
+      "command": [
+        "bash",
+        "-c",
+        "set -euo pipefail\nghc --version\nfish --version\nbash --version\npython3 runtime-test/native-launcher.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\npython3 runtime-test/direct-output.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\npython3 runtime-test/callback-diagnostics.py '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime' '/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk'\n"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "069d8c65809e22c0ed6ed91ea806c87d501dbd7ffcbf9db140a7f8442bd6353a",
+          "bytes": 27261744
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/8wk68bcp5i5lks85mjcrhq9a9py6y2hl-fish-4.9.3/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "c88fde5cf77a4358c15b1f5fc23dcf11f5f97ce4c715b69a0c36fc17b198a0dc",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-optimized-moving/receipt.json",
+      "receipt_sha256": "6fc332bdb81d6c4a00a6c68b92e992742c530b0e0403c9668ac8d625a9bf17a8",
+      "full_input_sha256": "d420f86fc524bfb8c2bea19da1ae57fa0a96c60dcd1535e2ed310251ef73a47d",
+      "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63"
+    },
+    "final-package-optimized": {
+      "timestamp": "2026-09-22T18:36:35.451588+00:00",
+      "exit": 0,
+      "elapsed_seconds": 125.20232349999787,
+      "command": [
+        "bash",
+        "/tmp/monk-package-optimized.sh"
+      ],
+      "build_inputs_unchanged": true,
+      "production_inputs_unchanged": true,
+      "successful_stable_command": true,
+      "binaries": [
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+          "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+          "bytes": 75682824
+        },
+        {
+          "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+          "sha256": "069d8c65809e22c0ed6ed91ea806c87d501dbd7ffcbf9db140a7f8442bd6353a",
+          "bytes": 27261744
+        }
+      ],
+      "toolchain_paths": {
+        "ghc": "/nix/store/d4zwbbjavljs7lgj4cpvg5g7nph3p2xr-ghc-shell-for-packages-ghc-9.14.1-env/bin/ghc",
+        "cabal": "/nix/store/hh07z6is3hynf3mkl7c34drajlsp67fc-cabal-install-3.16.1.0/bin/cabal",
+        "bash": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+        "fish": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+        "python3": "/nix/store/4l8r0s2r5fna7src82b5fc2hixdvfyw0-python3-3.14.7/bin/python3.14"
+      },
+      "log_sha256": "6b7065ead8a25bfe0622d07d989d92012e04e6bc639564a153fcfb0e1d4d3b82",
+      "receipt_path": ".superpowers/sdd/2026-09-22-portable-exact/final-package-optimized/receipt.json",
+      "receipt_sha256": "a2ac3160339299781907d8435935f9906a811d585426ffc8dfc3a680065c7447",
+      "full_input_sha256": "d420f86fc524bfb8c2bea19da1ae57fa0a96c60dcd1535e2ed310251ef73a47d",
+      "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63"
+    }
+  },
+  "outcomes": {
+    "canonical_main": {
+      "passed": 980,
+      "receipt": "final-optimized-runtime",
+      "whole_command_exit": 0,
+      "native_suites": "all pass",
+      "publication_python": 10,
+      "explicit_skip": "Oversized manual neofetch baseline; Tasty pass accounting does not imply exact execution parity."
+    },
+    "canonical_followup": {
+      "publication": 10,
+      "public_api_probes": 12,
+      "evidence_regressions": 27,
+      "quality": "pass",
+      "receipt": "final-canonical-followup"
+    },
+    "compatibility_ghc9122": {
+      "main_passed": 980,
+      "publication_haskell_passed": 38,
+      "pure_runtime": "pass",
+      "receipt": "final-compatibility-harness",
+      "native_extras_receipt": "final-compatibility-v3",
+      "optimized_runtime_followup": "final-optimized-compatibility-path: runtime rebuild, protocol/portable/launcher/writer/callback33 pass. Initial missing-PATH runner failure retained as wiring error."
+    },
+    "moving_fish493": {
+      "main_passed": 978,
+      "new_harness_regressions_passed": 2,
+      "native_launcher_writer_callbacks": "pass",
+      "receipts": [
+        "final-moving-fish-v3",
+        "final-moving-fish-harness"
+      ],
+      "optimized_runtime_followup": "final-optimized-moving: launcher/writer/callback33 pass"
+    },
+    "haddock_source_distribution": {
+      "receipt": "final-publication-harness",
+      "status": "pass",
+      "scope": "Unpacked source distribution built all components and installed both executables; Unicode-path combined/managed smoke parity passed. Final documentation/test-script archive repack is a separate content bridge."
+    }
+  },
+  "provenance_bridge": {
+    "comparison_production_sha256": "ebad27c97225ecf2306d50dcc671ddbd966b8e8e659c0322f32af258a85c48a1",
+    "final_production_sha256": "6a7a5cbc423fc1e9b20b64f89de58933598ce78c35dad405bc57f6f1cc17b9d5",
+    "changed_production_scanner_paths": [
+      "src/Monk/Internal/Shell.hs"
+    ],
+    "explanation": "Internal/Shell.hs is a test-support module registered only in the test harness. NUL-delimited environment snapshots replaced line parsing; two regression tests prove multiline environment values cannot forge map entries. The production scanner remains conservative. Monk and monk-runtime bytes are exactly unchanged.",
+    "binaries": [
+      {
+        "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk/build/monk/monk",
+        "sha256": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+        "bytes": 75682824
+      },
+      {
+        "path": "/Users/erich/.codex/worktrees/monk-portable-exact/monk/dist-ghc9141/build/aarch64-osx/ghc-9.14.1/monk-0.4.0/x/monk-runtime/build/monk-runtime/monk-runtime",
+        "sha256": "e954672988dba4f260c9bcfb28d12bcc5c502ec826732fb90152516d625c9d91",
+        "bytes": 27265136
+      }
+    ],
+    "full_input_receipts_are_snapshots": true
+  },
+  "acceptance_gaps": [
+    "Helper-free greeting/conditional criterion is unmet: exact output uses the native writer and user-approved pre-Fish launcher.",
+    "Linux x86_64/aarch64 native execution is deferred by the user.",
+    "Minimum macOS14.0 execution is unverified; load-command minimum is inspected on macOS27.",
+    "Original arithmetic3 source inputs are missing; historical hashes retained, no reconstruction.",
+    "Process-launch reduction is unverified without actual tracing.",
+    "Performance gates require the separately recorded complete cohorts; surviving subsets cannot pass."
+  ],
+  "pre_teardown_package": {
+    "derivation": "/nix/store/b3f5224vikzjpa1c6fywmi3k0vchaa0j-monk-runtime-aarch64-darwin.drv",
+    "same_derivation_after_plan_cleanup_and_test_support_change": true,
+    "inspection_and_copied_execution": {
+      "target": "aarch64-darwin",
+      "format": "Mach-O",
+      "architecture": "arm64",
+      "dynamic_dependencies": [
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libiconv.2.dylib",
+        "/usr/lib/libffi.dylib"
+      ],
+      "linkage_verified": true,
+      "execution_verified": true,
+      "sha256": "4dda9b6ef51d3d8da04c16c5319700b721db400c59afde0e2724472188aa9ea7",
+      "bytes": 27439520,
+      "abi": 2,
+      "profile": "bash53-i64",
+      "runtime_description_verified": true,
+      "platform_requirements": {
+        "os": "macOS",
+        "minimum_version": "14.0",
+        "basis": "Mach-O deployment-target load command",
+        "minimum_execution_verified": false,
+        "descriptor_paths": "Process substitution additionally requires usable /dev/fd paths; probed before effects."
+      },
+      "runtime_capabilities": [
+        "argv",
+        "bytes-platform",
+        "child-capture",
+        "child-run",
+        "descriptor-state",
+        "directory",
+        "echo",
+        "exec-site",
+        "expansion",
+        "glob",
+        "integer",
+        "launch",
+        "pattern",
+        "pattern-parts",
+        "pipe-paths",
+        "printf",
+        "session",
+        "split",
+        "write-builtin"
+      ],
+      "inspection_host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+      "execution_checks": [
+        "describe",
+        "protocol",
+        "portable",
+        "printf",
+        "expansion",
+        "session",
+        "descriptors",
+        "read",
+        "process-substitution",
+        "pattern-parts",
+        "exec",
+        "signals",
+        "direct-output",
+        "native-launcher",
+        "child-transport"
+      ]
+    },
+    "archive": {
+      "archive": "artifacts/monk-runtime-aarch64-darwin.tar.gz",
+      "sha256": "65eb8b0c1366a159184eeed8d5c3ee4a40d789773e59dc4a0decb461cba22ab3",
+      "bytes": 5865471,
+      "entries": [
+        "bin/monk-runtime",
+        "share/monk/package-evidence.json",
+        "share/monk/native-execution.json"
+      ],
+      "runtime_sha256": "4dda9b6ef51d3d8da04c16c5319700b721db400c59afde0e2724472188aa9ea7",
+      "content_and_modes_verified": true
+    },
+    "minimum_os_execution": "unverified",
+    "linux_execution": "user deferred; no remote hosts/builders"
+  },
+  "package": {
+    "derivation": "/nix/store/f2m9znv6cf4vkz2qacl843mlfg8wm4xd-monk-runtime-aarch64-darwin.drv",
+    "build_plan": "Only three Monk derivations; dependencies/compiler cached; builders disabled",
+    "receipt": "final-package-optimized",
+    "inspection_and_copied_execution": {
+      "target": "aarch64-darwin",
+      "format": "Mach-O",
+      "architecture": "arm64",
+      "dynamic_dependencies": [
+        "/usr/lib/libSystem.B.dylib",
+        "/usr/lib/libiconv.2.dylib",
+        "/usr/lib/libffi.dylib"
+      ],
+      "linkage_verified": true,
+      "execution_verified": true,
+      "sha256": "76e2ba5b9e2ee3dbc4af5a6a03f3542f0d678c38ea9d0c0fd8c9598a9ffc5ae0",
+      "bytes": 27433632,
+      "abi": 2,
+      "profile": "bash53-i64",
+      "runtime_description_verified": true,
+      "platform_requirements": {
+        "os": "macOS",
+        "minimum_version": "14.0",
+        "basis": "Mach-O deployment-target load command",
+        "minimum_execution_verified": false,
+        "descriptor_paths": "Process substitution additionally requires usable /dev/fd paths; probed before effects."
+      },
+      "runtime_capabilities": [
+        "argv",
+        "bytes-platform",
+        "child-capture",
+        "child-run",
+        "descriptor-state",
+        "directory",
+        "echo",
+        "exec-site",
+        "expansion",
+        "glob",
+        "integer",
+        "launch",
+        "pattern",
+        "pattern-parts",
+        "pipe-paths",
+        "printf",
+        "session",
+        "split",
+        "write-builtin"
+      ],
+      "inspection_host": "macOS-27.0-arm64-arm-64bit-Mach-O",
+      "execution_checks": [
+        "describe",
+        "protocol",
+        "portable",
+        "printf",
+        "expansion",
+        "session",
+        "descriptors",
+        "read",
+        "process-substitution",
+        "pattern-parts",
+        "exec",
+        "signals",
+        "direct-output",
+        "native-launcher",
+        "child-transport"
+      ]
+    },
+    "archive": {
+      "archive": "artifacts/monk-runtime-aarch64-darwin-optimized.tar.gz",
+      "sha256": "49571f0db325aab4dc79168d38816b5d7183e7b76f8835803f6099b59b1a61ad",
+      "bytes": 5864158,
+      "entries": [
+        "bin/monk-runtime",
+        "share/monk/package-evidence.json",
+        "share/monk/native-execution.json"
+      ],
+      "runtime_sha256": "76e2ba5b9e2ee3dbc4af5a6a03f3542f0d678c38ea9d0c0fd8c9598a9ffc5ae0",
+      "content_and_modes_verified": true,
+      "pre_teardown_archive_retained": "artifacts/monk-runtime-aarch64-darwin.tar.gz"
+    },
+    "minimum_os_execution": "unverified",
+    "linux_execution": "user deferred; no remote hosts/builders"
+  },
+  "pre_teardown_performance": {
+    "report": "docs/evidence/portable-exact-performance-final-2026-09-22.json",
+    "cohorts": {
+      "common16": {
+        "status": "unverified",
+        "unavailable": [
+          "benchmark/fixtures/small.bash",
+          "test/fixtures/integration/stdout-stderr-exit.bash"
+        ],
+        "expected": 16,
+        "measured": 14
+      },
+      "arithmetic3": {
+        "status": "unverified",
+        "unavailable": [
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-add.bash",
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-multiply.bash",
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-mixed.bash"
+        ],
+        "expected": 3,
+        "measured": 0
+      },
+      "targeted-native": {
+        "status": "unverified",
+        "unavailable": [
+          "performance/field-splitting.bash",
+          "performance/escaped-echo.bash",
+          "performance/composed-words.bash",
+          "performance/checked-printf.bash"
+        ],
+        "expected": 4,
+        "measured": 0
+      }
+    },
+    "surviving_subset": {
+      "scope": "Surviving common14 subset only; not the common16 acceptance gate",
+      "fixtures": 14,
+      "median_sum_ns": {
+        "baseline": 154864293.0,
+        "candidate": 1013566039.0
+      },
+      "candidate_over_baseline": 6.5448659556402715,
+      "observed_regression": true
+    },
+    "process_launches": {
+      "status": "unverified",
+      "reason": "No process tracing collected; static call counts are not launches."
+    },
+    "all_build_and_test_jobs_idle_during_measurement": true
+  },
+  "pre_teardown_canonical_outcome": {
+    "passed": 980,
+    "receipt": "final-canonical-harness",
+    "whole_command_exit": 1,
+    "failure": "Only obsolete literal-output publication expectation; main980 and all preceding native suites passed.",
+    "explicit_skip": "Oversized manual neofetch baseline; Tasty pass accounting does not imply its exact execution parity."
+  },
+  "runtime_optimization": {
+    "scope": "Leaf describe and direct writer complete output, and launcher after bracket cleanup, terminate without ordinary RTS teardown. Generic session/async/process primitive paths unchanged.",
+    "production_sha256": "15f89a7328f7ed21582ef002376ea1f3158902e1cfb2d13b82c4c566d4452c63",
+    "canonical_runtime_sha256": "069d8c65809e22c0ed6ed91ea806c87d501dbd7ffcbf9db140a7f8442bd6353a",
+    "compiler_sha256_unchanged": "6eb7373b7cc7d632aa01826ea6d629493d58b9fc85941b39f73987545c6434f4",
+    "new_regressions": "Partially consumed large output preserves SIGPIPE; describe preserves flushed output. Existing launcher cleanup/background/stdios tests pass.",
+    "fresh_comparisons": [
+      "docs/evidence/portable-exact-comparison-optimized-default-2026-09-22.json",
+      "docs/evidence/portable-exact-comparison-optimized-stable-2026-09-22.json"
+    ]
+  },
+  "performance": {
+    "report": "docs/evidence/portable-exact-performance-optimized-2026-09-22.json",
+    "cohorts": {
+      "common16": {
+        "status": "unverified",
+        "unavailable": [
+          "benchmark/fixtures/small.bash",
+          "test/fixtures/integration/stdout-stderr-exit.bash"
+        ],
+        "expected": 16,
+        "measured": 14
+      },
+      "arithmetic3": {
+        "status": "unverified",
+        "unavailable": [
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-add.bash",
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-multiply.bash",
+          ".superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/arithmetic-mixed.bash"
+        ],
+        "expected": 3,
+        "measured": 0
+      },
+      "targeted-native": {
+        "status": "unverified",
+        "unavailable": [
+          "performance/field-splitting.bash",
+          "performance/escaped-echo.bash",
+          "performance/composed-words.bash",
+          "performance/checked-printf.bash"
+        ],
+        "expected": 4,
+        "measured": 0
+      }
+    },
+    "surviving_subset": {
+      "scope": "Surviving common14 subset, not fullcommon16 acceptance",
+      "fixtures": 14,
+      "median_sum_ns": {
+        "baseline": 171475565.0,
+        "candidate": 621447312.5
+      },
+      "candidate_over_baseline": 3.624115847059609,
+      "observed_regression": true
+    },
+    "process_launches": {
+      "status": "unverified",
+      "reason": "No process tracing collected; static call counts are not launches."
+    },
+    "all_build_and_test_jobs_idle_during_measurement": true,
+    "candidate_median_reduction_from_pre_teardown": 0.38687042719670284,
+    "acceptance": "Performance is not accepted: substantial measured subset regression; complete cohorts and launch reduction remain unverified."
+  }
+}

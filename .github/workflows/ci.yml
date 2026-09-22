@@ -9,83 +9,166 @@ on:
     - cron: '0 0 * * 0'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  DEVENV_NIXPKGS_REV: 44a91898084f46797b5fac650c7e8c9ac38c43d4
+  LC_ALL: C
+  LANG: C
+  NIX_CONFIG: |
+    extra-substituters = https://cache.iog.io
+    extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+
 jobs:
   quality:
-    name: Pinned lint and formatting tools
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    name: Locked lint and formatting tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
     steps:
     - uses: actions/checkout@v5
-    - uses: haskell-actions/setup@v2.10.1
+    - uses: cachix/install-nix-action@v31
       with:
-        ghc-version: '9.12.2'
-        cabal-version: '3.16.1'
-    - name: Bootstrap tools independently of the project
-      run: |
-        cabal update
-        cabal install hlint-3.10 ormolu-0.9.0.0 --ignore-project --installdir="$HOME/.local/bin"
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-    - run: hlint .
-    - run: git ls-files '*.hs' -z | xargs -0 ormolu --mode check
-    - run: cabal check
+        extra_nix_config: |
+          extra-substituters = https://cache.iog.io
+          extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+    - name: Install pinned standalone devenv
+      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - run: devenv shell -- monk-quality
 
   acceptance:
-    name: GHC ${{ matrix.ghc }} / Fish ${{ matrix.fish }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+    name: ${{ matrix.compiler }} / Fish ${{ matrix.fish }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        ghc: ['9.12.2', '9.14.1']
+        compiler: [ghc9141, ghc9122]
         fish: [pinned, moving]
-    env:
-      LC_ALL: C
-      LANG: C
-      MONK_INTEGRATION: '1'
     steps:
     - uses: actions/checkout@v5
-    - uses: haskell-actions/setup@v2.10.1
-      id: haskell
+    - uses: cachix/install-nix-action@v31
       with:
-        ghc-version: ${{ matrix.ghc }}
-        cabal-version: '3.16.1'
-    - uses: actions/cache@v5
-      with:
-        path: ${{ steps.haskell.outputs.cabal-store }}
-        key: cabal-${{ runner.os }}-${{ matrix.ghc }}-${{ hashFiles('monk.cabal') }}
-        restore-keys: cabal-${{ runner.os }}-${{ matrix.ghc }}-
-    - name: Install and identify execution profile
-      run: bash scripts/install-ci-runtimes.sh "$RUNNER_TEMP/monk-runtime" '${{ matrix.fish }}'
-    - name: Resolve dependencies
+        extra_nix_config: |
+          extra-substituters = https://cache.iog.io
+          extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+    - name: Install pinned standalone devenv
+      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - name: Identify the locked execution profile
       run: |
-        cabal update
-        cabal configure -fdevelopment --enable-tests --enable-benchmarks --test-show-details=direct
-        cabal freeze
-    - run: cabal build all -fdevelopment
-    - name: Expose the matching native runtime
-      run: echo "$(dirname "$(cabal list-bin exe:monk-runtime)")" >> "$GITHUB_PATH"
-    - run: timeout 20m cabal test all -fdevelopment
-    - name: Native byte protocol, child transport, and publication
+        devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
+        set -euo pipefail
+        mkdir -p artifacts
+        {
+          ghc --numeric-version
+          cabal --numeric-version
+          bash --noprofile --norc --version
+          fish --no-config --version
+          uname -a
+          sha256sum devenv.lock cabal.project
+        } > artifacts/runtime-evidence.txt
+        python3 scripts/reference-runtime-profile.py > artifacts/reference-profile.json
+        cabal build all --dry-run --offline
+        SCRIPT
+    - name: Build, integrate, and check native protocol/publication/API boundaries
+      run: devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- monk-integration
+    - name: Linux execution selectors and fixture admission manifest
       run: |
-        python3 runtime-test/protocol.py "$(cabal list-bin exe:monk-runtime)"
-        bash test/native/child-transport.sh "$(cabal list-bin exe:monk-runtime)"
-        MONK_NATIVE_TEST_BINARY="$(cabal list-bin exe:monk)" MONK_NATIVE_RUNTIME="$(cabal list-bin exe:monk-runtime)" python3 scripts/test_native_publication.py
-    - name: Verify public abstraction boundaries with a positive control
-      run: cabal exec -- python3 scripts/check-public-boundaries.py --report artifacts/public-boundaries.json
-    - name: Linux execution and rejection selectors
-      run: timeout 5m cabal test monk-test -fdevelopment --test-options="-p '/procsub-output/ || /Planned child isolation/'"
-    - name: Fixture syntax and admission manifest
-      run: bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity-manifest.tsv
-    - name: Build Monk API documentation without rebuilding dependency docs
-      run: cabal haddock all -fdevelopment --disable-documentation
+        devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
+        set -euo pipefail
+        export PATH="$(dirname "$(cabal list-bin exe:monk-runtime)"):$PATH"
+        MONK_INTEGRATION=1 timeout 5m cabal test monk-test --test-options="-p '/procsub-output/ || /Planned child isolation/'"
+        bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity-manifest.tsv
+        SCRIPT
+    - name: Build API documentation
+      run: devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- monk-docs
     - name: Unpacked source build and install smoke
-      run: bash scripts/check-source-distribution.sh artifacts/sdist
+      run: devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- monk-sdist
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: acceptance-ghc-${{ matrix.ghc }}-fish-${{ matrix.fish }}
+        name: acceptance-${{ matrix.compiler }}-fish-${{ matrix.fish }}
         path: |
           artifacts/
-          cabal.project.freeze
-          ${{ runner.temp }}/monk-runtime/runtime-evidence.txt
-          ${{ runner.temp }}/monk-runtime/bash-build.log
+          devenv.lock
+          cabal.project
+
+  native-runtime:
+    name: Portable runtime / ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-linux
+            runner: ubuntu-24.04
+          - target: aarch64-linux
+            runner: ubuntu-24.04-arm
+          - target: aarch64-darwin
+            runner: macos-14
+    env:
+      MONK_PACKAGE_TARGET: ${{ matrix.target }}
+    steps:
+    - uses: actions/checkout@v5
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          extra-substituters = https://cache.iog.io
+          extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+    - name: Install pinned standalone devenv
+      run: nix profile add "github:NixOS/nixpkgs/$DEVENV_NIXPKGS_REV#devenv"
+    - name: Inspect the release build plan and cache availability
+      run: |
+        mkdir -p artifacts
+        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.drvPath" > artifacts/package-derivation.json
+        package_drv=$(python3 -c 'import json; print(next(iter(json.load(open("artifacts/package-derivation.json")).values())))')
+        nix build --dry-run --no-link "$package_drv^out" 2>&1 | tee artifacts/package-build-plan.txt
+    - name: Build native artifact and enforce architecture/linkage checks
+      run: |
+        devenv build "outputs.runtime.$MONK_PACKAGE_TARGET" outputs.reference.bash outputs.reference.fish outputs.testPrograms.python outputs.testPrograms.coreutils
+        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.outPath" outputs.reference.bash.outPath outputs.reference.fish.outPath outputs.testPrograms.python.outPath outputs.testPrograms.coreutils.outPath > artifacts/package-paths.json
+        python3 - <<'PY'
+        import json, os, pathlib, shutil
+        paths = json.load(open('artifacts/package-paths.json'))
+        target = os.environ['MONK_PACKAGE_TARGET']
+        shutil.copytree(paths[f'outputs.runtime.{target}.outPath'], 'artifacts/runtime')
+        reference = pathlib.Path('artifacts/reference-bin')
+        reference.mkdir()
+        for command in ['bash', 'fish']:
+            (reference / command).symlink_to(pathlib.Path(paths[f'outputs.reference.{command}.outPath']) / 'bin' / command)
+        for command, package in [('python3', 'python'), ('sha256sum', 'coreutils')]:
+            (reference / command).symlink_to(pathlib.Path(paths[f'outputs.testPrograms.{package}.outPath']) / 'bin' / command)
+        PY
+    - name: Execute copied artifact outside the build shell
+      run: |
+        runtime="$PWD/artifacts/runtime/bin/monk-runtime"
+        reference_path="$PWD/artifacts/reference-bin:/usr/bin:/bin"
+        env -i PATH="$reference_path" LC_ALL=C LANG=C "$runtime" --describe > artifacts/runtime-description.txt
+        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/protocol.py "$runtime"
+        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/portable.py "$runtime"
+        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/printf.py "$runtime"
+        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/expansion.py "$runtime"
+        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/session.py "$runtime"
+        for suite in descriptors read process-substitution pattern-parts exec signals direct-output native-launcher; do
+          env -i PATH="$reference_path" LC_ALL=C LANG=C python3 "runtime-test/$suite.py" "$runtime"
+        done
+        env -i PATH="$reference_path" LC_ALL=C LANG=C bash test/native/child-transport.sh "$runtime"
+        python3 - <<'PY'
+        import json, pathlib
+        evidence = pathlib.Path('artifacts/runtime/share/monk/package-evidence.json')
+        report = json.loads(evidence.read_text())
+        description = pathlib.Path('artifacts/runtime-description.txt').read_text().splitlines()
+        assert len(description) == 3 and description[0] == f"monk-runtime {report['abi']} {report['profile']}"
+        assert description[2] == 'target ' + report['target']
+        report['runtime_description_verified'] = True
+        report['runtime_capabilities'] = description[1].split()
+        report['execution_verified'] = True
+        report['execution_checks'] = ['describe', 'byte-protocol', 'portable-descriptors', 'printf', 'expansion', 'session', 'descriptors', 'read', 'process-substitution', 'pattern-parts', 'exec', 'signals', 'direct-output', 'native-launcher', 'child-transport']
+        pathlib.Path('artifacts/native-execution.json').write_text(json.dumps(report, indent=2) + '\n')
+        PY
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: native-runtime-${{ matrix.target }}
+        path: artifacts/

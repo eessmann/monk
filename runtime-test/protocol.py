@@ -3,7 +3,7 @@
 import os, subprocess, sys
 runtime=sys.argv[1]
 def call(op, frames):
- return subprocess.run([runtime,'--abi','1',op],input=b''.join(x+b'\0' for x in frames),capture_output=True)
+ return subprocess.run([runtime,'--abi','2',op],input=b''.join(x+b'\0' for x in frames),capture_output=True)
 def check(op,frames,out,status=0):
  r=call(op,frames)
  assert (r.returncode,r.stdout)==(status,out),(op,frames,r.returncode,r.stdout,r.stderr,out)
@@ -22,9 +22,9 @@ check('pattern',[b'match',b'ab\xff',b'1',b'a?',b'0',b'\xff'],b'')
 check('pattern',[b'match',b'a',b'0',b'*'],b'',1)
 check('glob',[b'0',b'/definitely-absent-monk/*'],b'/definitely-absent-monk/*\0')
 for op,raw in [('integer',b'add\0' ),('split',b'a'),('pattern',b'a\0x\0b\0'),('argv',b'a\0b\0bad\0')]:
- r=subprocess.run([runtime,'--abi','1',op],input=raw,capture_output=True)
+ r=subprocess.run([runtime,'--abi','2',op],input=raw,capture_output=True)
  assert r.returncode==125,(op,r.returncode,r.stdout)
-r=subprocess.run([runtime,'--abi','2','echo'],capture_output=True)
+r=subprocess.run([runtime,'--abi','1','echo'],capture_output=True)
 assert r.returncode==125
 print('runtime protocol and Bash differential checks passed')
 # Bash supplies the oracle, with inputs passed as byte argv and a fixed script.
@@ -33,7 +33,7 @@ for ifs in [b'',b' ',b':',b' :\t\n',b'\xff']:
  for value in [b'',b' ',b':',b'::',b' a : b: ',b'\xffa\xff\xffz',b'\na\tb  c\n']:
   oracle=subprocess.check_output(['bash','-c','IFS=$1; value=$2; set -- $value; if (( $# )); then printf "%s\\0" "$@"; fi','bash',ifs,value],env=env)
   check('split',[ifs,value],oracle)
-for args in [[b''],[b'-n',b'x'],[b'-e',br'\u1234 \U0001F600'],[b'-e',br'\x4a\0777\0\cxxx'],[b'-e',br'\\c'],[b'-eE',br'\n'],[b'-e',br'\uD800 \U80000000'],[b'\xff']]:
+for args in [[b''],[b'-n',b'x'],[b'-e',br'\u1234 \U0001F600'],[b'-e',br'\x4a\0777\0\cxxx'],[b'-e',br'\\c'],[b'-eE',br'\n'],[b'-e',br'\uD800 \U7FFFFFFF \U80000000 \UFFFFFFFF'],[b'\xff']]:
  oracle=subprocess.check_output(['bash','-c','echo "$@"','bash',*args],env=env)
  check('echo',args,oracle)
 import tempfile
@@ -59,5 +59,11 @@ for mask in range(8):
  def close():
   for fd in range(3):
    if not (mask & (1<<fd)): os.close(fd)
- r=subprocess.run([runtime,'--abi','1','descriptor-state'],capture_output=True,preexec_fn=close)
+ r=subprocess.run([runtime,'--abi','2','descriptor-state'],capture_output=True,preexec_fn=close)
  assert r.returncode==mask,('descriptor-state',mask,r.returncode)
+
+check('bytes-platform',[b'ff61',b'fe62'],(b'\xffa' if sys.platform=='darwin' else b'\xfeb')+b'\0')
+check('bytes-platform',[b'',b''],b'\0')
+for frames in ([b'0',b''],[b'gg',b''],[b'',b'xy'],[b'00']):
+ assert call('bytes-platform',frames).returncode==125,frames
+print('platform byte literal hex validation and native target selection passed')

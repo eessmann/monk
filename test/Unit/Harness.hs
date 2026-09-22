@@ -14,13 +14,17 @@ import Monk.Internal.Fixture
     loadFixtureMetadata,
   )
 import Monk.Internal.Shell
-  ( ShellRunMode (..),
+  ( RunResult (..),
+    Shell (..),
+    ShellRunMode (..),
     ShellRunTimeout (..),
     diffEnv,
     envAddedOrChanged,
     envRemoved,
     prepareEnv,
     readCreateProcessWithTimeout,
+    runShell,
+    shouldRunIntegration,
   )
 import Path (Abs, File, Path, parseRelFile, (</>))
 import Path.IO qualified as PathIO
@@ -59,10 +63,10 @@ unitHarnessTests =
         H.assertBool "expected stdin payload" ("background wait" `T.isInfixOf` fmStdin metadata)
         fmMode metadata @?= ShellRunSource
         fmArgs metadata @?= [],
-      H.testCase "Fixture metadata loader reads Linux process substitution platforms" $ do
+      H.testCase "Fixture metadata loader reads portable process substitution platforms" $ do
         fixturePath <- repoFile "test/fixtures/integration/procsub-output.bash"
         metadata <- loadFixtureMetadata fixturePath
-        fmPlatforms metadata @?= Just ["linux"]
+        fmPlatforms metadata @?= Just ["linux", "darwin"]
         fmPrereqs metadata @?= []
         fmRecursive metadata @?= False,
       H.testCase "Fixture metadata loader reads prereq and recursive sidecars" $ do
@@ -84,6 +88,7 @@ unitHarnessTests =
                 (M.fromList [("KEEP", "same"), ("CHANGE", "new"), ("ADD", "fresh"), ("OLDPWD", "/var"), ("_", "fish")])
         envAddedOrChanged delta @?= M.fromList [("ADD", "fresh"), ("CHANGE", "new")]
         envRemoved delta @?= Set.empty,
+      testGroup "environment snapshots preserve framed values" (map environmentSnapshotCase [ShellBash, ShellFish]),
       H.testCase "shell process runner times out hung commands" $ do
         result <-
           Exception.try
@@ -98,6 +103,22 @@ unitHarnessTests =
           Right _ ->
             H.assertFailure "expected hung shell command to time out"
     ]
+
+environmentSnapshotCase :: Shell -> TestTree
+environmentSnapshotCase shell = H.testCaseSteps (show shell) $ \step -> do
+  readiness <- shouldRunIntegration
+  case readiness of
+    Left reason -> step ("skipped environment snapshot comparison: " <> reason)
+    Right () -> do
+      base <- prepareEnv
+      let multiline = "alpha\nMONK_INTEGRATION=forged\n__MONK_ENV_BEGIN__\nomega=x=y"
+          values = [("MONK_MULTILINE", multiline), ("MONK_EMPTY", ""), ("MONK_EQUALS", "x=y=z"), ("MONK_INTEGRATION", "1")]
+          environment = values <> filter (\(name, _) -> name `elem` ["PATH", "HOME", "TMPDIR", "LC_ALL", "LANG", "XDG_CONFIG_HOME"]) base
+      result <- runShell shell environment "printf 'ordinary\\n__MONK_ENV_BEGIN__\\nlast'"
+      rrStdout result @?= "ordinary\n__MONK_ENV_BEGIN__\nlast"
+      rrStderr result @?= ""
+      forM_ values $ \(name, value) ->
+        M.lookup (toText name) (rrEnv result) @?= Just (toText value)
 
 repoFile :: FilePath -> IO (Path Abs File)
 repoFile rel = do

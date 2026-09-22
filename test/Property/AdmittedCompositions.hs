@@ -12,7 +12,18 @@ import Test.Tasty.QuickCheck as QC
 newtype Program = MkProgram [Step]
   deriving stock (Show)
 
-data Step = Print Text | Split Text | Arithmetic Int Int | Conditional Bool | Fallthrough | FunctionCall Text
+data Step
+  = Print Text
+  | Split Text
+  | Arithmetic Int Int
+  | Conditional Bool
+  | Fallthrough
+  | FunctionCall Text
+  | ArrayPrint [Text]
+  | ReadInput Text
+  | BackgroundExit Int
+  | Group [Step]
+  | Isolated [Step]
   deriving stock (Show)
 
 admittedCompositionTests :: TestTree
@@ -50,7 +61,8 @@ admittedCompositionTests =
                               <> "\nFish: "
                               <> show (observations fish)
                               <> "\nGenerated Fish:\n"
-                              <> toString (renderTranslation result)
+                              <> toString (T.take 16000 (renderTranslation result))
+                              <> "\n[Fish preview bounded to 16000 characters]"
                           )
                       )
                     QCM.assert equal
@@ -61,19 +73,25 @@ admittedCompositionTests =
 genProgram :: QC.Gen Program
 genProgram = do
   count <- QC.chooseInt (1, 5)
-  MkProgram <$> QC.vectorOf count genStep
+  MkProgram <$> QC.vectorOf count (genStep 2)
 
-genStep :: QC.Gen Step
-genStep =
-  QC.oneof
-    [ Print <$> word,
-      Split <$> QC.elements ["", "a:b", "a::b:", ":a", "a b"],
-      Arithmetic <$> QC.chooseInt (-20, 20) <*> QC.chooseInt (1, 9),
-      Conditional <$> QC.arbitrary,
-      pure Fallthrough,
-      FunctionCall <$> word
-    ]
+genStep :: Int -> QC.Gen Step
+genStep depth =
+  QC.frequency
+    ( [ (4, Print <$> word),
+        (2, Split <$> QC.elements ["", "a:b", "a::b:", ":a", "a b"]),
+        (2, Arithmetic <$> QC.chooseInt (-20, 20) <*> QC.chooseInt (1, 9)),
+        (2, Conditional <$> QC.arbitrary),
+        (1, pure Fallthrough),
+        (1, FunctionCall <$> word),
+        (2, ArrayPrint <$> (QC.chooseInt (0, 3) >>= \count -> QC.vectorOf count word)),
+        (2, ReadInput <$> word),
+        (1, BackgroundExit <$> QC.chooseInt (0, 3))
+      ]
+        <> [(2, constructor <$> nested) | depth > 0, constructor <- [Group, Isolated]]
+    )
   where
+    nested = QC.chooseInt (1, 3) >>= \count -> QC.vectorOf count (genStep (depth - 1))
     word = QC.elements ["", "one", "two words", "a:b", "line\nbreak", "literal *"]
 
 shrinkProgram :: Program -> [Program]
@@ -83,6 +101,11 @@ shrinkProgram (MkProgram steps) = [MkProgram values | values <- QC.shrinkList sh
     shrinkStep (Split value) = [Split "" | not (T.null value)]
     shrinkStep (Arithmetic a b) = [Arithmetic x y | (x, y) <- QC.shrink (a, b), y > 0, abs x <= 20, y <= 9]
     shrinkStep (FunctionCall value) = [FunctionCall "" | not (T.null value)]
+    shrinkStep (ArrayPrint values) = [ArrayPrint smaller | smaller <- QC.shrinkList (const [""]) values, smaller /= values]
+    shrinkStep (ReadInput value) = [ReadInput "" | not (T.null value)]
+    shrinkStep (BackgroundExit code) = [BackgroundExit 0 | code /= 0]
+    shrinkStep (Group values) = values <> [Group smaller | smaller <- QC.shrinkList shrinkStep values, not (null smaller)]
+    shrinkStep (Isolated values) = [Isolated smaller | smaller <- QC.shrinkList shrinkStep values, not (null smaller)]
     shrinkStep _ = []
 
 renderProgram :: Program -> Text
@@ -96,5 +119,10 @@ renderStep = \case
   Conditional flag -> "if " <> (if flag then "true" else "false") <> "; then printf 'yes\\n'; else printf 'no\\n'; fi"
   Fallthrough -> "case x in x) printf 'a\\n' ;& y) printf 'b\\n' ;;& x) printf 'c\\n' ;; esac"
   FunctionCall value -> "visit() { local x=" <> quote value <> "; printf '<%s>\\n' \"$x\"; }; visit"
+  ArrayPrint values -> "items=(" <> T.unwords (map quote values) <> "); printf '<%s>\\n' \"${items[@]}\""
+  ReadInput value -> "read -r item <<< " <> quote value <> "; printf '<%s>\\n' \"$item\""
+  BackgroundExit code -> "(exit " <> show code <> ") & task=$!; wait \"$task\"; printf 'job:%s\\n' \"$?\""
+  Group body -> "{ " <> T.intercalate "; " (map renderStep body) <> "; }"
+  Isolated body -> "( " <> T.intercalate "; " (map renderStep body) <> " )"
   where
     quote value = "'" <> T.replace "'" "'\\''" value <> "'"

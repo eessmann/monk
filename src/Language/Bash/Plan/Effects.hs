@@ -3,6 +3,7 @@ module Language.Bash.Plan.Effects
   ( Effects (..),
     statementEffects,
     scalarEffects,
+    wordEffects,
     programVariables,
     closeChildRegion,
     admitPipeline,
@@ -25,15 +26,19 @@ data Effects = MkEffects
     effectExternalEnvironment :: Bool,
     effectMayEnableErrexit :: Bool,
     effectSubstitution :: Bool,
-    effectPipefail :: Bool
+    effectPipefail :: Bool,
+    effectSession :: Bool,
+    effectArrays :: Set Text,
+    effectTraps :: Bool,
+    effectDirectory :: Bool
   }
   deriving stock (Eq, Show)
 
 instance Semigroup Effects where
-  MkEffects ar aw af ae ax as ap <> MkEffects br bw bf be bx bs bp = MkEffects (ar <> br) (aw <> bw) (af <> bf) (ae || be) (ax || bx) (as || bs) (ap || bp)
+  MkEffects ar aw af ae ax as ap aj aa at ad <> MkEffects br bw bf be bx bs bp bj ba bt bd = MkEffects (ar <> br) (aw <> bw) (af <> bf) (ae || be) (ax || bx) (as || bs) (ap || bp) (aj || bj) (aa <> ba) (at || bt) (ad || bd)
 
 instance Monoid Effects where
-  mempty = MkEffects mempty mempty mempty False False False False
+  mempty = MkEffects mempty mempty mempty False False False False False mempty False False
 
 -- | Every scalar touched by the owned program, including function bodies.
 programVariables :: [P.Statement] -> Set Text
@@ -47,10 +52,13 @@ readName name = mempty {effectReads = S.singleton name}
 writeName :: Text -> Effects
 writeName name = mempty {effectWrites = S.singleton name}
 
+arrayName :: Text -> Effects
+arrayName name = mempty {effectArrays = S.singleton name}
+
 statementEffects :: P.Statement -> Effects
 statementEffects (P.Statement _ node) = case node of
   P.Sequence body -> foldMap statementEffects body
-  P.Redirected _ statement -> statementEffects statement
+  P.Redirected redirects statement -> foldMap redirectEffects redirects <> statementEffects statement
   P.AssignmentCommand _ body -> foldMap statementEffects body
   P.DeclarationCommand declarations -> foldMap declarationEffects declarations
   P.Invoke target wordsValue ->
@@ -58,24 +66,29 @@ statementEffects (P.Statement _ node) = case node of
       P.Function name -> mempty {effectFunctions = S.singleton name, effectMayEnableErrexit = True}
       P.Builtin _ -> mempty
       P.External _ -> mempty {effectExternalEnvironment = True}
+  P.PrefixedInvoke assignments target values -> foldMap (\(_, name, scalar) -> writeName name <> scalarEffects scalar) assignments <> statementEffects (P.Statement Nothing (P.Invoke target values))
   P.Assign _ name scalar -> writeName name <> scalarEffects scalar
+  P.AssignArray _ name values -> arrayName name <> writeName name <> foldMap wordEffects values
+  P.AppendArray _ name values -> arrayName name <> readName name <> writeName name <> foldMap wordEffects values
+  P.AssignArrayElement _ name _ scalar -> arrayName name <> writeName name <> scalarEffects scalar
   P.Erase name -> writeName name
   P.SetArguments values -> foldMap wordEffects values
   P.ShiftArguments _ -> mempty
   P.ArithmeticFor initial predicate increment body -> foldMap statementEffects (initial : predicate : increment : body)
-  P.DirectoryOperation operation -> case operation of
-    Directory.PrintDirectory _ -> mempty
-    Directory.ChangeDirectory _ -> writeName "OLDPWD"
-    Directory.ChangePreviousDirectory -> readName "OLDPWD" <> writeName "OLDPWD"
-    Directory.PushDirectory _ -> readName "dirstack" <> writeName "dirstack" <> writeName "OLDPWD"
-    Directory.PopDirectory -> readName "dirstack" <> writeName "dirstack" <> writeName "OLDPWD"
+  P.DirectoryOperation operation ->
+    mempty {effectDirectory = True} <> case operation of
+      Directory.PrintDirectory _ -> mempty
+      Directory.ChangeDirectory _ -> writeName "OLDPWD"
+      Directory.ChangePreviousDirectory -> readName "OLDPWD" <> writeName "OLDPWD"
+      Directory.PushDirectory _ -> readName "dirstack" <> writeName "dirstack" <> writeName "OLDPWD"
+      Directory.PopDirectory -> readName "dirstack" <> writeName "dirstack" <> writeName "OLDPWD"
   P.SetOption option _ -> mempty {effectMayEnableErrexit = option == P.Errexit, effectPipefail = option == P.Pipefail}
   P.And left right -> statementEffects left <> statementEffects right
   P.Or left right -> statementEffects left <> statementEffects right
   P.Negate value -> statementEffects value
   P.Conditional condition yes no -> foldMap statementEffects (condition <> yes <> no)
   P.WhileLoop _ condition body -> foldMap statementEffects (condition <> body)
-  P.ForLoop _ name values body -> writeName name <> foldMap wordEffects values <> foldMap statementEffects body
+  P.ForLoop _ name values body -> (if name == "_" then mempty else writeName name) <> foldMap wordEffects values <> foldMap statementEffects body
   P.Case scalar arms -> scalarEffects scalar <> foldMap (\(P.CaseArm patterns body _) -> foldMap patternEffects patterns <> foldMap statementEffects body) arms
   P.PatternCondition _ scalar patternValue -> scalarEffects scalar <> patternEffects patternValue
   P.NumericCondition _ left right -> scalarEffects left <> scalarEffects right
@@ -84,11 +97,25 @@ statementEffects (P.Statement _ node) = case node of
   P.SourceBody request body -> foldMap wordEffects (P.sourceRequestArguments request) <> foldMap statementEffects body
   P.Subshell child -> childEffects child
   P.Pipeline children -> (foldMap childEffects children) {effectPipefail = True}
+  P.SupervisedPipeline children -> (foldMap childEffects children) {effectPipefail = True, effectSession = True}
+  P.Background child -> (childEffects child) {effectSession = True}
+  P.Wait wordsValue -> (foldMap wordEffects wordsValue) {effectSession = True}
+  P.Read _ target -> (readName "IFS" <> case target of P.ReadReply _ -> writeName "REPLY"; P.ReadScalars names -> foldMap (writeName . snd) names; P.ReadArray _ name -> writeName name <> arrayName name) {effectSession = True}
+  P.PrefixedRead assignments options target -> foldMap (\(_, name, scalar) -> writeName name <> scalarEffects scalar) assignments <> statementEffects (P.Statement Nothing (P.Read options target))
+  P.SetTrap _ body -> (foldMap (foldMap statementEffects) body) {effectSession = True, effectTraps = True, effectMayEnableErrexit = True}
   P.ArithmeticCommand _ expression _ -> arithmeticEffects expression
   P.Return value -> foldMap scalarEffects value
   P.Exit value -> foldMap scalarEffects value
   P.Break -> mempty
   P.Continue -> mempty
+
+redirectEffects :: P.Redirection -> Effects
+redirectEffects = \case
+  P.OpenDescriptor _ _ path -> (scalarEffects path) {effectSession = True}
+  P.InputDescriptor _ input _ -> (scalarEffects input) {effectSession = True}
+  P.DuplicateDescriptor target source _ -> mempty {effectSession = target > 2 || source > 2}
+  P.CloseDescriptor target _ -> mempty {effectSession = target > 2}
+  P.NullDescriptor target _ -> mempty {effectSession = target > 2}
 
 declarationEffects :: P.Declaration -> Effects
 declarationEffects = \case
@@ -101,22 +128,30 @@ wordEffects = \case
   P.SplitFields value -> readName "IFS" <> scalarEffects value
   P.PathnameFields patternValue -> patternEffects patternValue
   P.QuotedArguments before after _ -> scalarEffects before <> scalarEffects after
+  P.QuotedArray name before after _ -> arrayName name <> readName name <> scalarEffects before <> scalarEffects after
+  P.ExpandedWord parts -> readName "IFS" <> foldMap (\case P.QuotedExpansion value -> scalarEffects value; P.LiteralExpansion value -> scalarEffects value; P.SplitExpansion value -> scalarEffects value) parts
 
 scalarEffects :: P.Scalar -> Effects
 scalarEffects = \case
   P.Literal _ -> mempty
   P.ByteLiteral _ -> mempty
+  P.PlatformBytes _ _ -> mempty
   P.AlternateValue name _ value -> readName name <> scalarEffects value
   P.ParameterTransform _ value _ _ -> scalarEffects value
+  P.ParameterPatternTransform _ value patternValue -> scalarEffects value <> patternEffects patternValue
   P.AppendValue name value -> readName name <> scalarEffects value
   P.Variable name -> readName name
+  P.ArrayElement name _ -> arrayName name <> readName name
+  P.ArrayLength name -> arrayName name <> readName name
   P.Positional _ -> mempty
   P.PositionalDefault _ _ value -> scalarEffects value
   P.PositionalAlternate _ _ value -> scalarEffects value
   P.ArgumentCount -> mempty
   P.LastStatus -> mempty
+  P.LastBackgroundPid -> mempty {effectSession = True}
   P.Concat values -> foldMap scalarEffects values
   P.Substitute child -> (childEffects child) {effectSubstitution = True}
+  P.ProcessSubstitution _ child -> (childEffects child) {effectSession = True}
   P.DefaultValue _ name _ assigning value -> readName name <> (if assigning then writeName name else mempty) <> scalarEffects value
   P.ArithmeticValue _ expression _ -> arithmeticEffects expression
 
@@ -126,7 +161,7 @@ patternEffects (P.MkPattern parts) = foldMap (\case P.LiteralPattern scalar -> s
 childEffects :: P.ChildRegion -> Effects
 childEffects child =
   let nested = foldMap statementEffects (P.childStatements child <> concat (M.elems (P.childFunctions child)))
-   in mempty {effectReads = P.childVariables child, effectExternalEnvironment = P.childNeedsEnvironment child, effectMayEnableErrexit = effectMayEnableErrexit nested, effectSubstitution = effectSubstitution nested, effectPipefail = effectPipefail nested}
+   in mempty {effectReads = P.childVariables child, effectExternalEnvironment = P.childNeedsEnvironment child, effectMayEnableErrexit = effectMayEnableErrexit nested, effectSubstitution = effectSubstitution nested, effectPipefail = effectPipefail nested, effectSession = effectSession nested, effectArrays = P.childArrays child, effectTraps = effectTraps nested, effectDirectory = effectDirectory nested}
 
 arithmeticEffects :: A.ArithmeticExpr -> Effects
 arithmeticEffects = \case
@@ -148,7 +183,7 @@ closeChildRegion range available body = do
   let variables = effectReads effects <> effectWrites effects
       unsupported = S.filter specialBinding variables
   unless (S.null unsupported) (Left ("Child snapshot cannot preserve target-special or Bash introspection bindings: " <> T.intercalate ", " (S.toAscList unsupported)))
-  pure (P.MkChildRegion range body functions variables (effectExternalEnvironment effects))
+  pure (P.MkChildRegion range body functions variables (effectArrays effects) (effectExternalEnvironment effects))
   where
     close complete effects pending = case S.minView pending of
       Nothing -> pure (complete, effects)
@@ -193,6 +228,7 @@ mayWriteBuiltin functions = any (writesBuiltin functions)
 writesBuiltin :: Map Text [P.Statement] -> P.Statement -> Bool
 writesBuiltin functions (P.Statement _ node) = case node of
   P.Invoke (P.Builtin name) _ -> name `elem` ["printf", "echo"]
+  P.PrefixedInvoke _ target values -> writesBuiltin functions (P.Statement Nothing (P.Invoke target values))
   P.Invoke (P.Function name) _ -> maybe True (any (writesBuiltin functions)) (M.lookup name functions)
   P.Sequence body -> any (writesBuiltin functions) body
   P.Redirected _ statement -> writesBuiltin functions statement
@@ -208,9 +244,18 @@ writesBuiltin functions (P.Statement _ node) = case node of
   P.SourceBody _ body -> any (writesBuiltin functions) body
   P.Subshell child -> any (writesBuiltin (P.childFunctions child)) (P.childStatements child)
   P.Pipeline children -> let final = last children in any (writesBuiltin (P.childFunctions final)) (P.childStatements final)
+  P.SupervisedPipeline children -> let final = last children in any (writesBuiltin (P.childFunctions final)) (P.childStatements final)
+  P.Background _ -> False
+  P.Wait _ -> False
+  P.Read {} -> False
+  P.PrefixedRead {} -> False
+  P.SetTrap {} -> False
   P.Invoke (P.External _) _ -> False
   P.DeclarationCommand {} -> False
   P.Assign {} -> False
+  P.AssignArray {} -> False
+  P.AppendArray {} -> False
+  P.AssignArrayElement {} -> False
   P.Erase {} -> False
   P.SetArguments {} -> False
   P.ShiftArguments {} -> False

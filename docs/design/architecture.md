@@ -20,8 +20,10 @@ prototype branches preserve their history.
 
 Normalization owns quotation, field cardinality, evaluation regions, command
 identity, finite flow facts, storage decisions, and control/execution boundaries.
-It produces a private plan without executable ShellCheck tokens. Literal source
-discovery must resume normalization with immutable dependency input because a
+It produces a private plan without executable ShellCheck tokens. Literal or
+flow-proved eval text is parsed during translation and re-enters this normalizer;
+no generated program invokes Bash eval. Literal source
+discovery resumes normalization with immutable dependency input because a
 source can change later variable and function resolution. A separate syntax
 walker or a spelling-keyed output rewrite cannot establish those effects.
 
@@ -53,7 +55,8 @@ input returns diagnostics without executable output.
 
 `TranslationResult` is opaque, with ordinary inspection functions
 `translationScript`, `translationDiagnostics`, and
-`translationRuntimeRequirements`. Private record labels prevent record-update
+`translationRuntimeRequirements`, `translationExecutionStrategy`, and
+`translationStatistics`. Private record labels prevent record-update
 forgery. The same ownership rule applies to the source graph and output bundle. General Fish DSL construction remains available;
 a user-built `Script` is not a certified translation.
 
@@ -76,7 +79,67 @@ An owned source-body function isolates `return` while preserving incoming and
 final status, explicit arguments, exports and admitted caller-local updates.
 Internal Bash source calls forward inherited argv explicitly. Repeated source
 occurrences execute repeatedly even when their immutable parse input is reused.
+Each occurrence also retains Bash's diagnostic filename spelling independently
+of canonical graph identity. Explicit relative and symlink operands stay lexical;
+PATH lookup retains the selected entry spelling. Runtime statement and arithmetic
+locations use that origin, while snapshots, cycle checks and function identities
+continue to use canonical parser positions.
 Discovery uses declared cwd/PATH/search state, independently of output paths.
+
+## Native and supervised execution
+
+Direct printf/echo output has one shared framed native writer boundary to
+preserve initially closed stdout, errno diagnostics and actual SIGPIPE. Scalar
+operands and control remain native Fish; one helper-local result slot owns
+writer status. Silent scalar/control bodies can still require no primitive helper.
+The originally planned helper-free greeting conflicts with these demonstrated
+I/O semantics; exactness takes precedence without narrowing the input contract.
+
+The canonical standalone entry is `monk-runtime --abi 2 launch FILE [ARGS...]`.
+It records descriptor presence before Fish startup and restores closed streams
+around the compiled body. This entry is distinct from semantic supervision:
+DirectExecution still has native Fish control and no session owner. Private
+launch markers preserve the original file identity and do not enter user
+external environments. Sourceable entry retains its explicit caller contract.
+
+The same semantic plan selects `DirectExecution` or `SupervisedExecution` from
+its materialized runtime requirements. Direct output uses native Fish for
+proved scalar commands and control flow, with bounded byte/integer primitives
+where needed. Supervised output gives the native owner responsibility for
+background jobs, wait/status, streaming process endpoints, native read and
+ordered user descriptor scopes. This is one Fish code generator with explicit
+runtime operations, not a second Bash interpreter.
+
+`Session` materializes framed requests and private replies. The runtime owns
+virtual user descriptors, launches executable or already generated Fish child
+regions, and observes process termination. C launch actions are prepared before
+creating a child; ordinary foreground launches use POSIX spawn, while ignored
+asynchronous INT/QUIT requires a bounded C-only fork/exec path. No GHC code runs
+between fork and exec. Separate
+control transport carries scalars, dense array vectors, argv and definition
+closures without reusing script stdin. Ordinary child script/state transport
+uses an owned private capsule with independent file offsets. Process
+substitution instead uses real streaming pipes and a checked pipe-descriptor
+pathname capability; it never buffers producer data into a temporary file.
+
+Dense indexed arrays have typed assignment, append, index-zero/scalar update,
+read/count and quoted-splice operations. Normalization keeps array identity
+separate from known length. A runtime-sized dense read result retains unknown
+length through append and index-zero writes; it cannot prove arbitrary indexed
+writes safe. Child snapshots frame presence, count and every element separately.
+
+`Traps` materializes deferred EXIT/ERR bodies from compile-time parsed literal
+handlers. Registration does not freeze scalar values. ERR effects invalidate
+subsequent flow facts, and handler execution preserves the owning status and
+redirection region. Unsupported asynchronous handlers and unproved callback
+control transfers remain outside admission. See the [semantic audit](translator-audit.md)
+for the exact frontend restrictions.
+
+ABI 2 separates the `bash53-i64` shell profile from the native target and typed
+capabilities. The declared native targets are x86_64 Linux, aarch64 Linux and
+Apple Silicon Darwin. Native image selection checks the actual target;
+publication does not make an executable portable across operating systems.
+Local Darwin tests and unexecuted Linux matrix jobs remain distinct evidence.
 
 ## Structural Fish and publication
 
@@ -123,7 +186,7 @@ boundary. `Binding` owns scalar presence, logical export attributes and the
 inherited exported environment of unset locals. Ordinary assignments,
 declarations, arithmetic updates, external dispatch and child snapshots consume
 that ownership. These are runtime state values, not analysis receipts.
-`Child`, `ArithmeticPlan` and `Pattern` implement bounded operations. All helpers
+`Child`, `Session`, `Traps`, `ArithmeticPlan` and `Pattern` implement bounded operations. All helpers
 consume structured operands; source expression strings are never interpreted.
 
 `compileSourceBundle` collects source-wrapper definitions into immutable member
@@ -164,14 +227,15 @@ assumptions, not claims that a runtime check can prevent ancestor renames.
 Owned children inherit cwd and serialize their own stack through the existing
 snapshot boundary; child changes do not alter the parent's directory state.
 
-The bounded Linux directory envelope limits each UTF-8 path component to 255
+The lexical directory envelope limits each UTF-8 path component to 255
 bytes and the operand to 4095 bytes. These are lexical admission limits, not
 filesystem existence checks. Longer operands reject because Fish can emit its
 ENAMETOOLONG diagnostic outside the builtin stderr stream that the parent
 operation captures. Control-byte and non-ASCII operands within the envelope
 use Bash ANSI-C diagnostic quoting.
 
-The resolved logical directory path must also remain shorter than 4096 bytes.
+The resolved logical directory path must also fit the runtime target: at most
+1023 bytes on Darwin and 4095 bytes on Linux.
 A pure lexical runtime check enforces that obligation before parent cd, using
 the actual PWD and operand; a violation returns/exits with status 125 before
 the attempted directory operation. This guard performs no filesystem target

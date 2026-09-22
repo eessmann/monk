@@ -13,6 +13,7 @@ import ShellSupport (prepareEnv, shouldRunIntegration)
 import System.Directory (createDirectory, createDirectoryLink, doesDirectoryExist)
 import System.Exit (ExitCode (ExitFailure))
 import System.FilePath ((</>))
+import System.Info (os)
 import System.Process (CreateProcess (cwd, env), proc, readCreateProcessWithExitCode)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit qualified as H
@@ -32,6 +33,16 @@ unitPlannedDirectoryTests =
         rejection "CDPATH mutation rejects" standalone "CDPATH=/tmp; cd /",
         rejection "unknown cd previous path rejects" standalone "cd -",
         rejection "read-only cwd contract cannot change cwd" (sourceable {callerContract = fullCaller {callerDirectory = Just (MkDirectoryPermissions ReadDirectory ReadDirectory NoDirectoryAccess NoDirectoryAccess)}}) "cd /tmp",
+        exact Standalone "supervised logical pwd redirection" "pwd >'__SPACE__/out'; cat '__SPACE__/out'",
+        exact Standalone "supervised physical pwd redirection" "pwd -P >'__SPACE__/out'; cat '__SPACE__/out'",
+        exact Standalone "supervised cd diagnostic redirection" "cd /monk-directory-does-not-exist 2>'__SPACE__/out'; printf 'status:%s\\n' \"$?\"; cat '__SPACE__/out'",
+        exact Standalone "supervised popd diagnostic redirection" "popd 2>'__SPACE__/out'; printf 'status:%s\\n' \"$?\"; cat '__SPACE__/out'",
+        exact Standalone "supervised cd previous output redirection" "cd /tmp && cd - >'__SPACE__/out'; cat '__SPACE__/out'; pwd",
+        exact Standalone "supervised stack output redirection" "{ pushd /tmp; pushd /; popd; popd; } >'__SPACE__/out'; cat '__SPACE__/out'; pwd",
+        exact Standalone "supervised owned function directory output" "f(){ pwd; }; f >'__SPACE__/out'; cat '__SPACE__/out'",
+        exact Standalone "supervised closed cd diagnostics" "read x <<<'input'; cd /monk-directory-does-not-exist 2>&-; printf 'status:%s\\n' \"$?\"",
+        rejection "directory and callback signal state remains excluded" standalone "trap 'printf done' EXIT; pwd",
+        rejection "function closure directory callback state remains excluded" standalone "f(){ pwd; }; trap 'printf done' ERR; f",
         sourceEdges,
         callerStackBridge,
         permissionsMatrix,
@@ -252,11 +263,12 @@ resolvedPathBound mode = H.testCaseSteps (show mode) $ \step -> do
           fishPath = directory </> "input.fish"
           caller = fullCaller {callerFunctions = mempty, callerFunctionDirectories = mempty}
           config = if mode == Standalone then standalone else sourceable {callerContract = caller}
+          boundary = if os == "darwin" then 1018 else 4090
           grow path = do
-            let suffixLength = if length path >= 3880 then 4090 - length path - 1 else 200
+            let suffixLength = min 200 (boundary - length path - 1)
                 next = path </> replicate suffixLength 'x'
             createDirectory next
-            if length next == 4090 then pure next else grow next
+            if length next == boundary then pure next else grow next
       deep <- grow directory
       result <- translateBashScript config "path-bound.bash" "cd missing-directory; printf unreachable"
       translated <- either (\failure -> H.assertFailure (show failure) >> error "unreachable") pure result
@@ -266,7 +278,7 @@ resolvedPathBound mode = H.testCaseSteps (show mode) $ \step -> do
       (status, output, errors) <- readCreateProcessWithExitCode ((proc "fish" ("--no-config" : arguments)) {env = Just environment, cwd = Just deep}) ""
       H.assertEqual "contract violation status" (ExitFailure 125) status
       H.assertEqual "no body effect" "" output
-      H.assertBool "lexical bound fails before parent cd diagnostic" ("resolved logical directory path exceeds 4095 bytes" `T.isInfixOf` toText errors && not ("cd:" `T.isInfixOf` toText errors))
+      H.assertBool "lexical bound fails before parent cd diagnostic" ("resolved logical directory path exceeds the platform limit" `T.isInfixOf` toText errors && not ("cd:" `T.isInfixOf` toText errors))
 
 importedOldpwdInvalidatesPrevious :: TestTree
 importedOldpwdInvalidatesPrevious = H.testCase "declared imported OLDPWD write invalidates previous-directory proof" $ do

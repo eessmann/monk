@@ -40,6 +40,6 @@ framedPrimitive helper program inputs continuations =
         False
         []
         (Stmt (Decorated DecBuiltin (Command "printf" (map ExprVal (ExprLiteral "%s\\0" : inputs)))))
-        (PipeTo [] (Stmt (Command helper (map (ExprVal . ExprLiteral) ["--abi", "1", program]))) : continuations)
+        (PipeTo [] (Stmt (Command helper (map (ExprVal . ExprLiteral) ["--abi", "2", program]))) : continuations)
         False
     )

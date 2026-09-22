@@ -7,7 +7,13 @@ module Language.Bash.Plan
     StatementNode (..),
     Declaration (..),
     Redirection (..),
+    DescriptorMode (..),
+    ReadOptions (..),
+    ReadTarget (..),
+    TrapKind (..),
+    ProcessDirection (..),
     Word (..),
+    ExpansionPart (..),
     guaranteesField,
     Scalar (..),
     Pattern (..),
@@ -43,7 +49,11 @@ data StatementNode
   | DeclarationCommand [Declaration]
   | Redirected [Redirection] Statement
   | Invoke CallTarget [Word]
+  | PrefixedInvoke [(Storage, Text, Scalar)] CallTarget [Word]
   | Assign Storage Text Scalar
+  | AssignArray Storage Text [Word]
+  | AppendArray Storage Text [Word]
+  | AssignArrayElement Storage Text Int Scalar
   | Erase Text
   | SetArguments [Word]
   | DirectoryOperation DirectoryOperation
@@ -64,6 +74,12 @@ data StatementNode
   | SourceBody SourceRequest [Statement]
   | Subshell ChildRegion
   | Pipeline (NonEmpty ChildRegion)
+  | SupervisedPipeline (NonEmpty ChildRegion)
+  | Background ChildRegion
+  | Wait [Word]
+  | Read ReadOptions ReadTarget
+  | PrefixedRead [(Storage, Text, Scalar)] ReadOptions ReadTarget
+  | SetTrap TrapKind (Maybe [Statement])
   | ArithmeticCommand ArithmeticSite ArithmeticExpr (Map Text Storage)
   | Return (Maybe Scalar)
   | Exit (Maybe Scalar)
@@ -82,6 +98,28 @@ data Redirection
   = DuplicateDescriptor Int Int Bool
   | CloseDescriptor Int Bool
   | NullDescriptor Int Bool
+  | OpenDescriptor Int DescriptorMode Scalar
+  | InputDescriptor Int Scalar Bool
+  deriving stock (Show, Eq)
+
+data DescriptorMode = ReadFile | WriteFile | AppendFile | ReadWriteFile
+  deriving stock (Show, Eq)
+
+data ProcessDirection = ProcessInput | ProcessOutput
+  deriving stock (Show, Eq)
+
+data TrapKind = ExitTrap | ErrTrap
+  deriving stock (Show, Eq)
+
+data ReadOptions = ReadOptions
+  { readRaw :: Bool,
+    readDelimiter :: Text,
+    readCount :: Maybe Int,
+    readDescriptor :: Int
+  }
+  deriving stock (Show, Eq)
+
+data ReadTarget = ReadReply Storage | ReadScalars [(Storage, Text)] | ReadArray Storage Text
   deriving stock (Show, Eq)
 
 data Storage = Global | Visible | Local | CallerGlobal BindingExport | CallerVisible BindingExport
@@ -98,6 +136,11 @@ data Word
   | SplitFields Scalar
   | PathnameFields Pattern
   | QuotedArguments Scalar Scalar Bool
+  | QuotedArray Text Scalar Scalar Bool
+  | ExpandedWord [ExpansionPart]
+  deriving stock (Show, Eq)
+
+data ExpansionPart = QuotedExpansion Scalar | LiteralExpansion Scalar | SplitExpansion Scalar
   deriving stock (Show, Eq)
 
 -- | The admitted glob envelope has a literal no-match fallback. Other list
@@ -107,23 +150,31 @@ guaranteesField = \case
   OneField _ -> True
   PathnameFields _ -> True
   QuotedArguments _ _ True -> True
+  QuotedArray _ _ _ True -> True
+  ExpandedWord parts -> any (\case QuotedExpansion _ -> True; LiteralExpansion (Literal text) -> text /= ""; _ -> False) parts
   _ -> False
 
 data Scalar
   = Literal Text
   | Variable Text
+  | ArrayElement Text Int
+  | ArrayLength Text
   | Positional Int
   | PositionalDefault Int Bool Scalar
   | PositionalAlternate Int Bool Scalar
   | ArgumentCount
   | LastStatus
+  | LastBackgroundPid
   | Concat [Scalar]
   | Substitute ChildRegion
+  | ProcessSubstitution ProcessDirection ChildRegion
   | DefaultValue Storage Text Bool Bool Scalar
   | AlternateValue Text Bool Scalar
   | ParameterTransform Text Scalar Text Text
+  | ParameterPatternTransform Text Scalar Pattern
   | AppendValue Text Scalar
   | ByteLiteral ByteString
+  | PlatformBytes ByteString ByteString
   | ArithmeticValue ArithmeticSite ArithmeticExpr (Map Text Storage)
   deriving stock (Show, Eq)
 
@@ -143,6 +194,7 @@ data ChildRegion = MkChildRegion
     childStatements :: [Statement],
     childFunctions :: Map Text [Statement],
     childVariables :: Set Text,
+    childArrays :: Set Text,
     childNeedsEnvironment :: Bool
   }
   deriving stock (Show, Eq)
@@ -169,6 +221,7 @@ data SourceEntryContext = SourceEntryContext
   { sourceEntryDefinitions :: Map Text (Text, Int),
     sourceEntryVariables :: Set Text,
     sourceEntryConstants :: Map Text Text,
+    sourceEntryArrays :: Map Text Int,
     sourceEntryLocals :: Set Text,
     sourceEntryNumericVariables :: Set Text,
     sourceEntryDirectoryFacts :: DirectoryFacts

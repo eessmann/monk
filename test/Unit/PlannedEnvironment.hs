@@ -7,6 +7,7 @@ where
 
 import Data.List (isInfixOf)
 import Data.List.NonEmpty qualified as NonEmpty
+import Data.Set qualified as Set
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
 import Monk.Translation
@@ -62,20 +63,23 @@ unitPlannedEnvironmentTests =
             "non-scalar binding x",
           hostileBindingCase
             "a private function collision is rejected before user effects"
-            "printf 'effect\\n'"
+            "echo -e 'effect\\n'"
             "function __monk_plan_0_collision; true; end"
             "private function namespace is occupied",
           hostileBindingCase
             "a private variable collision is rejected before user effects"
-            "printf 'effect\\n'"
+            "echo -e 'effect\\n'"
             "set --global __monk_plan_0_collision occupied"
             "private variable namespace is occupied",
           sourceablePrivateCollisionCase,
+          testGroup "sourceable launch marker guards" [sourceableLaunchMarkerCase name deferred | name <- ["MONK_LAUNCH_ORIGINAL", "MONK_LAUNCH_WRAPPER"], deferred <- [False, True]],
           ambientCaptureLimitCase,
+          sourceableCaptureLimitCase,
           exportedScalarCase,
           unrelatedHostileBindingCase
         ],
-      testGroup "reserved target bindings" (map reservedBindingCase ["argv", "PWD", "SHLVL", "_", "fish_read_limit"])
+      testGroup "reserved target bindings" (map reservedBindingCase ["argv", "PWD", "SHLVL", "_", "fish_read_limit"]),
+      testGroup "reserved launch metadata" [launchBindingCase name source | name <- ["MONK_LAUNCH_ORIGINAL", "MONK_LAUNCH_WRAPPER"], source <- [name <> "=changed", "printf '%s' \"$" <> name <> "\""]]
     ]
 
 hostileBindingCase :: String -> Text -> Text -> Text -> TestTree
@@ -110,6 +114,24 @@ sourceablePrivateCollisionCase = H.testCaseSteps "sourceable entry retains the p
       H.assertBool "missing stable caller contract prefix" ("monk: caller contract failed:" `isInfixOf` processStderr result)
       H.assertBool "missing private-variable detail" ("private variable namespace is occupied" `isInfixOf` processStderr result)
 
+sourceableLaunchMarkerCase :: Text -> Bool -> TestTree
+sourceableLaunchMarkerCase name deferred = H.testCaseSteps (T.unpack name <> if deferred then " at deferred call" else " at source entry") $ \step -> do
+  readiness <- shouldRunIntegration
+  case readiness of
+    Left reason -> step ("skipped: " <> reason)
+    Right () -> withIsolatedFishConfig config source $ \path environment -> do
+      result <- runFish environment script path
+      H.assertEqual "reserved ambient marker rejected" (ExitFailure 125) (processExit result)
+      H.assertEqual "caller resumes without user effects" "caller:125\n" (processStdout result)
+      H.assertBool "missing caller contract diagnostic" ("monk: caller contract failed:" `isInfixOf` processStderr result)
+      H.assertBool "missing reserved marker detail" ("reserved launcher metadata" `isInfixOf` processStderr result)
+  where
+    config = sourceableConfig {callerContract = (callerContract sourceableConfig) {callerExportedFunctions = if deferred then Set.singleton "f" else Set.empty}}
+    source = if deferred then "f() { printf effect; command env; }" else "printf effect; command env"
+    marker = "set --global --export " <> name <> " ambient\n"
+    enter = "source \"$argv[1]\"\n"
+    script = (if deferred then enter <> marker <> "f\n" else marker <> enter) <> "set --local code $status\nprintf 'caller:%s\\n' \"$code\"\nexit $code"
+
 ambientCaptureLimitCase :: TestTree
 ambientCaptureLimitCase = H.testCaseSteps "owned field capture ignores an ambient low Fish capture limit" $ \step -> do
   readiness <- shouldRunIntegration
@@ -118,6 +140,22 @@ ambientCaptureLimitCase = H.testCaseSteps "owned field capture ignores an ambien
     Right () -> withIsolatedFish "x=abc; printf '%s\\n' $x" $ \path environment -> do
       result <- runFish environment "set --global fish_read_limit 1\nsource \"$argv[1]\"" path
       H.assertEqual "owned capture status/stdout/stderr" (ExitSuccess, "abc\n", "") result
+
+sourceableCaptureLimitCase :: TestTree
+sourceableCaptureLimitCase = H.testCaseSteps "sourceable runtime setup preserves the caller capture limit" $ \step -> do
+  readiness <- shouldRunIntegration
+  case readiness of
+    Left reason -> step ("skipped: " <> reason)
+    Right () -> withIsolatedFishConfig sourceableConfig "printf 'effect\\n'" $ \path environment -> do
+      result <- runFish environment "set --global fish_read_limit 1\nsource \"$argv[1]\"\nset code $status\nprintf 'limit:%s\\n' \"$fish_read_limit\"\nexit $code" path
+      H.assertEqual "source output and restored caller limit" (ExitSuccess, "effect\nlimit:1\n", "") result
+
+launchBindingCase :: Text -> Text -> TestTree
+launchBindingCase name source = H.testCase (T.unpack name <> ": " <> T.unpack source) $ do
+  result <- translateBashScript strictConfig "launch-binding.bash" source
+  case result of
+    Left failure -> diagnosticCode (NonEmpty.head (failureDiagnostics failure)) H.@?= MkDiagnosticCode "monk.semantic.launch-binding"
+    Right _ -> H.assertFailure "private launch metadata was admitted as source state"
 
 exportedScalarCase :: TestTree
 exportedScalarCase = H.testCaseSteps "an exported scalar input satisfies the standalone guard" $ \step -> do

@@ -12,6 +12,7 @@ module Monk.Translation
     translationDiagnostics,
     translationRuntimeRequirements,
     translationStatistics,
+    translationExecutionStrategy,
     TranslationFailure (..),
     translateParseResult,
     translateBashFile,
@@ -64,6 +65,9 @@ translationRuntimeRequirements = resultRuntimeRequirements
 
 translationStatistics :: TranslationResult -> TranslationStatistics
 translationStatistics = resultStatistics
+
+translationExecutionStrategy :: TranslationResult -> ExecutionStrategy
+translationExecutionStrategy = executionStrategyFor . translationRuntimeRequirements
 
 newtype TranslationFailure = MkTranslationFailure
   { failureDiagnostics :: NonEmpty Diagnostic

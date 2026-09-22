@@ -18,10 +18,10 @@ unitPlannedRedirectTests =
       exact "function output redirect executes only when called" "f() { printf 'called\\n'; } >&2; printf 'before\\n'; f; printf 'after\\n'",
       exact "function redirect sees descriptors at invocation" "f() { sh -c 'printf err >&2'; } 2>&1; f >/dev/null; printf 'after\\n'",
       exact "uncalled function redirects do not affect definition status" "false; f() { printf body; } >/dev/null; printf 'status:%s\\n' \"$?\"",
-      rejected "shared file opens require owned failure and descriptor semantics" "x=before; { x=after; } >out.txt",
-      rejected "append requires the same file-open ownership" "printf value >>out.txt",
-      rejected "computed file targets cannot bypass descriptor admission" "printf value >\"$target\"",
-      rejected "nonstandard descriptors cannot collide with private child transport" "printf value 3>&1"
+      rejected "shared file path writes need expansion-order proof" "x=before; { x=after; } >\"${target:=out.txt}\"",
+      rejected "append path writes need expansion-order proof" "printf value >>\"${target:=out.txt}\"",
+      rejected "multi-field file targets require a cardinality proof" "printf value >\"$@\"",
+      rejected "descriptors above the finite owner bound stay rejected" "printf value 256>&1"
     ]
 
 exact :: String -> Text -> TestTree

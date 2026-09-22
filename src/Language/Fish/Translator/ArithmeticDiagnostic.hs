@@ -15,17 +15,17 @@ import Language.Fish.Translator.ArithmeticPlan
 
 arithmeticDiagnostic :: Bool -> ArithmeticSite -> ArithmeticMaterialization -> [FishStatement]
 arithmeticDiagnostic command site materialized =
-  [ conditional (equal (arithmeticErrorOrigin materialized) (ExprLiteral (show tokenIdentity)))
-      $ conditional (equal (arithmeticError materialized) (ExprLiteral code))
-      $ Stmt
-        ( Decorated DecBuiltin $
-            Command
-              "printf"
-              [ ExprVal (ExprLiteral "%s"),
-                ExprVal (ExprLiteral message),
-                RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))
-              ]
-        )
+  [ conditional (equal (arithmeticErrorOrigin materialized) (ExprLiteral (show tokenIdentity))) $
+      conditional (equal (arithmeticError materialized) (ExprLiteral code)) $
+        Stmt
+          ( Decorated DecBuiltin $
+              Command
+                "printf"
+                [ ExprVal (ExprLiteral "%s"),
+                  ExprVal (ExprLiteral message),
+                  RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))
+                ]
+          )
   | (MkArithmeticOrigin tokenIdentity, code, message) <- arithmeticSiteMessages command site
   ]
   where

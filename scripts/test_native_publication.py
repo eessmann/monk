@@ -37,13 +37,25 @@ class NativePublication(unittest.TestCase):
         return subprocess.run([self.fish, "--no-config", str(target)],
                               capture_output=True, env=env or self.env, timeout=20)
 
-    def test_literal_output_has_no_runtime(self):
+    def execute_native(self, target, *, runtime=None, env=None):
+        return subprocess.run([str(runtime or self.runtime), "--abi", "2", "launch", str(target)],
+                              capture_output=True, env=env or self.env, timeout=20)
+
+    def test_literal_output_declares_exact_writer_runtime(self):
         target = self.translate("echo hello\n")
         output = target.read_bytes()
         self.assertNotIn(b"python", output)
-        self.assertNotIn(b"monk-runtime", output)
-        result = self.execute(target)
+        self.assertIn(b"write-builtin", output)
+        result = self.execute_native(target)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"hello\n", b""))
+
+    def test_silent_literal_assignment_has_no_body_helper(self):
+        target = self.translate("literal_control=hello\n")
+        output = target.read_bytes()
+        self.assertNotIn(b"function __monk_", output)
+        self.assertNotIn(b"write-builtin", output)
+        result = self.execute_native(target)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"", b""))
 
     def test_managed_runtime_executes_without_python_or_installed_provider(self):
         target = self.translate('x=21; echo "$x"\n', "entry", "--managed")
@@ -53,7 +65,7 @@ class NativePublication(unittest.TestCase):
         isolated = self.root / "path"
         isolated.mkdir()
         (isolated / "fish").symlink_to(self.fish)
-        result = self.execute(target, env={**self.env, "PATH": str(isolated)})
+        result = self.execute_native(target, runtime=binaries[0], env={**self.env, "PATH": str(isolated)})
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"21\n", b""))
 
     def test_missing_installed_runtime_prevents_body_effects(self):
@@ -65,7 +77,7 @@ class NativePublication(unittest.TestCase):
         self.assertIn(b"monk.runtime:", result.stderr)
 
     def test_native_operations_ignore_ambient_ghc_runtime_flags(self):
-        result = subprocess.run([self.runtime, "--abi", "1", "echo"],
+        result = subprocess.run([self.runtime, "--abi", "2", "echo"],
                                 input=b"hello\0", capture_output=True,
                                 env={**self.env, "GHCRTS": "-s"}, timeout=20)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"hello\n", b""))
@@ -75,7 +87,7 @@ class NativePublication(unittest.TestCase):
         shutil.copy2(self.runtime, provider)
         self.runtime = str(provider)
         target = self.translate('x=value; echo "$x"\n')
-        result = self.execute(target)
+        result = self.execute_native(target)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b"value\n", b""))
 
     def test_incompatible_installed_runtime_prevents_body_effects(self):

@@ -1,0 +1,43 @@
+{
+  "platform": "macOS-27.0-arm64-arm-64bit-Mach-O",
+  "locale": "C",
+  "executables": {
+    "bash": {
+      "path": "/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash",
+      "sha256": "c76a7b7482203eb6d4108271500848f121364b2898e7febaefbd458714c8f56e",
+      "version": "GNU bash, version 5.3.9(1)-release (aarch64-apple-darwin25.3.0)"
+    },
+    "fish": {
+      "path": "/nix/store/2rb8r6s2ic5wryq75aa0k3vhav51mxj6-fish-4.6.0/bin/fish",
+      "sha256": "241c9c36726193c252a8e3b58c1233edf2b192c3b4ae07b71077e04e52c33640",
+      "version": "fish, version 4.6.0"
+    }
+  },
+  "bash_probes": {
+    "a\\uD800b": {
+      "stdout_base64": "YVx1RDgwMGIK",
+      "stderr_base64": "",
+      "exit": 0
+    },
+    "a\\U00110000b": {
+      "stdout_base64": "YVxVMDAxMTAwMDBiCg==",
+      "stderr_base64": "",
+      "exit": 0
+    },
+    "a\\U7fffffffb": {
+      "stdout_base64": "YVxVN0ZGRkZGRkZiCg==",
+      "stderr_base64": "",
+      "exit": 0
+    },
+    "a\\U80000000b": {
+      "stdout_base64": "YVxVODAwMDAwMDBiCg==",
+      "stderr_base64": "",
+      "exit": 0
+    },
+    "a\\Uffffffffb": {
+      "stdout_base64": "YVxVRkZGRkZGRkZiCg==",
+      "stderr_base64": "",
+      "exit": 0
+    }
+  }
+}

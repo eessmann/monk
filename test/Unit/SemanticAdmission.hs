@@ -50,14 +50,13 @@ exactFixtures =
     MkSemanticFixture "case fallthrough" "test/fixtures/semantic/case-fallthrough.bash",
     MkSemanticFixture "integer intermediate division" "test/fixtures/semantic/arithmetic-integral-intermediate.bash",
     MkSemanticFixture "dynamic caller local" "test/fixtures/semantic/dynamic-local.bash",
-    MkSemanticFixture "constant dynamic command" "test/fixtures/semantic/dynamic-command.bash"
+    MkSemanticFixture "constant dynamic command" "test/fixtures/semantic/dynamic-command.bash",
+    MkSemanticFixture "compiled literal eval" "test/fixtures/semantic/eval-bash-syntax.bash"
   ]
 
 rejectedFixtures :: [SemanticFixture]
 rejectedFixtures =
-  [ MkSemanticFixture "sparse mixed array" "test/fixtures/semantic/array-mixed.bash",
-    MkSemanticFixture "eval" "test/fixtures/semantic/eval-bash-syntax.bash"
-  ]
+  [MkSemanticFixture "sparse mixed array" "test/fixtures/semantic/array-mixed.bash"]
 
 positiveFixtures :: [SemanticFixture]
 positiveFixtures =

@@ -5,12 +5,13 @@ where
 
 import Data.ByteString qualified as BS
 import Data.Text qualified as T
-import Monk.Translation (renderTranslation, strictConfig, translateBashScript)
+import Monk.Translation (TranslationStatistics (..), renderTranslation, strictConfig, translateBashScript, translationStatistics)
 import ShellSupport (prepareEnv, shouldRunIntegration)
 import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import System.IO (withBinaryFile)
 import System.IO.Temp (withSystemTempDirectory)
+import System.Info (os)
 import System.Process (CreateProcess (env, std_err, std_in, std_out), StdStream (NoStream, UseHandle), proc, waitForProcess, withCreateProcess)
 import System.Timeout qualified as Timeout
 import Test.Tasty (TestTree, testGroup)
@@ -20,7 +21,27 @@ unitPlannedPrimitivesTests :: TestTree
 unitPlannedPrimitivesTests =
   testGroup
     "Planned word and builtin primitives"
-    [ H.testCase "standalone admission output grows linearly with bindings" $ do
+    [ H.testCase "native scalar conditional uses only the exact output boundary" $ do
+        result <- translateBashScript strictConfig "native-greeting.bash" "name=$1; if test -n \"$name\"; then printf 'Hello %s\\n' \"$name\"; else printf '%s\\n' Hello; fi"
+        case result of
+          Left failure -> H.assertFailure (show failure)
+          Right translation -> do
+            let output = renderTranslation translation
+                stats = translationStatistics translation
+            H.assertEqual "writer and signal termination sites" 2 (statisticsNativeCallSites stats)
+            H.assertEqual "one output boundary" 1 (statisticsHelperDefinitions stats)
+            H.assertBool "unnecessary field temporary" (not ("_field_" `T.isInfixOf` output))
+            H.assertBool "unnecessary source-status slot" (not ("__monk_plan_0_status" `T.isInfixOf` output)),
+      H.testCase "literal-only control needs no private namespace" $ do
+        result <- translateBashScript strictConfig "native-literal.bash" "true"
+        case result of
+          Left failure -> H.assertFailure (show failure)
+          Right translation -> H.assertBool "literal command carries private state" (not ("__monk_" `T.isInfixOf` renderTranslation translation)),
+      exact "native conditional has zero status when no branch runs" "if false; then printf bad; fi; printf '%s' \"$?\"" "0",
+      exact "native short circuit preserves selected status" "false && printf bad; printf '%s:' \"$?\"; true || printf bad; printf '%s' \"$?\"" "1:0",
+      exact "native scalar assignment retains incoming export" "export x=before; x=after; printenv x" "after\n",
+      exact "native scalar reads retain spaces and empty arguments" "set -- '' 'a b'; x=$1; printf '<%s>' \"$x\" \"$2\" \"$3\"" "<><a b><>",
+      H.testCase "standalone admission output grows linearly with bindings" $ do
         sizes <- forM [4, 8] $ \count -> do
           let source = T.intercalate "; " ["v" <> show index <> "=value" | index <- [1 .. count :: Int]]
           result <- translateBashScript strictConfig "guard-growth.bash" source
@@ -30,7 +51,7 @@ unitPlannedPrimitivesTests =
           _ -> H.assertFailure "missing guard size sample",
       exact "echo octal and hexadecimal escapes emit raw bytes" "echo -e '\\0377\\xff'" (BS.pack [255, 255, 10]),
       exact "echo Unicode escapes follow the selected C locale" "echo -e '\\uD800\\U00110000\\U7fffffff'" "\\uD800\\U00110000\\U7FFFFFFF\n",
-      exact "echo out of range Unicode escape emits no bytes" "echo -e 'a\\Uffffffffb'" "ab\n",
+      exact "echo out of range Unicode follows the pinned Nix Bash build" "echo -e 'a\\Uffffffffb'" (if os == "darwin" then "a\\UFFFFFFFFb\n" else "ab\n"),
       exact "echo stop escape suppresses following arguments and newline" "echo -e 'one\\cignored' two" "one",
       exact "concatenation freezes earlier scalar before later arithmetic update" "n=1; printf '%s\\n' \"$n$((n=2))$n\"" "122\n",
       exact "quoted argv prefix is evaluated before lazy suffix write" "set -- a b; unset x; printf '<%s>\\n' \"$x$@${x:=after}\"" "<a>\n<bafter>\n",

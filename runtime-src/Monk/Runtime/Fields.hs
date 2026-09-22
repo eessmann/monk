@@ -7,6 +7,7 @@ import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as C
 import Data.Char (digitToInt, toLower)
 import Numeric (showHex)
+import System.Info (os)
 
 splitFields :: ByteString -> ByteString -> [ByteString]
 splitFields ifs = go [] . B.dropWhile white
@@ -51,9 +52,11 @@ echoBytes args = B.pack (render escapes body <> [10 | newline && not stopped])
             valid w = let ch = toLower (toEnum (fromIntegral w)) in ch `elem` (if base == 8 then "01234567" else "0123456789abcdef" :: String)
             ds = take count (takeWhile valid xs)
             number = foldl (\n w -> n * base + toInteger (digitToInt (toEnum (fromIntegral w)))) 0 ds
+            -- The pinned Darwin Bash has no iconv conversion path and keeps
+            -- out-of-range escapes literal; Linux's iconv path drops them.
             out
               | null ds && c /= 48 = [92, c]
-              | c `elem` [117, 85] = if number < 128 then [fromInteger number] else if number > 0x7fffffff then [] else B.unpack (C.pack ("\\" <> [if number <= 65535 then 'u' else 'U'] <> replicate ((if number <= 65535 then 4 else 8) - length hex) '0' <> hex))
+              | c `elem` [117, 85] = if number < 128 then [fromInteger number] else if number > 0x7fffffff && os /= "darwin" then [] else B.unpack (C.pack ("\\" <> [if number <= 65535 then 'u' else 'U'] <> replicate ((if number <= 65535 then 4 else 8) - length hex) '0' <> hex))
               | otherwise = [fromInteger (number `mod` 256)]
             hex = map (\ch -> if ch >= 'a' && ch <= 'f' then toEnum (fromEnum ch - 32) else ch) (showHex number "")
          in out <> render True (drop (length ds) xs)

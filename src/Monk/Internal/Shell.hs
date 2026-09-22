@@ -23,8 +23,6 @@ where
 import Control.Exception (bracket, throwIO)
 import Data.Aeson (FromJSON, ToJSON)
 import Data.Char (isAlpha, toLower)
-import Data.List (elemIndices)
-import Data.List.NonEmpty qualified as NE
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text qualified as T
@@ -161,13 +159,13 @@ marker = "__MONK_ENV_BEGIN__"
 
 wrapScriptPath :: ShellRunMode -> Shell -> Path Abs File -> [Text] -> Text
 wrapScriptPath runMode shell scriptPath args =
-  let markerLine = "printf '\\n%s\\n' '" <> marker <> "'"
+  let markerLine = "printf '\\0%s\\0' '" <> marker <> "'"
       (statusLine, exitLine) =
         case shell of
           ShellBash -> ("monk_status=$?", "exit $monk_status")
           ShellFish -> ("set -l monk_status $status", "exit $monk_status")
       bodyLines = scriptPathLines runMode shell scriptPath args
-      footer = [statusLine, markerLine, "env", exitLine]
+      footer = [statusLine, markerLine, "env -0", exitLine]
    in T.intercalate "\n" (bodyLines <> footer)
 
 scriptPathLines :: ShellRunMode -> Shell -> Path Abs File -> [Text] -> [Text]
@@ -206,23 +204,22 @@ scriptMayExit script =
   where
     normalizeToken = T.takeWhile isAlpha . T.dropWhile (not . isAlpha)
 
+-- NUL cannot occur in environment names or values. A framed marker therefore
+-- separates script bytes from the snapshot even when values contain newlines
+-- that resemble assignments or the old line marker.
 splitEnv :: Text -> Text -> (Text, Text)
 splitEnv markerText output =
-  let ls = T.splitOn "\n" output
-      idxs = elemIndices markerText ls
-   in case NE.nonEmpty idxs of
-        Nothing -> (output, "")
-        Just neIdxs ->
-          let idx = NE.last neIdxs
-              outLines = take idx ls
-              envLines = drop (idx + 1) ls
-           in (T.intercalate "\n" outLines, T.intercalate "\n" envLines)
+  let boundary = "\0" <> markerText <> "\0"
+      (before, environment) = T.breakOnEnd boundary output
+   in if T.null before
+        then (output, "")
+        else (T.dropEnd (T.length boundary) before, environment)
 
 parseEnv :: Text -> Map.Map Text Text
-parseEnv = Map.fromList . mapMaybe parseLine . filter (not . T.null) . T.lines
+parseEnv = Map.fromList . mapMaybe parseEntry . T.splitOn "\0"
   where
-    parseLine line =
-      case T.breakOn "=" line of
+    parseEntry entry =
+      case T.breakOn "=" entry of
         (key, rest) | not (T.null rest) -> Just (key, T.drop 1 rest)
         _ -> Nothing
 

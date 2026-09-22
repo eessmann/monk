@@ -37,10 +37,14 @@ import Language.Fish.Translator.ArithmeticPlan qualified as Arithmetic
 import Language.Fish.Translator.Binding qualified as Binding
 import Language.Fish.Translator.Child qualified as Child
 import Language.Fish.Translator.Directory qualified as Directory
+import Language.Fish.Translator.Native qualified as Native
 import Language.Fish.Translator.NativeRuntime qualified as NativeRuntime
 import Language.Fish.Translator.Pattern qualified as Pattern
+import Language.Fish.Translator.Session qualified as Session
 import Language.Fish.Translator.Statistics (commandReferences, materializationStatistics)
+import Language.Fish.Translator.Traps qualified as Traps
 import Monk.Runtime.Integer qualified as Integer
+import Monk.Runtime.NativeTarget (runtimeABI)
 import Monk.Translation.Types
 import Numeric (showHex, showOct)
 import ShellCheck.Interface (ParseResult)
@@ -78,7 +82,14 @@ data Materialization = MkMaterialization
     materialModules :: M.Map FilePath FishStatement,
     materialLoops :: [Text],
     materialContinueActions :: [[FishStatement]],
-    materialErrexitRelevant :: Bool
+    materialErrexitRelevant :: Bool,
+    materialSession :: Bool,
+    materialDescriptorDepth :: Int,
+    materialReturnDepth :: Int,
+    materialLoopDescriptorDepths :: [Int],
+    materialTraps :: Bool,
+    materialDeferCompletion :: Bool,
+    materialCallback :: Bool
   }
 
 type Materialize = StateT Materialization (Either (NonEmpty Diagnostic))
@@ -108,16 +119,44 @@ compileBundleLoader entry bundle = do
   pure (MkPlannedTranslation script (plannedDiagnostics admitted) (plannedRequirements admitted) (materializationStatistics "" "" script))
 
 compileMaterialization :: Bool -> P.SourcePlan -> Either (NonEmpty Diagnostic) PlannedBundle
+compileMaterialization _ (P.SourcePlan _ _ reserved)
+  | any (`S.member` reserved) ["MONK_LAUNCH_ORIGINAL", "MONK_LAUNCH_WRAPPER"] =
+      Left (planDiagnostic "launch-binding" "Source bindings may not overlap private standalone launch metadata" :| [])
+compileMaterialization _ (P.SourcePlan cfg statements reserved)
+  | entryMode cfg == Standalone,
+    profileSupportsFishFeature (targetProfile cfg) Fish46,
+    let prefix = choosePrefix reserved 0,
+    Just (body, commands, writesOutput) <- Native.nativeStatements prefix statements =
+      let effects = foldMap Effects.statementEffects statements
+          bindings = S.delete "#" (Effects.effectReads effects <> Effects.effectWrites effects)
+          operations = S.fromList ([NativeExec | not (S.null commands)] <> [NativeWrite | writesOutput])
+          script = MkScript (if S.null operations then standaloneBindingGuards bindings <> body else standaloneGuards prefix bindings (NativeRuntime.nativeRuntimeSetup cfg prefix operations <> [NativeRuntime.nativeWriterDefinition prefix | writesOutput] <> body))
+          requirement program reason = MkRuntimeRequirement program (MkRequirementUse reason Nothing :| [])
+          requirements = nativeRuntimeRequirement NativeLaunch "Preserve streams before Fish startup" : requirement (RequiresFishFeature Fish46) "Structural Fish execution profile" : [requirement (RequiresCommand name) "Explicit external command dispatch" | name <- S.toAscList commands] <> [nativeRuntimeRequirement NativeExec "Source-located external exec failures" | not (S.null commands)] <> [nativeRuntimeRequirement NativeWrite "Bash output errno and signal semantics" | writesOutput]
+          translation = MkPlannedTranslation script [] requirements (materializationStatistics prefix (NativeRuntime.runtimeHelperName prefix) script)
+       in Right (MkPlannedBundle translation mempty mempty)
 compileMaterialization separate (P.SourcePlan cfg statements reserved) = do
   let prefix = choosePrefix reserved 0
       identityTag = show (cfg, statements)
       effects = foldMap Effects.statementEffects statements
       bindings = S.delete "#" (Effects.effectReads effects <> Effects.effectWrites effects <> M.keysSet (callerVariables (callerContract cfg)))
-      initial = MkMaterialization prefix 0 mempty [] cfg identityTag False False Nothing [] bindings separate mempty [] [] (Effects.effectMayEnableErrexit effects)
+      initial = MkMaterialization prefix 0 mempty [] cfg identityTag False False Nothing [] bindings (separate && not (Effects.effectSession effects)) mempty [] [] (Effects.effectMayEnableErrexit effects) (Effects.effectSession effects) 0 0 [] (Effects.effectTraps effects) False False
+  when (not (S.null (Effects.effectArrays effects)) && entryMode cfg == Sourceable) (Left (planDiagnostic "array-entry" "Owned arrays currently require standalone execution; caller contracts describe scalar bindings" :| []))
+  when (Effects.effectTraps effects && Effects.effectDirectory effects) (Left (planDiagnostic "directory-trap-signal" "Directory operations combined with EXIT/ERR traps require shared stdio error-state ownership across signal callbacks" :| []))
+  when (Effects.effectSession effects && entryMode cfg == Sourceable) (Left (planDiagnostic "session-entry" "Session effects require standalone execution" :| []))
+  when (Effects.effectSession effects && any (`S.member` reserved) ["MONK_SESSION_SOCKET", "MONK_SESSION_TOKEN", "MONK_SESSION_REPLY", "MONK_SESSION_FDS"]) (Left (planDiagnostic "session-binding" "Source bindings may not overlap the private session transport" :| []))
   (body, final) <-
     runStateT
       ( do
           needProgram (RequiresFishFeature Fish46) "Structural Fish execution profile"
+          when (entryMode cfg == Standalone) (mergeRequirement (nativeRuntimeRequirement NativeLaunch "Preserve streams before Fish startup"))
+          when (Effects.effectSession effects) $ do
+            needNative NativeSession "Owned process and descriptor session"
+            needNative NativeDescriptorState "Observe user streams before session control transport"
+            needProgram (RequiresCommand "fish") "Private generated Fish evaluator"
+            modify' (\material -> material {materialHelpers = materialHelpers material <> [Session.requestDefinition prefix]})
+          when (Effects.effectTraps effects) $
+            modify' (\material -> material {materialHelpers = materialHelpers material <> Traps.definitions prefix})
           when (stableDirectoryEnabled cfg && not (S.null (bindings `S.intersection` S.fromList ["PWD", "OLDPWD", "dirstack"]))) $
             needNative NativeDirectory "Directory binding boundary obligations"
           when (entryMode cfg == Sourceable) $ do
@@ -129,7 +168,9 @@ compileMaterialization separate (P.SourcePlan cfg statements reserved) = do
   let statusName = prefix <> "status"
       initialization =
         [assign [SetGlobal] statusName (ExprLiteral "0")]
+          <> [assign [SetGlobal] (prefix <> "source_origin") (ExprLiteral (fromMaybe "<input>" (listToMaybe [srcFile (rangeStart range) | P.Statement (Just range) _ <- statements]))) | Effects.effectTraps effects]
           <> [assign [SetGlobal] (prefix <> role) (ExprLiteral "0") | Effects.effectMayEnableErrexit effects, role <- ["errexit", "suppress"]]
+          <> [assign [SetGlobal] (prefix <> "last_pid") (ExprLiteral "") | Effects.effectSession effects]
           <> [assign [SetGlobal] (prefix <> "pipefail") (ExprLiteral "0") | Effects.effectPipefail effects]
           <> [assign [SetGlobal] (prefix <> "ifs") (ExprLiteral " \t\n") | S.member "IFS" bindings]
           <> [assign [SetGlobal] (prefix <> role) (ExprLiteral "0") | Effects.effectSubstitution effects, role <- ["substitution_executed", "substitution_status"]]
@@ -138,15 +179,16 @@ compileMaterialization separate (P.SourcePlan cfg statements reserved) = do
       modules = fmap (MkScript . (: [])) (materialModules final)
       moduleRoot = prefix <> "module_root"
       loaders =
-        [assign [SetLocal] moduleRoot (ExprQuotedCommandSubst (builtin "status" [arg (ExprLiteral "dirname")] :| [])) | not (M.null modules)]
+        [assign [SetLocal] moduleRoot (NativeRuntime.entryDirectory prefix) | not (M.null modules)]
           <> concatMap (loadModule (entryMode cfg == Sourceable) moduleRoot) (M.keys modules)
       helpers = materialHelpers final <> loaders
       nativeOperations = foldMap (\case RequiresNativeRuntime _ _ operations -> operations; _ -> mempty) (M.keys (materialRequirements final))
       runtimeSetup = NativeRuntime.nativeRuntimeSetup cfg prefix nativeOperations
+      programBody = initialization <> [statement | Effects.effectTraps effects, statement <- Traps.initialize prefix] <> helpers <> (if S.member NativeDirectory nativeOperations then Directory.directorySetup cfg prefix else []) <> body <> [if Effects.effectTraps effects then Traps.exitWithStatus prefix (scalarVar statusName) else builtin "exit" [arg (scalarVar statusName)]]
       complete =
         if entryMode cfg == Sourceable
           then [asCommand (sourceableEntry cfg nativeOperations prefix identityTag (scalarVar "status") (prefix <> "entry") moduleFunctions helpers body)]
-          else standaloneGuards prefix bindings (runtimeSetup <> initialization <> helpers <> (if S.member NativeDirectory nativeOperations then Directory.directorySetup cfg prefix else []) <> body <> [builtin "exit" [arg (scalarVar statusName)]])
+          else standaloneGuards prefix (bindings S.\\ Effects.effectArrays effects) (standaloneArrayGuards (Effects.effectArrays effects) <> [statement | Effects.effectSession effects, statement <- sessionEnvironmentGuards] <> runtimeSetup <> if Effects.effectSession effects then Session.launchSession prefix programBody else programBody)
       statistics = materializationStatistics prefix (NativeRuntime.runtimeHelperName prefix) (MkScript complete)
       requirements = [MkRuntimeRequirement program uses | (program, uses) <- M.toAscList (materialRequirements final)]
   statistics `seq` pure ()
@@ -160,10 +202,93 @@ compileMaterialization separate (P.SourcePlan cfg statements reserved) = do
         (profileSupportsPlatformCapability (targetProfile cfg) capability)
         (Left (planDiagnostic "target-capability" ("Target profile does not support " <> platformCapabilityName capability) :| []))
     RequiresCommand _ -> pure ()
-    RequiresNativeRuntime abi profile _ -> unless (abi == 1 && profile == targetProfile cfg) (Left (planDiagnostic "native-runtime-capability" "Native runtime ABI/profile is incompatible" :| []))
+    RequiresNativeRuntime abi profile _ -> unless (abi == runtimeABI && profile == targetProfile cfg) (Left (planDiagnostic "native-runtime-capability" "Native runtime ABI/profile is incompatible" :| []))
   -- The owned complete script includes every inserted initialization and final
   -- control operation; no subsequent pass changes its semantics.
   pure (MkPlannedBundle (MkPlannedTranslation (MkScript complete) (materialDiagnostics final) requirements statistics) modules (fmap (materializationStatistics prefix (NativeRuntime.runtimeHelperName prefix)) modules))
+
+-- Native session stages consume the same compiled child snapshots as bounded
+-- helpers. External-only stages keep their real executable PID.
+sessionStage :: P.ChildRegion -> Materialize ([FishStatement], [ExprOrRedirect], [FishStatement])
+sessionStage region = case concatMap flattenStatements (P.childStatements region) of
+  [P.Statement _ (P.Invoke (P.External name) wordsValue)] | all pureStageWord wordsValue -> do
+    (prelude, arguments) <- lowerWords wordsValue
+    needProgram (RequiresCommand name) "Owned external pipeline stage"
+    let origin = maybe "<input>" (srcFile . rangeStart) (P.childRange region)
+        line = maybe "1" (show . srcLine . rangeStart) (P.childRange region)
+    pure (prelude, map (arg . ExprLiteral) ["external-site", origin, line, name] <> arguments, [])
+  _ -> do
+    invocation <- childMaterialization Child.IsolatedChild region
+    pure (Child.childSnapshotPrelude invocation, arg (ExprLiteral "snapshot") : Child.childSessionFrames invocation, childCleanup invocation)
+
+pureStageWord :: P.Word -> Bool
+pureStageWord (P.OneField value) = pureStageScalar value
+pureStageWord (P.QuotedArguments before after _) = pureStageScalar before && pureStageScalar after
+pureStageWord _ = False
+
+pureStageScalar :: P.Scalar -> Bool
+pureStageScalar = \case
+  P.Literal _ -> True
+  P.Variable _ -> True
+  P.Positional _ -> True
+  P.ArgumentCount -> True
+  P.LastStatus -> True
+  P.LastBackgroundPid -> True
+  P.Concat values -> all pureStageScalar values
+  _ -> False
+
+projectedSessionRequest :: Text -> [ExprOrRedirect] -> Materialize FishStatement
+projectedSessionRequest operation frames = do
+  temporary <- fresh "session_environment"
+  prefix <- gets materialPrefix
+  names <- gets materialBindings
+  bindings <- traverse (fmap (Binding.bindingRuntime prefix) . bindingName) (S.toAscList (S.delete "IFS" names))
+  pure (Stmt (Begin (bodyNE (Binding.environmentShadows temporary bindings <> [Session.request prefix operation frames])) []))
+
+flattenStatements :: P.Statement -> [P.Statement]
+flattenStatements (P.Statement _ (P.Sequence body)) = concatMap flattenStatements body
+flattenStatements statement = [statement]
+
+lowerSessionPipeline :: Bool -> Text -> NonEmpty P.ChildRegion -> Materialize [FishStatement]
+lowerSessionPipeline suppressed operation regions = do
+  stages <- traverse sessionStage regions
+  pipefail <- runtimeName "pipefail"
+  saved <- forM stages $ \(prelude, frames, cleanup) -> do
+    name <- fresh "stage"
+    let remaining = ExprVariable (VarIndex name (IndexRange (Just (ExprNumLiteral 2)) Nothing))
+        kind = ExprQuotedVariable (VarIndex name (IndexSingle (ExprNumLiteral 1)))
+    pure (prelude <> [builtin "set" (map (arg . ExprLiteral) ["--local", "--unexport", "--unpath", name] <> frames)], [arg kind, arg (ExprQuotedCommandSubst (builtin "count" [arg remaining] :| [])), arg remaining], cleanup)
+  captured <- captureStatus
+  guards <- if operation == "spawn" then pure [] else errexitGuard suppressed
+  let prefixFrames = [arg (ExprLiteral "pipeline"), arg (scalarVar pipefail), arg (ExprLiteral (show (length regions)))]
+  invocation <- projectedSessionRequest operation (prefixFrames <> concatMap (\(_, frames, _) -> frames) saved)
+  pure (concatMap (\(before, _, _) -> before) saved <> [invocation, captured] <> concatMap (\(_, _, after) -> after) saved <> guards)
+
+diagnosticOrigin :: Materialize (Text, Text)
+diagnosticOrigin = do
+  range <- gets materialRange
+  pure (maybe "<input>" (srcFile . rangeStart) range, maybe "1" (show . srcLine . rangeStart) range)
+
+-- Callback diagnostics belong to the execution site, not the trap declaration.
+-- Handler line offsets are bounded compiler metadata, not Bash arithmetic.
+diagnosticArguments :: Materialize [ExprOrRedirect]
+diagnosticArguments = do
+  callback <- gets materialCallback
+  prefix <- gets materialPrefix
+  (origin, line) <- diagnosticOrigin
+  range <- gets materialRange
+  let offset = maybe 0 (subtract 1 . srcLine . rangeStart) range
+  pure $
+    if callback
+      then [arg (scalarVar (prefix <> "callback_origin")), if offset == 0 then arg (scalarVar (prefix <> "callback_line")) else arg (ExprMath (scalarVar (prefix <> "callback_line") :| [ExprLiteral "+", ExprLiteral (show offset)]))]
+      else map (arg . ExprLiteral) [origin, line]
+
+diagnosticOriginExpression :: Materialize (FishExpr TStr)
+diagnosticOriginExpression = do
+  callback <- gets materialCallback
+  prefix <- gets materialPrefix
+  (origin, _) <- diagnosticOrigin
+  pure (if callback then scalarVar (prefix <> "callback_origin") else ExprLiteral origin)
 
 loadModule :: Bool -> Text -> FilePath -> [FishStatement]
 loadModule sourceable root path =
@@ -213,7 +338,7 @@ needNative operation reason = do
   needProgram (RequiresFishFeature NulDelimitedCapture) "Native provider pathname byte preservation"
   name <- runtimeName "native"
   helpers <- gets materialHelpers
-  unless (name `elem` helperNames helpers) $ do
+  unless (operation `elem` [NativeExec, NativeWrite] || name `elem` helperNames helpers) $ do
     bindings <- gets materialBindings
     prefix <- gets materialPrefix
     modify' (\s -> s {materialHelpers = materialHelpers s <> [NativeRuntime.nativeRuntimeDefinition prefix bindings]})
@@ -268,14 +393,20 @@ errexitGuard suppressed
   | suppressed = pure []
   | otherwise = do
       relevant <- gets materialErrexitRelevant
-      if relevant then materializeGuard else pure []
+      deferred <- gets materialDeferCompletion
+      if relevant && not deferred then materializeGuard else pure []
   where
     materializeGuard = do
       enabled <- runtimeName "errexit"
       suppression <- runtimeName "suppress"
       status <- runtimeName "status"
-      let exitFailure = ifStatements [testEquals (scalarVar status) "0"] [] [builtin "exit" [arg (scalarVar status)]]
-      pure [ifStatements [testEquals (scalarVar enabled) "1"] [ifStatements [testEquals (scalarVar suppression) "0"] [exitFailure] []] []]
+      traps <- gets materialTraps
+      prefix <- gets materialPrefix
+      origin <- diagnosticOriginExpression
+      location <- diagnosticArguments
+      let terminate = if traps then Traps.exitWithStatusAt prefix origin (scalarVar status) else builtin "exit" [arg (scalarVar status)]
+          exitFailure = ifStatements [testEquals (scalarVar status) "0"] [] ([Traps.errorHook prefix location | traps] <> [ifStatements [testEquals (scalarVar enabled) "1"] [terminate] []])
+      pure [ifStatements [testEquals (scalarVar suppression) "0"] [exitFailure] []]
 
 lowerStatements :: Bool -> [P.Statement] -> Materialize [FishStatement]
 lowerStatements suppressed = fmap concat . traverse (lowerStatement suppressed)
@@ -377,26 +508,23 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
           <> [if maskStatus then zero else ifStatements [testEquals (scalarVar marker) "1"] [substitution] [zero]]
           <> guardStatements
       )
-  P.Invoke (P.Builtin "echo") wordsValue
-    | Just values <- traverse literalWord wordsValue,
-      Just (newline, output) <- nativeEcho values -> do
-        capture <- captureStatus
-        guardStatements <- errexitGuard suppressed
-        pure ([builtin "printf" [arg (ExprLiteral (if newline then "%s\n" else "%s")), arg (ExprLiteral (T.intercalate " " output))], capture] <> guardStatements)
   P.Invoke target wordsValue -> do
-    (prelude, arguments) <- lowerWords wordsValue
-    body <- lowerInvocation suppressed target arguments
+    (prelude, body) <- lowerInvokeWords suppressed target wordsValue
+    pure (prelude <> body)
+  P.PrefixedInvoke assignments target wordsValue -> do
+    (prelude, body) <- lowerPrefixedInvoke suppressed assignments target wordsValue
     pure (prelude <> body)
   P.Redirected redirects statement -> do
-    needProgram (RequiresPlatformCapability Linux64DescriptorFilesystem) "Standard descriptor and stable null device operations"
-    (prelude, body) <- case statement of
-      P.Statement _ (P.Invoke target wordsValue) -> do
-        (expansions, arguments) <- lowerWords wordsValue
-        invocation <- lowerInvocation suppressed target arguments
-        pure (expansions, invocation)
-      P.Statement _ P.DeclarationCommand {} -> lift (Left (planDiagnostic "redirect-declaration" "Redirected declarations require their own expansion and local-slot scope" :| []))
-      _ -> ([],) <$> lowerStatement suppressed statement
-    pure (prelude <> [Stmt (Begin (bodyNE body) (map (RedirectVal . lowerRedirect) redirects))])
+    supervised <- gets materialSession
+    if supervised then lowerOwnedRedirects suppressed redirects statement else lowerDirectRedirects suppressed redirects statement
+  P.Read options target -> lowerRead suppressed options target
+  P.PrefixedRead assignments options target -> do
+    bindings <- fmap concat $ forM assignments $ \(_, name, scalar) -> do
+      (prelude, value) <- lowerScalar scalar
+      actual <- bindingName name
+      pure (prelude <> [assign [SetLocal, SetUnexport, SetUnpath] actual value])
+    body <- lowerRead suppressed options target
+    pure [Stmt (Begin (bodyNE (bindings <> body)) [])]
   P.DeclarationCommand declarations -> lowerDeclarations declarations
   P.Assign storage name scalar -> do
     (prelude, value) <- lowerScalar scalar
@@ -405,6 +533,14 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     grouped <- gets materialAssignment
     prefix <- gets materialPrefix
     pure (prelude <> Binding.writeBinding (Binding.bindingRuntime prefix target) storage value <> [status | not grouped])
+  P.AssignArray storage name values -> lowerArrayWrite storage name values False
+  P.AppendArray storage name values -> lowerArrayWrite storage name values True
+  P.AssignArrayElement storage name index scalar -> do
+    (prelude, value) <- lowerScalar scalar
+    target <- bindingName name
+    status <- setSourceStatus (ExprLiteral "0")
+    grouped <- gets materialAssignment
+    pure (prelude <> arrayWrite storage target (target <> "[" <> show (index + 1) <> "]") [arg value] <> [status | not grouped])
   P.Erase name -> do
     target <- bindingName name
     status <- setSourceStatus (ExprLiteral "0")
@@ -422,9 +558,13 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     range <- gets materialRange
     guardStatements <- errexitGuard suppressed
     mode <- gets (entryMode . materialConfig)
+    supervised <- gets materialSession
     let origin = maybe "<input>" (srcFile . rangeStart) range
         line = maybe "1" (show . srcLine . rangeStart) range
-    pure (Directory.directoryStatements mode prefix runtime status origin line operation <> guardStatements)
+    traps <- gets materialTraps
+    incoming <- fresh "directory_incoming"
+    let terminate = if traps then [assign [SetGlobal] (runtime <> "pending_signal") (ExprLiteral "13"), Traps.exitWithStatusAt runtime (ExprLiteral origin) (scalarVar incoming)] else [Session.request runtime "finish-signal" [arg (ExprLiteral "13")], builtin "exit" [arg (ExprLiteral "141")]]
+    pure ([assign [SetLocal] incoming (scalarVar status) | supervised && traps] <> Directory.directoryStatements supervised mode prefix runtime status origin line operation <> [ifStatements [testEquals (scalarVar status) "141"] terminate [] | supervised] <> guardStatements)
   P.SetOption option enabled -> do
     name <- runtimeName (case option of P.Errexit -> "errexit"; P.Pipefail -> "pipefail")
     status <- setSourceStatus (ExprLiteral "0")
@@ -459,10 +599,12 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     (incrementBody, _) <- lowerHeader failed increment
     previous <- gets materialLoops
     previousActions <- gets materialContinueActions
+    previousDepths <- gets materialLoopDescriptorDepths
+    loopDepth <- gets materialDescriptorDepth
     let incrementActions = incrementBody <> [ifStatements [testEquals (scalarVar failed) "1"] [Stmt Break] []]
-    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = incrementActions : previousActions})
+    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = incrementActions : previousActions, materialLoopDescriptorDepths = loopDepth : previousDepths})
     bodyValue <- lowerStatements suppressed body
-    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions})
+    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions, materialLoopDescriptorDepths = previousDepths})
     status <- runtimeName "status"
     finalStatus <- setSourceStatus (scalarVar result)
     failedStatus <- setSourceStatus (ExprLiteral "1")
@@ -475,10 +617,12 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     result <- fresh "loop_status"
     previous <- gets materialLoops
     previousActions <- gets materialContinueActions
-    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = [] : previousActions})
+    previousDepths <- gets materialLoopDescriptorDepths
+    loopDepth <- gets materialDescriptorDepth
+    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = [] : previousActions, materialLoopDescriptorDepths = loopDepth : previousDepths})
     predicateBody <- lowerStatements True predicate
     bodyValue <- lowerStatements suppressed body
-    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions})
+    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions, materialLoopDescriptorDepths = previousDepths})
     status <- runtimeName "status"
     let check = if inverted then Stmt (Not (Command "test" [arg (scalarVar status), arg (ExprLiteral "="), arg (ExprLiteral "0")])) else testEquals (scalarVar status) "0"
     resultStatus <- setSourceStatus (scalarVar result)
@@ -490,9 +634,11 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     result <- fresh "loop_status"
     previous <- gets materialLoops
     previousActions <- gets materialContinueActions
-    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = [] : previousActions})
+    previousDepths <- gets materialLoopDescriptorDepths
+    loopDepth <- gets materialDescriptorDepth
+    modify' (\material -> material {materialLoops = result : previous, materialContinueActions = [] : previousActions, materialLoopDescriptorDepths = loopDepth : previousDepths})
     bodyValue <- lowerStatements suppressed body
-    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions})
+    modify' (\material -> material {materialLoops = previous, materialContinueActions = previousActions, materialLoopDescriptorDepths = previousDepths})
     values <- fresh "for_values"
     iteration <- fresh "iteration"
     status <- runtimeName "status"
@@ -501,14 +647,14 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
       ( prelude
           <> [ builtin "set" (arg (ExprLiteral values) : arguments),
                assign [SetLocal] result (ExprLiteral "0"),
-               Stmt (For iteration (ExprVariable (VarAll values)) (bodyNE (Binding.writeBinding (Binding.bindingRuntime prefix target) storage (scalarVar iteration) <> bodyValue <> [assign [] result (scalarVar status)])) []),
+               Stmt (For iteration (ExprVariable (VarAll values)) (bodyNE ([statement | name /= "_", statement <- Binding.writeBinding (Binding.bindingRuntime prefix target) storage (scalarVar iteration)] <> bodyValue <> [assign [] result (scalarVar status)])) []),
                resultStatus
              ]
       )
   P.Case scalar arms -> lowerCase suppressed scalar arms
   P.DefineFunction name body -> do
     needProgram (RequiresFishFeature FunctionScopeSharing) "Bash dynamic function scope"
-    bodyValue <- lowerStatements False body
+    bodyValue <- withDescriptorRoot (lowerStatements False body)
     status <- runtimeName "status"
     zero <- setSourceStatus (ExprLiteral "0")
     cfg <- gets materialConfig
@@ -517,7 +663,8 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     helpers <- gets materialHelpers
     wrapper <- fresh "function_entry"
     nativeOperations <- gets (foldMap (\case RequiresNativeRuntime _ _ operations -> operations; _ -> mempty) . M.keys . materialRequirements)
-    let directBody = bodyValue <> [builtin "return" [arg (if null bodyValue then ExprLiteral "0" else scalarVar status)]]
+    traps <- gets materialTraps
+    let directBody = [statement | traps, statement <- Traps.functionEntry prefix] <> bodyValue <> [builtin "return" [arg (if null bodyValue then ExprLiteral "0" else scalarVar status)]]
         framedBody = sourceableEntry cfg nativeOperations prefix identityTag (scalarVar (prefix <> "incoming")) wrapper [] helpers bodyValue
         sharedBody =
           [ ifStatements
@@ -534,7 +681,12 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
   P.SourceBody request body -> do
     needProgram (RequiresFishFeature FunctionScopeSharing) "Owned source return and caller scope"
     wrapper <- fresh "source"
+    previousReturn <- gets materialReturnDepth
+    deferred <- gets materialDeferCompletion
+    currentDepth <- gets materialDescriptorDepth
+    modify' (\material -> material {materialReturnDepth = currentDepth, materialDeferCompletion = False})
     bodyValue <- lowerStatements suppressed body
+    modify' (\material -> material {materialReturnDepth = previousReturn, materialDeferCompletion = deferred})
     status <- runtimeName "status"
     (prelude, arguments) <-
       if null (P.sourceRequestArguments request)
@@ -572,14 +724,49 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
     guardStatements <- errexitGuard suppressed
     pure (Child.childPrelude invocation <> [Child.childCommand invocation, status] <> childCleanup invocation <> guardStatements)
   P.Pipeline regions -> do
-    invocations <- traverse (childMaterialization Child.IsolatedChild) regions
-    prefix <- fresh "pipeline"
-    pipefail <- runtimeName "pipefail"
-    let result = Child.materializePipeline prefix (scalarVar pipefail) invocations
-    traverse_ mergeRequirement (Child.pipelineRequirements result)
-    status <- setSourceStatus (Child.pipelineStatus result)
-    guardStatements <- errexitGuard suppressed
-    pure (Child.pipelineStatements result <> [status] <> concatMap childCleanup invocations <> guardStatements)
+    supervised <- gets materialSession
+    if supervised
+      then lowerSessionPipeline suppressed "run" regions
+      else do
+        invocations <- traverse (childMaterialization Child.IsolatedChild) regions
+        prefix <- fresh "pipeline"
+        pipefail <- runtimeName "pipefail"
+        let result = Child.materializePipeline prefix (scalarVar pipefail) invocations
+        traverse_ mergeRequirement (Child.pipelineRequirements result)
+        status <- setSourceStatus (Child.pipelineStatus result)
+        guardStatements <- errexitGuard suppressed
+        pure (Child.pipelineStatements result <> [status] <> concatMap childCleanup invocations <> guardStatements)
+  P.SupervisedPipeline regions -> lowerSessionPipeline suppressed "run" regions
+  P.Background region -> do
+    case concatMap flattenStatements (P.childStatements region) of
+      [P.Statement _ (P.Pipeline regions)] -> lowerSessionPipeline True "spawn" regions
+      [P.Statement _ (P.SupervisedPipeline regions)] -> lowerSessionPipeline True "spawn" regions
+      _ -> do
+        (prelude, frames, cleanup) <- sessionStage region
+        invocation <- projectedSessionRequest "spawn" frames
+        captured <- captureStatus
+        pure (prelude <> [invocation, captured] <> cleanup)
+  P.Wait wordsValue -> do
+    (prelude, arguments) <- lowerWords wordsValue
+    prefix <- gets materialPrefix
+    (origin, line) <- diagnosticOrigin
+    captured <- captureStatus
+    guards <- errexitGuard suppressed
+    pure (prelude <> [Session.request prefix "wait" (map (arg . ExprLiteral) [origin, line] <> arguments), captured] <> guards)
+  P.SetTrap kind handler -> do
+    prefix <- gets materialPrefix
+    zero <- setSourceStatus (ExprLiteral "0")
+    case handler of
+      Nothing -> pure (Traps.install prefix kind Nothing <> [zero])
+      Just statements -> do
+        name <- fresh "trap_body"
+        previousCallback <- gets materialCallback
+        modify' (\material -> material {materialCallback = True})
+        body <- withDescriptorRoot (lowerStatements False statements)
+        modify' (\material -> material {materialCallback = previousCallback})
+        status <- runtimeName "status"
+        let definition = Stmt (Function (MkFishFunction name [FuncUnknownFlag "--no-scope-shadowing"] [] (bodyNE (body <> [builtin "return" [arg (scalarVar status)]]))))
+        pure ([definition] <> Traps.install prefix kind (Just name) <> [zero])
   P.ArithmeticCommand site expression bindings -> do
     result <- arithmeticMaterialization expression bindings
     success <- setSourceStatus (Arithmetic.arithmeticStatus result)
@@ -596,11 +783,10 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
       )
   P.Return value -> lowerExit "return" value
   P.Exit value -> lowerExit "exit" value
-  P.Break -> lowerLoopJump (Stmt Break)
+  P.Break -> lowerLoopJump [] (Stmt Break)
   P.Continue -> do
     actions <- gets (fromMaybe [] . viaNonEmpty head . materialContinueActions)
-    jump <- lowerLoopJump (Stmt Continue)
-    pure (actions <> jump)
+    lowerLoopJump actions (Stmt Continue)
   where
     lowerConjunction onSuccess left right = do
       first <- lowerStatement True left
@@ -610,7 +796,100 @@ lowerStatementNode suppressed (P.Statement _ node) = case node of
       pure (first <> [branch])
     lowerExit name value = do
       (prelude, result) <- maybe (([],) . scalarVar <$> runtimeName "status") lowerScalar value
-      pure (prelude <> [builtin name [arg result]])
+      remaining <- gets materialReturnDepth
+      unwind <- if name == "return" then unwindDescriptors remaining else pure []
+      traps <- gets materialTraps
+      prefix <- gets materialPrefix
+      origin <- diagnosticOriginExpression
+      pure (prelude <> unwind <> [if traps && name == "exit" then Traps.exitWithStatusAt prefix origin result else builtin name [arg result]])
+
+withDescriptorRoot :: Materialize a -> Materialize a
+withDescriptorRoot action = do
+  depth <- gets materialDescriptorDepth
+  returnDepth <- gets materialReturnDepth
+  loopDepths <- gets materialLoopDescriptorDepths
+  deferred <- gets materialDeferCompletion
+  modify' (\material -> material {materialDescriptorDepth = 0, materialReturnDepth = 0, materialLoopDescriptorDepths = [], materialDeferCompletion = False})
+  result <- action
+  modify' (\material -> material {materialDescriptorDepth = depth, materialReturnDepth = returnDepth, materialLoopDescriptorDepths = loopDepths, materialDeferCompletion = deferred})
+  pure result
+
+unwindDescriptors :: Int -> Materialize [FishStatement]
+unwindDescriptors remaining = do
+  depth <- gets materialDescriptorDepth
+  prefix <- gets materialPrefix
+  pure (replicate (max 0 (depth - remaining)) (Session.request prefix "fd-pop" []))
+
+lowerOwnedRedirects :: Bool -> [P.Redirection] -> P.Statement -> Materialize [FishStatement]
+lowerOwnedRedirects suppressed redirects statement = do
+  prefix <- gets materialPrefix
+  depth <- gets materialDescriptorDepth
+  failed <- fresh "redirect_status"
+  operations <- traverse lowerOwnedRedirect redirects
+  previousDefer <- gets materialDeferCompletion
+  let simple = case statement of P.Statement _ (P.Sequence _) -> False; P.Statement _ (P.Conditional {}) -> False; P.Statement _ (P.WhileLoop {}) -> False; P.Statement _ (P.ForLoop {}) -> False; P.Statement _ (P.ArithmeticFor {}) -> False; P.Statement _ (P.Case {}) -> False; P.Statement _ (P.And {}) -> False; P.Statement _ (P.Or {}) -> False; _ -> True
+  modify' (\material -> material {materialDescriptorDepth = depth + 1, materialDeferCompletion = previousDefer || simple})
+  (prelude, body) <- case statement of
+    P.Statement _ (P.Invoke target wordsValue) -> lowerInvokeWords suppressed target wordsValue
+    P.Statement _ (P.PrefixedInvoke assignments target wordsValue) -> lowerPrefixedInvoke suppressed assignments target wordsValue
+    _ -> ([],) <$> lowerStatement suppressed statement
+  modify' (\material -> material {materialDescriptorDepth = depth, materialDeferCompletion = previousDefer})
+  failureStatus <- setSourceStatus (scalarVar failed)
+  guards <- errexitGuard suppressed
+  let apply statements = ifStatements [testEquals (scalarVar failed) "0"] (statements <> [assign [] failed (scalarVar "status")]) []
+  pure (prelude <> [Session.request prefix "fd-push" [], assign [SetLocal] failed (scalarVar "status")] <> map apply operations <> [ifStatements [testEquals (scalarVar failed) "0"] (body <> [Session.request prefix "fd-pop" []] <> [guardStatement | simple, guardStatement <- guards]) ([failureStatus, Session.request prefix "fd-pop" []] <> guards)])
+
+lowerOwnedRedirect :: P.Redirection -> Materialize [FishStatement]
+lowerOwnedRedirect redirect = do
+  prefix <- gets materialPrefix
+  (origin, line) <- diagnosticOrigin
+  let request operation fields = Session.request prefix operation (map arg fields)
+      open fd mode path = do
+        (prelude, value) <- lowerScalar path
+        pure (prelude <> [request "fd-open" [ExprLiteral origin, ExprLiteral line, ExprLiteral (show fd), ExprLiteral mode, value]])
+  case redirect of
+    P.OpenDescriptor fd _ endpoint@P.ProcessSubstitution {} -> do
+      (prelude, _) <- lowerScalar endpoint
+      pure (prelude <> [request "fd-endpoint" [ExprLiteral origin, ExprLiteral line, ExprLiteral (show fd), Session.endpointLease prefix]])
+    P.OpenDescriptor fd mode path -> open fd (case mode of P.ReadFile -> "read"; P.WriteFile -> "write"; P.AppendFile -> "append"; P.ReadWriteFile -> "read-write") path
+    P.NullDescriptor fd input -> open fd (if input then "read" else "write") (P.Literal "/dev/null")
+    P.DuplicateDescriptor target source _ -> pure [request "fd-dup" (map ExprLiteral [origin, line, show target, show source])]
+    P.CloseDescriptor fd _ -> pure [request "fd-close" [ExprLiteral (show fd)]]
+    P.InputDescriptor fd scalar newline -> do
+      (prelude, value) <- lowerScalar scalar
+      pure (prelude <> [request "fd-data" [ExprLiteral (show fd), if newline then ExprStringConcat value (ExprLiteral "\n") else value]])
+
+lowerRead :: Bool -> P.ReadOptions -> P.ReadTarget -> Materialize [FishStatement]
+lowerRead suppressed options target = do
+  prefix <- gets materialPrefix
+  ifs <- runtimeName "ifs"
+  (origin, line) <- diagnosticOrigin
+  captured <- captureStatus
+  guards <- errexitGuard suppressed
+  let (mode, count) = case target of P.ReadReply _ -> ("reply", 1 :: Int); P.ReadScalars names -> ("scalar", length names); P.ReadArray {} -> ("array", 0)
+      fields = map ExprLiteral [origin, line, show (P.readDescriptor options), if P.readRaw options then "1" else "0", P.readDelimiter options, maybe "-1" show (P.readCount options)] <> [scalarVar ifs] <> map ExprLiteral [mode, show count]
+      value index = ExprQuotedVariable (VarIndex (prefix <> "session_fields") (IndexSingle (ExprNumLiteral (index + 1))))
+      write (index, (storage, name)) = do
+        actual <- bindingName name
+        pure (Binding.writeBinding (Binding.bindingRuntime prefix actual) storage (value index))
+  assignments <- case target of
+    P.ReadReply storage -> write (1, (storage, "REPLY"))
+    P.ReadScalars names -> concat <$> traverse write (zip [1 ..] names)
+    P.ReadArray storage name -> do
+      actual <- bindingName name
+      pure (arrayWrite storage actual actual [arg (Session.responseValues prefix)])
+  pure ([Session.request prefix "read" (map arg fields), captured, ifStatements [testEquals (value 0) "1"] assignments []] <> guards)
+
+lowerDirectRedirects :: Bool -> [P.Redirection] -> P.Statement -> Materialize [FishStatement]
+lowerDirectRedirects suppressed redirects statement = do
+  needProgram (RequiresPlatformCapability PosixOwnedDescriptors) "Standard descriptor and stable null device operations"
+  (prelude, body) <- case statement of
+    P.Statement _ (P.Invoke target wordsValue) -> lowerInvokeWords suppressed target wordsValue
+    P.Statement _ (P.PrefixedInvoke assignments target wordsValue) -> lowerPrefixedInvoke suppressed assignments target wordsValue
+    P.Statement _ P.DeclarationCommand {} -> lift (Left (planDiagnostic "redirect-declaration" "Redirected declarations require their own expansion and local-slot scope" :| []))
+    _ -> ([],) <$> lowerStatement suppressed statement
+  lowered <- either (\message -> lift (Left (planDiagnostic "redirect-materialization" message :| []))) pure (traverse lowerRedirect redirects)
+  pure (prelude <> [Stmt (Begin (bodyNE body) (map RedirectVal lowered))])
 
 lowerHeader :: Text -> P.Statement -> Materialize ([FishStatement], FishExpr TStr)
 lowerHeader failed (P.Statement _ (P.ArithmeticCommand site expression bindings)) = do
@@ -618,26 +897,72 @@ lowerHeader failed (P.Statement _ (P.ArithmeticCommand site expression bindings)
   pure (Arithmetic.arithmeticStatements result <> [ifStatements [testEquals (Arithmetic.arithmeticError result) ""] [] (arithmeticDiagnostic True site result <> [assign [] failed (ExprLiteral "1")])], Arithmetic.arithmeticValue result)
 lowerHeader _ _ = lift (Left (planDiagnostic "arithmetic-header" "Arithmetic loop header must own an integer operation" :| []))
 
-lowerLoopJump :: FishStatement -> Materialize [FishStatement]
-lowerLoopJump jump = do
+lowerLoopJump :: [FishStatement] -> FishStatement -> Materialize [FishStatement]
+lowerLoopJump actions jump = do
   target <- gets (viaNonEmpty head . materialLoops)
   result <- maybe (lift (Left (planDiagnostic "loop-control" "Loop control has no owned materialization target" :| []))) pure target
   zero <- setSourceStatus (ExprLiteral "0")
-  pure [zero, assign [] result (ExprLiteral "0"), jump]
+  remaining <- gets (fromMaybe 0 . viaNonEmpty head . materialLoopDescriptorDepths)
+  unwind <- unwindDescriptors remaining
+  pure (unwind <> actions <> [zero, assign [] result (ExprLiteral "0"), jump])
 
-lowerRedirect :: P.Redirection -> Redirect
+lowerRedirect :: P.Redirection -> Either Text Redirect
 lowerRedirect = \case
-  P.DuplicateDescriptor source target input -> MkRedirect (RedirectFD source) (mode input) (RedirectTargetFD target)
-  P.CloseDescriptor source input -> MkRedirect (RedirectFD source) (mode input) RedirectClose
-  P.NullDescriptor source input -> MkRedirect (RedirectFD source) (mode input) (RedirectFile (ExprLiteral "/dev/null"))
+  P.DuplicateDescriptor source target input -> pure (MkRedirect (RedirectFD source) (mode input) (RedirectTargetFD target))
+  P.CloseDescriptor source input -> pure (MkRedirect (RedirectFD source) (mode input) RedirectClose)
+  P.NullDescriptor source input -> pure (MkRedirect (RedirectFD source) (mode input) (RedirectFile (ExprLiteral "/dev/null")))
+  P.OpenDescriptor {} -> Left "File opens require an owned descriptor session"
+  P.InputDescriptor {} -> Left "Input data requires an owned descriptor session"
   where
     mode input = if input then RedirectIn else RedirectOut
+
+lowerPrefixedInvoke :: Bool -> [(P.Storage, Text, P.Scalar)] -> P.CallTarget -> [P.Word] -> Materialize ([FishStatement], [FishStatement])
+lowerPrefixedInvoke suppressed assignments target wordsValue = do
+  (prelude, arguments) <- lowerWords wordsValue
+  prefix <- gets materialPrefix
+  frozen <- forM assignments $ \(_, name, scalar) -> do
+    (setup, value) <- lowerScalar scalar
+    actual <- bindingName name
+    saved <- fresh "prefix_value"
+    let installValue operand = [assign [SetLocal, SetExport, SetUnpath] actual operand, assign [SetLocal] (prefix <> "binding_export_" <> actual) (ExprLiteral "--export"), assignList [SetLocal] (prefix <> "binding_environment_" <> actual) (ExprListLiteral [])]
+    pure (assign [SetLocal] saved (ExprLiteral ""), setup <> installValue value <> [assign [] saved (scalarVar actual)], installValue (scalarVar saved))
+  body <- lowerInvocation suppressed target arguments
+  let declarations = [declaration | (declaration, _, _) <- frozen]
+      expansion = concat [statements | (_, statements, _) <- frozen]
+      installation = concat [statements | (_, _, statements) <- frozen]
+  pure (prelude <> declarations <> [Stmt (Begin (bodyNE expansion) [])], [Stmt (Begin (bodyNE (installation <> body)) [])])
+
+lowerInvokeWords :: Bool -> P.CallTarget -> [P.Word] -> Materialize ([FishStatement], [FishStatement])
+lowerInvokeWords suppressed target wordsValue = do
+  supervised <- gets materialSession
+  case (supervised, target, traverse literalWord wordsValue >>= Native.nativeEcho) of
+    (False, P.Builtin "echo", Just (newline, output)) -> do
+      writer <- directWriter "echo-bytes" [arg (ExprLiteral (T.intercalate " " output <> if newline then "\n" else ""))]
+      captured <- captureStatus
+      guards <- errexitGuard suppressed
+      pure ([], [writer, captured] <> guards)
+    _ -> do
+      (prelude, arguments) <- lowerWords wordsValue
+      body <- lowerInvocation suppressed target arguments
+      prefix <- gets materialPrefix
+      let endpoint = \case P.OneField P.ProcessSubstitution {} -> True; _ -> False
+      pure (prelude, body <> [Session.request prefix "substitution-release" [] | any endpoint wordsValue])
 
 lowerInvocation :: Bool -> P.CallTarget -> [ExprOrRedirect] -> Materialize [FishStatement]
 lowerInvocation suppressed target arguments = do
   capture <- captureStatus
   guardStatements <- errexitGuard suppressed
+  supervised <- gets materialSession
+  prefix <- gets materialPrefix
   case target of
+    P.Builtin name | supervised && name `elem` ["printf", "echo"] -> do
+      location <- diagnosticArguments
+      origin <- diagnosticOriginExpression
+      sourceStatus <- runtimeName "status"
+      traps <- gets materialTraps
+      incoming <- fresh "writer_incoming"
+      let terminate = if traps then [assign [SetGlobal] (prefix <> "pending_signal") (ExprLiteral "13"), Traps.exitWithStatusAt prefix origin (scalarVar incoming)] else [Session.request prefix "finish-signal" [arg (ExprLiteral "13")], builtin "exit" [arg (ExprLiteral "141")]]
+      pure ([assign [SetLocal] incoming (scalarVar sourceStatus) | traps] <> [Session.request prefix "run" ([arg (ExprLiteral "builtin")] <> location <> [arg (ExprLiteral name)] <> arguments), capture, ifStatements [testEquals (scalarVar sourceStatus) "141"] terminate []] <> guardStatements)
     P.Function name -> do
       suppression <- runtimeName "suppress"
       saved <- fresh "caller_suppression"
@@ -648,15 +973,25 @@ lowerInvocation suppressed target arguments = do
             <> [call, capture, assign [] suppression (scalarVar saved)]
             <> guardStatements
         )
-    P.Builtin "echo" -> do
-      needNative NativeEcho "Bash echo option and byte semantics"
-      native <- runtimeName "native"
-      pure ([framedPrimitive native "echo" arguments, capture] <> guardStatements)
+    P.Builtin name | name `elem` ["printf", "echo"] -> do
+      writer <- directWriter name arguments
+      pure ([writer, capture] <> guardStatements)
     P.Builtin name -> pure ([builtin (if name == ":" then "true" else name) arguments, capture] <> guardStatements)
     P.External name -> do
       needProgram (RequiresCommand name) "Explicit external command dispatch"
       helper <- externalHelper name
-      pure ([Stmt (Command helper arguments), capture] <> guardStatements)
+      (origin, line) <- diagnosticOrigin
+      pure ([Stmt (Command helper (map (arg . ExprLiteral) [origin, line] <> arguments)), capture] <> guardStatements)
+
+directWriter :: Text -> [ExprOrRedirect] -> Materialize FishStatement
+directWriter name arguments = do
+  needNative NativeWrite "Bash output errno and signal semantics"
+  prefix <- gets materialPrefix
+  helpers <- gets materialHelpers
+  unless (NativeRuntime.nativeWriterName prefix `elem` helperNames helpers) $
+    modify' (\material -> material {materialHelpers = materialHelpers material <> [NativeRuntime.nativeWriterDefinition prefix]})
+  range <- gets materialRange
+  pure (NativeRuntime.nativeWriterInvocation prefix range name arguments)
 
 lowerWords :: [P.Word] -> Materialize ([FishStatement], [ExprOrRedirect])
 lowerWords values = do
@@ -665,6 +1000,17 @@ lowerWords values = do
 
 lowerWord :: P.Word -> Materialize ([FishStatement], [ExprOrRedirect])
 lowerWord = \case
+  P.ExpandedWord parts -> do
+    frozen <- forM parts $ \part -> do
+      let (mode, scalar) = case part of P.QuotedExpansion value -> ("q", value); P.LiteralExpansion value -> ("l", value); P.SplitExpansion value -> ("e", value)
+      (prelude, value) <- lowerScalar scalar
+      temporary <- fresh "expansion_part"
+      pure (prelude <> [assign [SetLocal] temporary value], [arg (ExprLiteral mode), arg (scalarVar temporary)])
+    ifs <- runtimeName "ifs"
+    needNative NativeExpansion "Composed quote-aware splitting and pathname expansion"
+    native <- runtimeName "native"
+    temporary <- fresh "expanded_fields"
+    pure (concatMap fst frozen <> captureList temporary (nulCaptureStatement (framedPrimitive native "expansion" (arg (scalarVar ifs) : concatMap snd frozen))), [arg (ExprVariable (VarAll temporary))])
   P.PathnameFields patternValue -> do
     (prelude, parts) <- lowerPatternParts patternValue
     needNative NativeGlob "Quote-aware pathname expansion"
@@ -696,6 +1042,39 @@ lowerWord = \case
     temporary <- fresh "argv_fields"
     let producer = framedPrimitive native "argv" [arg (scalarVar savedPrefix), arg suffix, arg (ExprLiteral (if force then "1" else "0")), arg (ExprVariable (VarAll "argv"))]
     pure (preA <> [assign [SetLocal] savedPrefix prefix] <> preB <> captureList temporary (nulCaptureStatement producer), [arg (ExprVariable (VarAll temporary))])
+  P.QuotedArray name (P.Literal "") (P.Literal "") False -> do
+    target <- bindingName name
+    temporary <- fresh "array_fields"
+    pure ([assignList [SetLocal] temporary (ExprVariable (VarAll target))], [arg (ExprVariable (VarAll temporary))])
+  P.QuotedArray name before after force -> do
+    target <- bindingName name
+    (preA, prefix) <- lowerScalar before
+    savedPrefix <- fresh "array_prefix"
+    (preB, suffix) <- lowerScalar after
+    needNative NativeArgv "Quoted array prefix and suffix cardinality"
+    native <- runtimeName "native"
+    needProgram (RequiresFishFeature NulDelimitedCapture) "Quoted array field transport"
+    temporary <- fresh "array_fields"
+    let producer = framedPrimitive native "argv" [arg (scalarVar savedPrefix), arg suffix, arg (ExprLiteral (if force then "1" else "0")), arg (ExprVariable (VarAll target))]
+    pure (preA <> [assign [SetLocal] savedPrefix prefix] <> preB <> captureList temporary (nulCaptureStatement producer), [arg (ExprVariable (VarAll temporary))])
+
+lowerArrayWrite :: P.Storage -> Text -> [P.Word] -> Bool -> Materialize [FishStatement]
+lowerArrayWrite storage name values append = do
+  (prelude, arguments) <- lowerWords values
+  target <- bindingName name
+  status <- setSourceStatus (ExprLiteral "0")
+  grouped <- gets materialAssignment
+  let operands = [arg (ExprVariable (VarAll target)) | append] <> arguments
+  pure (prelude <> arrayWrite storage target target operands <> [status | not grouped])
+
+arrayWrite :: P.Storage -> Text -> Text -> [ExprOrRedirect] -> [FishStatement]
+arrayWrite storage name target values =
+  let write flags = builtin "set" (map (arg . ExprLiteral) (flags <> ["--unexport", "--unpath", target]) <> values)
+   in case storage of
+        P.Global -> [write ["--global"]]
+        P.CallerGlobal _ -> [write ["--global"]]
+        P.Local -> [write []]
+        _ -> [ifStatements [builtin "set" [arg (ExprLiteral "--query"), arg (ExprLiteral name)]] [write []] [write ["--global"]]]
 
 captureList :: Text -> FishExpr (TList TStr) -> [FishStatement]
 captureList name expression =
@@ -709,7 +1088,7 @@ nulCapture native program values = nulCaptureStatement (framedPrimitive native p
 framedPrimitive :: Text -> Text -> [ExprOrRedirect] -> FishStatement
 framedPrimitive native program values =
   let producer = builtin "printf" (arg (ExprLiteral "%s\\0") : values)
-      consumer = Stmt (Command native [arg (ExprLiteral "--abi"), arg (ExprLiteral "1"), arg (ExprLiteral program)])
+      consumer = Stmt (Command native [arg (ExprLiteral "--abi"), arg (ExprLiteral (show runtimeABI)), arg (ExprLiteral program)])
    in Stmt (Pipeline (MkFishJobPipeline False [] producer [PipeTo [] consumer] False))
 
 nulCaptureStatement :: FishStatement -> FishExpr (TList TStr)
@@ -724,11 +1103,27 @@ lowerScalar = \case
     let escaped = mconcat ["\\" <> toText (showOct byte "") | byte <- BS.unpack bytes]
         producer = builtin "printf" [arg (ExprLiteral "%b\\0"), arg (ExprLiteral escaped)]
     pure (captureList temporary (nulCaptureStatement producer), scalarVar temporary)
+  P.PlatformBytes darwinBytes linuxBytes -> do
+    temporary <- fresh "platform_bytes"
+    needNative NativePlatformBytes "Platform-dependent Bash ANSI quoted bytes"
+    helper <- runtimeName "native"
+    let hexBytes = T.concat . map (\byte -> let digits = toText (showHex byte "") in T.justifyRight 2 '0' digits) . BS.unpack
+    pure (captureList temporary (nulCapture helper "bytes-platform" (map (ExprLiteral . hexBytes) [darwinBytes, linuxBytes])), scalarVar temporary)
   P.AppendValue name value -> do
     (prelude, rhs) <- lowerScalar value
     saved <- fresh "append_rhs"
     target <- bindingName name
     pure (prelude <> [assign [SetLocal] saved rhs], ExprStringConcat (scalarVar target) (scalarVar saved))
+  P.ParameterPatternTransform operation scalar patternValue -> do
+    (prelude, value) <- lowerScalar scalar
+    subject <- fresh "parameter_subject"
+    (patternPrelude, parts) <- lowerPatternParts patternValue
+    needNative NativePatternParts "Quote-aware byte parameter pattern"
+    helper <- runtimeName "native"
+    temporary <- fresh "parameter_transform"
+    needProgram (RequiresFishFeature NulDelimitedCapture) "Parameter byte transport"
+    let fields = [ExprLiteral operation, scalarVar subject] <> concatMap (\(active, part) -> [ExprLiteral (if active then "1" else "0"), part]) parts
+    pure (prelude <> [assign [SetLocal] subject value] <> patternPrelude <> captureList temporary (nulCapture helper "pattern-parts" fields), scalarVar temporary)
   P.ParameterTransform operation scalar patternValue replacement -> do
     (prelude, value) <- lowerScalar scalar
     needNative NativePattern "Bounded byte parameter operation"
@@ -746,6 +1141,12 @@ lowerScalar = \case
         predicate = if nullSensitive then [Stmt (JobConj (MkFishJobConjunction Nothing (jobOf exists) [JCAnd (jobOf nonempty)]))] else [exists]
     pure ([assign [SetLocal] temporary (ExprLiteral ""), ifStatements predicate (prelude <> [assign [] temporary value]) []], scalarVar temporary)
   P.Variable name -> ([],) . scalarVar <$> bindingName name
+  P.ArrayElement name index -> do
+    target <- bindingName name
+    pure ([], ExprQuotedVariable (VarIndex target (IndexSingle (ExprNumLiteral (index + 1)))))
+  P.ArrayLength name -> do
+    target <- bindingName name
+    pure ([], ExprQuotedCommandSubst (builtin "count" [arg (ExprVariable (VarAll target))] :| []))
   P.PositionalAlternate index nullSensitive alternative -> do
     temporary <- fresh "positional_alternate"
     (prelude, value) <- lowerScalar alternative
@@ -764,6 +1165,7 @@ lowerScalar = \case
     pure ([assign [SetLocal] temporary (ExprLiteral ""), ifStatements predicate [assign [] temporary current] (prelude <> [assign [] temporary fallback])], scalarVar temporary)
   P.Positional index -> pure ([], ExprQuotedVariable (VarIndex "argv" (IndexSingle (ExprNumLiteral index))))
   P.ArgumentCount -> pure ([], ExprQuotedCommandSubst (builtin "count" [arg (ExprVariable (VarAll "argv"))] :| []))
+  P.LastBackgroundPid -> do name <- runtimeName "last_pid"; pure ([], scalarVar name)
   P.LastStatus -> ([],) . scalarVar <$> runtimeName "status"
   P.Concat values | Just literals <- traverse (\case P.Literal value -> Just value; _ -> Nothing) values -> pure ([], ExprLiteral (mconcat literals))
   P.Concat values -> do
@@ -772,6 +1174,14 @@ lowerScalar = \case
       temporary <- fresh "scalar_part"
       pure (prelude <> [assign [SetLocal] temporary expression], scalarVar temporary)
     pure (concatMap fst parts, foldl' ExprStringConcat (ExprLiteral "") (map snd parts))
+  P.ProcessSubstitution direction region -> do
+    prefix <- gets materialPrefix
+    needNative NativePipePaths "Inherited pipe pathname endpoints"
+    needProgram (RequiresPlatformCapability PipeDescriptorPaths) "Owned process substitution pipe descriptors"
+    (prelude, frames, cleanup) <- sessionStage region
+    invocation <- projectedSessionRequest "substitution" (arg (ExprLiteral (case direction of P.ProcessInput -> "input"; P.ProcessOutput -> "output")) : frames)
+    temporary <- fresh "process_endpoint"
+    pure (prelude <> [invocation, assign [SetLocal] temporary (Session.endpointPath prefix)] <> cleanup, scalarVar temporary)
   P.Substitute region -> do
     invocation <- childMaterialization Child.SubstitutionChild region
     prefix <- fresh "capture"
@@ -804,12 +1214,16 @@ lowerScalar = \case
     pure ([assign [SetLocal] temporary (ExprLiteral ""), ifStatements predicate [assign [] temporary (scalarVar target)] otherwiseBody], scalarVar temporary)
   P.ArithmeticValue site expression bindings -> do
     result <- arithmeticMaterialization expression bindings
+    traps <- gets materialTraps
+    prefix <- gets materialPrefix
+    origin <- diagnosticOriginExpression
+    let terminate = if traps then Traps.exitWithStatusAt prefix origin (ExprLiteral "1") else builtin "exit" [arg (ExprLiteral "1")]
     pure
       ( Arithmetic.arithmeticStatements result
           <> [ ifStatements
                  [testEquals (Arithmetic.arithmeticError result) ""]
                  []
-                 (arithmeticDiagnostic False site result <> [builtin "exit" [arg (ExprLiteral "1")]])
+                 (arithmeticDiagnostic False site result <> [terminate])
              ],
         Arithmetic.arithmeticValue result
       )
@@ -857,6 +1271,8 @@ arithmeticMaterialization expression bindings = do
 externalHelper :: Text -> Materialize Text
 externalHelper executable = do
   needProgram (RequiresFishFeature FunctionScopeSharing) "Owned external environment projection"
+  supervised <- gets materialSession
+  unless supervised (needNative NativeExec "Source-located external exec failures")
   helper <- runtimeName ("external_" <> T.intercalate "_" [toText (showHex (ord character) "") | character <- toString executable])
   existing <- gets (helperNames . materialHelpers)
   unless (helper `elem` existing) $ do
@@ -864,7 +1280,17 @@ externalHelper executable = do
     prefix <- gets materialPrefix
     names <- gets materialBindings
     bindings <- traverse (fmap (Binding.bindingRuntime prefix) . bindingName) (S.toAscList (S.delete "IFS" names))
-    let body = Binding.environmentShadows temporary bindings <> [external executable [arg (ExprVariable (VarAll "argv"))]]
+    let invocationArguments =
+          [ arg (ExprQuotedVariable (VarIndex "argv" (IndexSingle (ExprNumLiteral 1)))),
+            arg (ExprQuotedVariable (VarIndex "argv" (IndexSingle (ExprNumLiteral 2)))),
+            arg (ExprLiteral executable),
+            arg (ExprVariable (VarIndex "argv" (IndexRange (Just (ExprNumLiteral 3)) Nothing)))
+          ]
+        invocation =
+          if supervised
+            then Session.request prefix "run" (arg (ExprLiteral "external-site") : invocationArguments)
+            else Stmt (Decorated DecCommand (CommandExpr (scalarVar (NativeRuntime.runtimePathName prefix)) (map (arg . ExprLiteral) ["--abi", "2", "exec-site"] <> invocationArguments)))
+        body = Binding.environmentShadows temporary bindings <> [invocation]
         definition = Stmt (Function (MkFishFunction helper [FuncUnknownFlag "--no-scope-shadowing"] [] (bodyNE body)))
     modify' (\material -> material {materialHelpers = materialHelpers material <> [definition]})
   pure helper
@@ -895,30 +1321,36 @@ childMaterialization mode region = do
   prefix <- fresh "child"
   runtimePrefix <- gets materialPrefix
   suppressed <- gets materialSuppressed
+  supervised <- gets materialSession
+  traps <- gets materialTraps
   previousHelpers <- gets materialHelpers
   definitions <- fmap concat $ forM (M.toAscList (P.childFunctions region)) $ \(name, body) ->
     lowerStatement False (P.Statement (P.childRange region) (P.DefineFunction name body))
-  body <- lowerStatements suppressed (P.childStatements region)
+  bodyValue <- withDescriptorRoot (lowerStatements suppressed (P.childStatements region))
+  let body = [assign [SetGlobal] (runtimePrefix <> "source_origin") (ExprLiteral (maybe "<input>" (srcFile . rangeStart) (P.childRange region))) | traps] <> bodyValue
   helpers <- gets materialHelpers
   modify' (\s -> s {materialHelpers = previousHelpers})
   ownedBindings <- gets materialBindings
   actualBindings <- S.fromList <$> traverse bindingName (S.toAscList (P.childVariables region <> (if P.childNeedsEnvironment region then ownedBindings else mempty)))
   ownerPrefix <- gets materialPrefix
-  let bindings = actualBindings <> foldMap (Binding.bindingRuntimeNames . Binding.bindingRuntime ownerPrefix) actualBindings
+  actualArrays <- S.fromList <$> traverse bindingName (S.toAscList (P.childArrays region))
+  let bindings = (actualBindings S.\\ actualArrays) <> foldMap (Binding.bindingRuntimeNames . Binding.bindingRuntime ownerPrefix) actualBindings
   let runtime =
         Child.MkChildRuntime
           runtimePrefix
           (runtimePrefix <> "status")
           (runtimePrefix <> "errexit")
           (runtimePrefix <> "suppress")
-          (S.fromList [runtimePrefix <> role | role <- ["status", "errexit", "pipefail", "suppress", "ifs", "active", "substitution_executed", "substitution_status", "native_path"]])
+          (S.fromList ([runtimePrefix <> role | role <- ["status", "errexit", "pipefail", "suppress", "ifs", "active", "substitution_executed", "substitution_status", "native_path", "last_pid"]] <> [runtimePrefix <> "source_origin" | traps]))
           (NativeRuntime.runtimeHelperName runtimePrefix)
           suppressed
+          supervised
+          traps
   result <-
     either
       (\message -> lift (Left (planDiagnostic "child-materialization" message :| [])))
       pure
-      (Child.materializeChild prefix mode runtime bindings (helperClosure helpers (body <> definitions) <> definitions) body)
+      (Child.materializeChild prefix mode runtime bindings actualArrays (helperClosure helpers (body <> definitions <> [Traps.exitWithStatus runtimePrefix (scalarVar (runtimePrefix <> "status")) | traps]) <> definitions) body)
   traverse_ mergeRequirement (Child.childRequirements result)
   needProgram (RequiresFishFeature FunctionScopeSharing) "Owned child body and dynamic function closure"
   pure result
@@ -968,8 +1400,9 @@ lowerPatterns input (patternValue : remaining) = do
 sourceableEntry :: TranslateConfig -> S.Set NativeOperation -> Text -> Text -> FishExpr TStr -> Text -> [Text] -> [FishStatement] -> [FishStatement] -> [FishStatement]
 sourceableEntry cfg nativeOperations prefix identityTag incomingValue wrapper moduleFunctions helpers body =
   [assign [SetLocal] incoming incomingValue]
-    <> privateGuardsWithCaptured guardFailure captured prefix incoming (callerGuards (callerContract cfg) execution)
+    <> privateGuardsWithCaptured guardFailure captured prefix incoming markerGuards
   where
+    markerGuards = foldr (\name next -> guardWhen (builtin "set" [arg (ExprLiteral "--query"), arg (ExprLiteral name)]) ("reserved launcher metadata " <> name) next) (callerGuards (callerContract cfg) execution) ["MONK_LAUNCH_ORIGINAL", "MONK_LAUNCH_WRAPPER"]
     captured = [NativeRuntime.runtimePathName prefix | wrapper /= prefix <> "entry" && not (S.null nativeOperations)]
     incoming = prefix <> "incoming"
     result = prefix <> "result"
@@ -1030,23 +1463,21 @@ guardWhen predicate message next = [ifStatements [predicate] (guardFailure messa
 guardUnless :: FishStatement -> Text -> [FishStatement] -> [FishStatement]
 guardUnless predicate message next = [ifStatements [predicate] next (guardFailure message)]
 
-privateGuardsWith :: (Text -> [FishStatement]) -> Text -> Text -> [FishStatement] -> [FishStatement]
-privateGuardsWith failure = privateGuardsWithCaptured failure []
-
 privateGuardsWithCaptured :: (Text -> [FishStatement]) -> [Text] -> Text -> Text -> [FishStatement] -> [FishStatement]
 privateGuardsWithCaptured failure captured prefix incoming next =
-  rejectWhen
-    (namesMatch (builtin "functions" [arg (ExprLiteral "--all"), arg (ExprLiteral "--names")]) [])
-    "private function namespace is occupied"
-    $ rejectWhen
-      ( namesMatch
-          (builtin "set" [arg (ExprLiteral "--names")])
-          [PipeTo [] (builtin "string" [arg (ExprLiteral "match"), arg (ExprLiteral "--invert"), arg (ExprLiteral "--regex"), arg (ExprLiteral "--"), arg (ExprLiteral ("^(" <> T.intercalate "|" (incoming : captured) <> ")$"))])]
-      )
+  foldr (\(predicate, message) continuation -> [ifStatements [predicate] (failure message) continuation]) next (privateGuardChecks captured prefix incoming)
+
+privateGuardChecks :: [Text] -> Text -> Text -> [(FishStatement, Text)]
+privateGuardChecks captured prefix incoming =
+  [ (namesMatch (builtin "functions" [arg (ExprLiteral "--all"), arg (ExprLiteral "--names")]) [], "private function namespace is occupied"),
+    ( namesMatch
+        (builtin "set" [arg (ExprLiteral "--names")])
+        [PipeTo [] (builtin "string" [arg (ExprLiteral "match"), arg (ExprLiteral "--invert"), arg (ExprLiteral "--regex"), arg (ExprLiteral "--"), arg (ExprLiteral ("^(" <> T.intercalate "|" excluded <> ")$"))]) | not (null excluded)],
       "private variable namespace is occupied"
-      next
+    )
+  ]
   where
-    rejectWhen predicate message continuation = [ifStatements [predicate] (failure message) continuation]
+    excluded = filter (not . T.null) (incoming : captured)
     namesMatch producer middle =
       Stmt
         ( Pipeline
@@ -1063,26 +1494,48 @@ privateGuardsWithCaptured failure captured prefix incoming next =
 -- relevant source bindings. Unrelated interactive state is immaterial.
 standaloneGuards :: Text -> S.Set Text -> [FishStatement] -> [FishStatement]
 standaloneGuards prefix bindings next =
-  privateGuardsWith failure prefix "" (guardSequence [bindingGuard name [builtin "true" []] | name <- S.toAscList (S.delete "IFS" bindings)] next)
+  [ifStatements [predicate] (standaloneFailure message) [] | (predicate, message) <- privateGuardChecks [] prefix ""]
+    <> standaloneBindingGuards bindings
+    <> next
+
+standaloneFailure :: Text -> [FishStatement]
+standaloneFailure message =
+  [ builtin "printf" [arg (ExprLiteral "%s\n"), arg (ExprLiteral ("monk: runtime contract failed: " <> message)), RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))],
+    builtin "exit" [arg (ExprLiteral "125")]
+  ]
+
+-- These checks can terminate their owned standalone process directly. Keeping
+-- their continuation flat makes each boundary obligation visible only once.
+standaloneBindingGuards :: S.Set Text -> [FishStatement]
+standaloneBindingGuards bindings = concatMap bindingGuard (S.toAscList (S.delete "IFS" bindings))
   where
-    failure message =
-      [ builtin "printf" [arg (ExprLiteral "%s\n"), arg (ExprLiteral ("monk: runtime contract failed: " <> message)), RedirectVal (MkRedirect RedirectStdout RedirectOut (RedirectTargetFD 2))],
-        builtin "exit" [arg (ExprLiteral "125")]
-      ]
-    rejectWhen predicate message continuation = [ifStatements [predicate] (failure message) continuation]
-    require predicate message continuation = [ifStatements [predicate] continuation (failure message)]
+    rejectWhen predicate message = ifStatements [predicate] (standaloneFailure message) []
+    require predicate message = ifStatements [predicate] [] (standaloneFailure message)
     query flags name = builtin "set" (map (arg . ExprLiteral) ("--query" : flags <> [name]))
-    bindingGuard name continuation =
-      rejectWhen (query ["--universal"] name) ("universal binding " <> name) $
-        rejectWhen
-          (query ["--path"] name)
-          ("path binding " <> name)
-          [ifStatements [query [] name] (shape name continuation) continuation]
-    shape name continuation =
+    bindingGuard name =
+      [ rejectWhen (query ["--universal"] name) ("universal binding " <> name),
+        rejectWhen (query ["--path"] name) ("path binding " <> name),
+        ifStatements [query [] name] (shape name) []
+      ]
+    shape name =
       let count = ExprQuotedCommandSubst (builtin "count" [arg (ExprVariable (VarAll name))] :| [])
-       in require (testEquals count "1") ("non-scalar binding " <> name)
-            $ rejectWhen (query ["--local"] name) ("local binding " <> name)
-            $ require (query ["--export"] name) ("non-environment binding " <> name) continuation
+       in [ require (testEquals count "1") ("non-scalar binding " <> name),
+            rejectWhen (query ["--local"] name) ("local binding " <> name),
+            require (query ["--export"] name) ("non-environment binding " <> name)
+          ]
+
+sessionEnvironmentGuards :: [FishStatement]
+sessionEnvironmentGuards =
+  [ ifStatements [builtin "set" [arg (ExprLiteral "--query"), arg (ExprLiteral name)]] (standaloneFailure ("private session binding " <> name)) []
+  | name <- ["MONK_SESSION_SOCKET", "MONK_SESSION_TOKEN", "MONK_SESSION_REPLY", "MONK_SESSION_FDS"]
+  ]
+
+-- Arrays are owned by the translated program. An ambient scalar with the same
+-- name carries export attributes which are outside this initial contract.
+standaloneArrayGuards :: S.Set Text -> [FishStatement]
+standaloneArrayGuards = concatMap checkArray . S.toAscList
+  where
+    checkArray name = [ifStatements [builtin "set" [arg (ExprLiteral "--query"), arg (ExprLiteral name)]] (standaloneFailure ("preexisting array binding " <> name)) []]
 
 -- Each check has a bounded body and succeeds with status zero. The conjunction
 -- stops at the first failed check, preserving its status, and owns one copy of
@@ -1125,27 +1578,13 @@ callerGuards contract =
         scopeFlags = ["--global" | scope == GlobalBinding]
         cardinality = ExprQuotedCommandSubst (builtin "count" [arg (ExprVariable (VarAll name))] :| [])
         shape =
-          guardUnless (testEquals cardinality "1") ("non-scalar binding " <> name)
-            $ guardWhen (query (scopeFlags <> ["--path"]) name) ("path binding " <> name)
-            $ (if exported == ExportedBinding then guardUnless else guardWhen)
-              (query (scopeFlags <> ["--export"]) name)
-              ("export attribute mismatch for " <> name)
-              remaining
+          guardUnless (testEquals cardinality "1") ("non-scalar binding " <> name) $
+            guardWhen (query (scopeFlags <> ["--path"]) name) ("path binding " <> name) $
+              (if exported == ExportedBinding then guardUnless else guardWhen)
+                (query (scopeFlags <> ["--export"]) name)
+                ("export attribute mismatch for " <> name)
+                remaining
 
 literalWord :: P.Word -> Maybe Text
 literalWord (P.OneField (P.Literal value)) = Just value
 literalWord _ = Nothing
-
-nativeEcho :: [Text] -> Maybe (Bool, [Text])
-nativeEcho = options True False
-  where
-    options newline escapes (value : rest)
-      | Just flags <- T.stripPrefix "-" value,
-        not (T.null flags),
-        T.all (`elem` ['n', 'e', 'E']) flags =
-          let step (n, e) flag = case flag of 'n' -> (False, e); 'e' -> (n, True); _ -> (n, False)
-              (nextNewline, nextEscapes) = T.foldl' step (newline, escapes) flags
-           in options nextNewline nextEscapes rest
-    options newline escapes values
-      | not escapes || not (any (T.any (== '\\')) values) = Just (newline, values)
-      | otherwise = Nothing

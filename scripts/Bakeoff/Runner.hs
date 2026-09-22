@@ -68,12 +68,12 @@ runBakeoff cfg = do
         Exit.die (toString (renderToolPreflightFailure preflightFailure))
       Right resolved -> pure resolved
   let warnings = toolPreflightWarnings cfg tools
-  unless (null warnings)
-    $ TIO.hPutStrLn stderr
-    $ T.unlines
-      ( "Bake-off tool preflight notes:"
-          : map ("- " <>) warnings
-      )
+  unless (null warnings) $
+    TIO.hPutStrLn stderr $
+      T.unlines
+        ( "Bake-off tool preflight notes:"
+            : map ("- " <>) warnings
+        )
   processEnv <- prepareEnv
   fixtures <- resolveFixtureSelection (bakeoffCwd cfg) (bakeoffGroups cfg) (bakeoffFiles cfg) (bakeoffFileLists cfg) (bakeoffCompatibleFileLists cfg)
   artifacts <- traverse (\fixture -> (fixture,) <$> fixtureArtifacts cfg fixture) fixtures
