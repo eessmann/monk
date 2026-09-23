@@ -12,14 +12,15 @@ fresh local results from historical evidence and unverified target execution.
 
 ## Build and translate
 
-Use the pinned devenv/haskell.nix project (GHC 9.14.1 by default, with a
-GHC 9.12.2 compatibility lane and Cabal 3.16.1). See [dependency and packaging
+Use the pinned devenv project (GHC 9.14.1 by default, with a
+GHC 9.12.2 compatibility lane, Cabal 3.16.1, and the locked Rust nightly). See [dependency and packaging
 commands](nix/README.md), including the devenv MCP launch configuration:
 
 ```bash
 devenv shell -- bash -e <<'SCRIPT'
 monk-build
-runtime="$(cabal list-bin exe:monk-runtime)"
+monk-rust-build
+runtime="$PWD/target/debug/monk-runtime"
 cabal run monk -- script.bash --strict --runtime "$runtime" --output script.fish
 "$runtime" --abi 2 launch script.fish
 SCRIPT
@@ -38,7 +39,8 @@ closed stdout and SIGPIPE. Scalar expressions and control flow stay in Fish.
 All standalone output uses the ABI 2 native launcher so initially closed
 streams are recorded before Fish starts. Byte operations use bounded helpers; supervised programs keep control flow in a private Fish
 evaluator while the native owner manages user processes and descriptors. Install both executables with
-`cabal install exe:monk exe:monk-runtime`, or select a provider with `--runtime FILE`.
+`cabal install exe:monk` and `cargo install --path runtime --locked`, or select a
+provider with `--runtime FILE`.
 `--managed --output script.fish` captures that provider in an immutable bundle.
 The captured `bin/monk-runtime` can launch the bundle entry without an installed
 provider. Sourceable output retains its declared Fish caller interface.
@@ -136,6 +138,9 @@ files returned by inspection accessors.
 
 ```bash
 devenv shell -- monk-build
+devenv shell -- monk-rust-build
+devenv shell -- monk-rust-test
+devenv shell -- monk-rust-quality
 devenv shell -- monk-integration
 devenv shell -- monk-quality
 devenv shell -- monk-docs

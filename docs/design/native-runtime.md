@@ -1,10 +1,19 @@
 # Native runtime ABI 2
 
 Generated programs use native Fish where equivalence has been established and
-`monk-runtime` for bounded byte and integer operations. The private Cabal
-`monk-runtime-core` library has no ShellCheck dependency. It uses `bytestring`,
-`process` and `unix`; Shelly's newline-adding `run` and separate `cd` state are
-unsuitable for these observable boundaries. See the [Shelly API](https://hackage-content.haskell.org/package/shelly-1.12.1.1/docs/Shelly.html).
+`monk-runtime` for bounded byte and integer operations. The executable is built
+entirely with Cargo from `runtime/`, using edition 2024 and pinned
+nightly 2026-09-23. `rustix` 1.1.5 handles owned descriptors, byte I/O, filesystem,
+pipes, Unix sockets, descriptor transfer and polling. `nix` 0.31.3 handles suitable
+process/signal operations; maintained `libc` bindings cover the small private
+native boundary. Clap 4.6.7 derives the CLI argument envelope using `OsString`;
+protocol headers remain ordered and command arguments retain raw byte spelling,
+including literal `--` and flag-like values. The crate is not published as a library; a narrow CLI entry
+point and checked capability facade leave raw descriptor adoption and signal
+authority private. No project C source or Haskell execution runtime remains.
+The Haskell compiler, typed Fish DSL, semantic admission and publication APIs
+are unchanged. The private compiler-support library retains the pure integer
+specification, digest, ABI metadata and provider checks.
 
 ## Standalone entry
 
@@ -75,8 +84,9 @@ not process argument vectors. Metadata input never replaces the script's stdin.
 
 The integer specification uses unbounded Haskell intermediates with explicit
 signed-64 wrapping after each primitive, truncation toward zero, bounded shift
-counts, modular exponentiation and defined division edge cases. Both constant
-folding and runtime execution use it. Batching excludes writes, lazy control and
+counts, modular exponentiation and defined division edge cases. Constant
+folding uses this retained specification; Rust implements equivalent bounded
+integer operations with differential tests against that specification and Bash. Batching excludes writes, lazy control and
 failing division/remainder/power boundaries; errors remain in their execution
 regions and retain source origins. Independent Bash comparisons validate the
 shared specification rather than merely comparing its two consumers.
@@ -90,23 +100,37 @@ opens an independent offset. Parent ownership keeps the capsule alive until the
 child finishes, then removes it. This transport carries compiled Fish and
 framed state, never arbitrary Bash source or process-substitution producer data.
 
-A C constructor records descriptor presence before GHC can reuse closed stream
-numbers. Parent-prepared C POSIX-spawn actions set cwd, signals, argv,
-environment and descriptor duplication/closure without executing Haskell on a
-forked child heap. Background launches and inherited ignored INT/QUIT use a
-parent-prepared C-only fork/exec path with signals blocked during setup and a
-close-on-exec errno acknowledgement. Its child executes only async-signal-safe
-operations; it never enters Haskell. Foreground launches retain default signal
-behavior unless the source process inherited an ignored disposition. The small
-failed-executable PID fallback is C-only and exits with the source failure status
-immediately. Original closed streams are restored around the generated
-body after Fish startup. Private/RTS descriptors do not escape into external
-commands. Linux may use close_range as an optimization, with POSIX fallback;
-Darwin does not require Linux syscall constants or procfs.
+Rust pre-main constructors capture original stream presence and inherited
+ignored INT/QUIT. Internally reserved standard descriptors remain valid for Rust;
+child execution restores actual absent streams. A failed executable replacement
+restores both descriptor reservations and signal state before reporting errors
+or attempting another PATH candidate. `-Zon-broken-pipe=inherit` and explicit
+operation policy preserve actual signal termination.
 
-`-rtsopts=ignoreAll` prevents ambient `GHCRTS` from changing runtime behavior or
-adding statistics to stderr. The descriptor and process wrappers supplement
-Haskell byte/protocol implementations; they are not a source interpreter.
+Prepared launches own argv, environment, cwd and descriptor mappings. Consuming
+launch and completion transitions, borrowed descriptors and endpoint leases
+make ownership explicit. Fixed private pattern types bound scalar invariants;
+they never cross FFI or wire boundaries. Ordinary launches use POSIX spawn;
+ignored INT/QUIT uses a bounded fork/exec leaf over precomputed data. Only audited
+async-signal-safe libc calls occur after fork: no allocation, formatting,
+unwinding or general destructors. POSIX spawn returns positive errno values,
+which the native RAII wrappers check directly. Executable lookup never invokes
+an implicit shell fallback. Raw wait statuses retain Linux real-time signals.
+
+One session owner mutates signal/spawn state, reaps children and caches status.
+Signal handlers only notify. A bounded signal wake thread owns no descriptors
+and never reaps; it interrupts the owner thread even when an event arrived just
+before a blocking syscall. Shutdown joins it before restoring handlers. Source
+read state survives transient interruptions. Normal owner completion leaves
+background children alive; explicit failure cleanup terminates owned foreground
+work. Guardian leases survive launcher-to-owner transfer and clean capsules on
+owner death, with an absolute 60-second authentication deadline.
+
+Private descriptors do not escape into external commands. Linux can use
+close_range with a bounded fallback; Darwin inventories descriptors independently
+of the current soft limit. Both use native cwd capabilities after rename/unlink.
+All temporaries use explicit 0600 file / 0700 directory modes.
+
 
 ## Supervised owner and streaming endpoints
 
@@ -166,6 +190,8 @@ bundle bytes and elapsed times are separate evidence.
 
 
 Portable target declarations do not substitute for execution evidence. The
+[Rust migration report](rust-runtime-verification.md) records the current
+implementation and remaining execution gates. The historical
 [portable runtime report](../../.superpowers/sdd/2026-09-22-portable-exact/portable-runtime-report.md)
 records canonical local Darwin tests, the witnessed pre-exec GHC crash and its
 POSIX-spawn repair, byte-pattern oracle checks and remaining Linux verification.

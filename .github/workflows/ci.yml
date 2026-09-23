@@ -36,6 +36,7 @@ jobs:
         devenv_nixpkgs_rev=$(nix eval --impure --raw --expr 'let lock = builtins.fromJSON (builtins.readFile ./devenv.lock); in (builtins.getAttr (lock.nodes.root.inputs."nixpkgs-tools") lock.nodes).locked.rev')
         nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - run: devenv shell -- monk-quality
+    - run: devenv shell -- monk-rust-quality
 
   acceptance:
     name: ${{ matrix.compiler }} / Fish ${{ matrix.fish }}
@@ -68,7 +69,7 @@ jobs:
           bash --noprofile --norc --version
           fish --no-config --version
           uname -a
-          sha256sum devenv.lock cabal.project
+          sha256sum devenv.lock cabal.project Cargo.lock rust-toolchain.toml
         } > artifacts/runtime-evidence.txt
         cabal build exe:monk-tool
         "$(cabal list-bin exe:monk-tool)" evidence profile > artifacts/reference-profile.json
@@ -80,7 +81,7 @@ jobs:
       run: |
         devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
         set -euo pipefail
-        export PATH="$(dirname "$(cabal list-bin exe:monk-runtime)"):$PATH"
+        export PATH="$PWD/target/debug:$PATH"
         MONK_INTEGRATION=1 timeout 5m cabal test monk-test --test-options="-p '/procsub-output/ || /Planned child isolation/'"
         bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity-manifest.tsv
         SCRIPT
@@ -96,6 +97,8 @@ jobs:
           artifacts/
           devenv.lock
           cabal.project
+          Cargo.lock
+          rust-toolchain.toml
 
   native-runtime:
     name: Portable runtime / ${{ matrix.target }}
@@ -150,7 +153,7 @@ jobs:
         case "$(uname -s)" in Darwin) temp_root=/private/tmp;; *) temp_root=/tmp;; esac
         env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" "$runtime" --describe > artifacts/runtime-description.txt
         mkdir -p artifacts/native-checks
-        for suite in protocol portable printf expansion session descriptors read process-substitution pattern-parts exec signals direct-output native-launcher; do
+        for suite in callback-diagnostics descriptors direct-output directory-signals exec expansion native-launcher pattern-parts portable printf process-substitution protocol read session signals; do
           env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" \
             artifacts/reference-bin/monk-tool runtime check --suite "$suite" --runtime "$runtime" \
               --report "artifacts/native-checks/$suite.json"

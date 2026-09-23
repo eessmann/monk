@@ -28,44 +28,70 @@ in {
   };
   config = {
     inputsFrom = [ haskellShell ];
+    languages.rust = {
+      enable = true;
+      toolchainFile = ./rust-toolchain.toml;
+    };
     # inputsFrom merges packages, not the shell derivation's environment.
     env = {
       inherit (haskellShell) CABAL_CONFIG NIX_GHC NIX_GHCPKG NIX_GHC_LIBDIR NIX_GHC_DOCDIR;
     };
-    packages = (with tools; [ cabal-install hlint ormolu git babelfish coreutils m4 cabal2nix ])
+    packages = (with tools; [ cabal-install hlint ormolu git babelfish coreutils m4 cabal2nix nil ])
       ++ [ hp.gmp (lib.hiPrio reference.bash)
         (lib.hiPrio (if config.monk.fishChannel == "pinned" then reference.fish else tools.fish)) ];
     env.LC_ALL = "C";
     env.LANG = "C";
+    env.MONK_REFERENCE_BASH = "${reference.bash}/bin/bash";
     # Publication rejects symlink ancestors; Darwin /tmp points at /private/tmp.
     enterShell = lib.mkAfter ''
       export TMPDIR=${if pkgs.stdenv.isDarwin then "/private/tmp" else "/tmp"}
+      export PATH="$PWD/target/debug:$PATH"
     '';
-    scripts.monk-build.exec = "cabal build all";
+    scripts.monk-build.exec = ''
+      set -euo pipefail
+      cargo build --locked --package monk-runtime
+      cabal build all
+    '';
+    scripts.monk-rust-build.exec = "cargo build --locked --package monk-runtime";
+    scripts.monk-rust-test.exec = "cargo test --locked --package monk-runtime";
+    scripts.monk-rust-quality.exec = ''
+      set -euo pipefail
+      cargo fmt --all --check
+      cargo clippy --locked --workspace --all-targets -- -D warnings
+    '';
     scripts.monk-test.exec = ''
       set -euo pipefail
+      cargo test --locked --package monk-runtime
+      cargo build --locked --package monk-runtime
       cabal build all
       cabal test all --test-show-details=direct
     '';
     scripts.monk-integration.exec = ''
       set -euo pipefail
+      cargo test --locked --package monk-runtime
+      cargo build --locked --package monk-runtime
       cabal build all
-      runtime="$(cabal list-bin exe:monk-runtime)"
+      runtime="$PWD/target/debug/monk-runtime"
       monk="$(cabal list-bin exe:monk)"
       tool="$(cabal list-bin exe:monk-tool)"
-      export PATH="$(dirname "$runtime"):$PATH"
+      export PATH="$PWD/target/debug:$PATH"
       MONK_INTEGRATION=1 cabal test all --test-show-details=direct
       for suite in callback-diagnostics descriptors direct-output directory-signals exec expansion native-launcher pattern-parts portable printf process-substitution protocol read session signals; do
         "$tool" runtime check --suite "$suite" --runtime "$runtime" --monk "$monk"
       done
-      "$tool" runtime check --suite digest --runtime "$(cabal list-bin test:runtime-test)"
+      "$tool" runtime check --suite digest --runtime "$(cabal list-bin test:compiler-support-test)"
       bash test/native/child-transport.sh "$runtime"
       "$tool" boundaries check --report artifacts/public-boundaries.json
     '';
     scripts.monk-quality.exec = ''
       set -euo pipefail
-      hlint .
-      git ls-files --cached --others --exclude-standard -z -- '*.hs' | xargs -0 ormolu --mode check
+      bash scripts/generate-abi-metadata.sh --check
+      sources=()
+      while IFS= read -r -d "" source; do
+        if test -f "$source"; then sources+=("$source"); fi
+      done < <(git ls-files --cached --others --exclude-standard -z -- '*.hs')
+      hlint "''${sources[@]}"
+      ormolu --mode check "''${sources[@]}"
       cabal check
       bash scripts/check-tooling-language.sh
     '';
@@ -74,6 +100,9 @@ in {
     scripts.monk-sdist.exec = "bash scripts/check-source-distribution.sh artifacts/sdist";
     tasks = {
       "monk:build".exec = config.scripts.monk-build.exec;
+      "monk:rust-build".exec = config.scripts.monk-rust-build.exec;
+      "monk:rust-test".exec = config.scripts.monk-rust-test.exec;
+      "monk:rust-quality".exec = config.scripts.monk-rust-quality.exec;
       "monk:test".exec = config.scripts.monk-test.exec;
       "monk:integration".exec = config.scripts.monk-integration.exec;
       "monk:quality".exec = config.scripts.monk-quality.exec;

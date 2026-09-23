@@ -1,0 +1,115 @@
+{
+  "schema": 1,
+  "recorded_at": "2026-09-23T12:59:12Z",
+  "scope": "Local aarch64 Darwin package, source archive, Haskell integration and build quality for the clap-based Rust runtime. Linux native and minimum-macOS execution are not claimed.",
+  "source_state": "Uncommitted codex/rust-runtime worktree. The package and source archive are frozen execution snapshots; later documentation and this receipt are not self-contained in either earlier snapshot.",
+  "toolchain": {
+    "rust_nightly": "nightly-2026-09-23",
+    "rustc_observed": "rustc 1.100.0-nightly (6bb1652a0 2026-09-22)",
+    "ghc": "9.14.1",
+    "cargo_locked": true,
+    "cli_dependency": "clap 4.6.7"
+  },
+  "darwin_package": {
+    "nix_output": "/nix/store/x6jz2wx103yvv1d5p90hjvn8w5yc6xc1-monk-rust-runtime-aarch64-darwin",
+    "binary": "/nix/store/x6jz2wx103yvv1d5p90hjvn8w5yc6xc1-monk-rust-runtime-aarch64-darwin/bin/monk-runtime",
+    "sha256": "0d197973592bacbaa20c3291416c25c48375ef091f0d18dfac08f6b42ebc639c",
+    "bytes": 1285584,
+    "format": "Mach-O arm64",
+    "abi": 2,
+    "profile": "bash53-i64",
+    "dynamic_dependencies": [
+      "/usr/lib/libiconv.2.dylib",
+      "/usr/lib/libSystem.B.dylib"
+    ],
+    "codesign_verified": true,
+    "inspector_report": {
+      "path": "/nix/store/x6jz2wx103yvv1d5p90hjvn8w5yc6xc1-monk-rust-runtime-aarch64-darwin/share/monk/package-evidence.json",
+      "sha256": "f10dc09ab181c51635cafb46a8149f832325d60570c8fc9759602833a26d18d7",
+      "linkage_verified": true,
+      "minimum_macos_version": "14.0",
+      "minimum_macos_execution_verified": false
+    },
+    "runtime_checks": {
+      "named_abi_suites_passed": 15,
+      "child_transport_passed": true,
+      "receipt_count": 16,
+      "receipt_directory": "artifacts/rust-runtime-build/package-darwin-clap/checks",
+      "attestation": "artifacts/rust-runtime-build/package-darwin-clap/native-execution.json",
+      "attestation_sha256": "5f9c8d68ae18b16831011b463ab45ee6aa340330ccb90de1cf7dc09017ce5c11",
+      "execution_verified": true,
+      "check_receipts_verified": true,
+      "platform_gaps": [
+        "The local filesystem rejected invalid-byte pathnames \\255 and \\254.txt in the expansion suite."
+      ]
+    }
+  },
+  "source_archive": {
+    "path": "artifacts/sdist/unpacked-jHB8xbtv/monk-0.4.0.tar.gz",
+    "sha256": "0f9784c8c9ac57be00786724cde33a537b6e39baaf5590b620002e7dc8ca6c8f",
+    "bytes": 1033835,
+    "verification_log": "artifacts/sdist/unpacked-jHB8xbtv/verification.log",
+    "verification_log_sha256": "4ae97ab40d7192bb74fd0fda3b69a52e5b55c352822252e62ae008c49a0c33f9",
+    "verification_log_bytes": 33398,
+    "abi_generation_drift_check": "passed",
+    "locked_cargo_tests": "passed",
+    "locked_cargo_release_build": "passed",
+    "cabal_build_and_install": "passed",
+    "combined_and_managed_strict_unicode_bash_fish_smoke": "passed",
+    "installed_runtime": {
+      "path": "artifacts/sdist/unpacked-jHB8xbtv/bin/monk-runtime",
+      "sha256": "4efb4e0467974b1b01f632a0fd39b222d8a46ac458b06918841e7fda66f3771c",
+      "bytes": 1284400
+    },
+    "included_inputs_checked": [
+      "Cargo.lock with clap 4.6.7",
+      "runtime/src/cli.rs",
+      "runtime/tests/cli_contract.rs",
+      "runtime/tests/type_guarantees.rs",
+      "protocol/abi2.tsv",
+      "scripts/generate-abi-metadata.sh",
+      "support-src/Monk/Runtime/Abi2.hs",
+      "docs/evidence/rust-runtime-performance-2026-09-23.json"
+    ],
+    "performance_evidence_sha256_in_archive": "2588fdfb91251e8adaf141563739f33949773115c2d70e328312b8d817de89b9"
+  },
+  "haskell": {
+    "integration": {
+      "command": "devenv shell -- monk-integration",
+      "result": "passed",
+      "log": "artifacts/rust-runtime-build/integration-clap.log",
+      "log_sha256": "a78def4baef245f32d91a7e8e70aa341ce11a09251790368d0b6ae9142ff2a24",
+      "log_bytes": 134107,
+      "main_tests_passed": 980,
+      "publication_tests_passed": 38,
+      "compiler_support_test": "passed",
+      "tooling_tests_passed": 63,
+      "rust_runtime_suites_passed": 15,
+      "digest_child_transport_and_boundaries": "passed"
+    },
+    "quality": {
+      "command": "devenv shell -- monk-quality",
+      "result": "passed",
+      "abi_generator_drift": "clean",
+      "hlint": "No hints",
+      "ormolu": "passed",
+      "cabal_check": "No errors or warnings could be found in the package",
+      "scope_note": "Quality ran after the generated opcode tables changed. The later clap changes were confined to Rust sources and Cargo metadata; the archive independently passed Cabal check and ABI drift detection."
+    },
+    "haddock": {
+      "command": "devenv shell -- monk-docs",
+      "result": "passed on the earlier Haskell snapshot",
+      "scope_note": "Haddock was not rerun after generated opcode tables changed. It reported missing documentation and dependency link targets as nonfatal warnings."
+    }
+  },
+  "other_target_evidence": {
+    "x86_64_linux_musl": "Nix evaluation and all-target Cargo check only; no linked release or native execution proof",
+    "aarch64_linux_musl": "Nix evaluation and all-target Cargo check only; no linked release or native execution proof",
+    "macos_minimum_version": "Mach-O deployment target inspected; execution on the minimum OS was not tested"
+  },
+  "related_evidence": [
+    "docs/evidence/rust-runtime-verification-2026-09-23.json",
+    "docs/evidence/rust-runtime-coverage-2026-09-23.json",
+    "docs/evidence/rust-runtime-performance-2026-09-23.json"
+  ]
+}

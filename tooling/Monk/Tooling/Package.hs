@@ -21,6 +21,7 @@ import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as C
 import Data.Text qualified as T
 import Data.Text.Encoding qualified as TE
+import Monk.Runtime.Abi2 (abiCapabilities, abiProfile, abiVersion)
 import Monk.Runtime.Digest (sha256)
 import System.Exit (ExitCode (..))
 import System.Info (arch, os)
@@ -104,7 +105,10 @@ targetName target = case target of
 verifyDescription :: Target -> Text -> Either Text [Text]
 verifyDescription target description = case T.lines description of
   [header, capabilities, reportedTarget]
-    | header == "monk-runtime 2 bash53-i64" && reportedTarget == "target " <> targetName target -> Right (T.words capabilities)
+    | header == "monk-runtime " <> T.pack (show abiVersion) <> " " <> T.pack abiProfile
+        && capabilities == T.pack abiCapabilities
+        && reportedTarget == "target " <> targetName target ->
+        Right (T.words capabilities)
   _ -> Left "executed runtime description does not match package ABI/profile/target"
 
 -- | The package receipt must still describe the copied artifact that CI ran.
@@ -154,8 +158,8 @@ attestExecution (Object fields) description checkerHash receipts = do
   if KM.lookup "linkage_verified" fields == Just (Bool True)
     then Right ()
     else Left "release linkage verification is missing"
-  if KM.lookup "abi" fields == Just (toJSON (2 :: Int))
-    && KM.lookup "profile" fields == Just (String "bash53-i64")
+  if KM.lookup "abi" fields == Just (toJSON abiVersion)
+    && KM.lookup "profile" fields == Just (String (T.pack abiProfile))
     then Right ()
     else Left "release ABI/profile is invalid"
   targetNameValue <- case KM.lookup "target" fields of
@@ -222,8 +226,8 @@ packageReport target linkage binary host =
       "execution_verified" .= False,
       "sha256" .= C.unpack (sha256 binary),
       "bytes" .= B.length binary,
-      "abi" .= (2 :: Int),
-      "profile" .= ("bash53-i64" :: Text),
+      "abi" .= abiVersion,
+      "profile" .= T.pack abiProfile,
       "runtime_description_verified" .= False,
       "platform_requirements" .= requirements,
       "inspection_host" .= host

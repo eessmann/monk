@@ -26,11 +26,11 @@ import System.FilePath (makeRelative, takeDirectory, takeExtension, (</>))
 import System.Posix.Files (fileMode, getFileStatus, getSymbolicLinkStatus, isDirectory, isSymbolicLink, readSymbolicLink)
 
 productionDirs, buildDirs, productionFiles, buildFiles, ignoredDirs, generatedSuffixes :: [FilePath]
-productionDirs = ["app", "src", "runtime-app", "runtime-src", "runtime-cbits", "nix"]
-productionFiles = ["monk.cabal", "cabal.project", "cabal.project.freeze", "cabal.project.local", "devenv.nix", "devenv.yaml", "devenv.lock", "devenv.local.nix", "devenv.local.yaml", "Setup.hs"]
-buildDirs = productionDirs <> ["test", "runtime-test", "benchmark", "scripts", "harness-support", "docs", ".github", "tooling", "tooling-app", "tooling-test"]
+productionDirs = ["app", "src", "support-src", "runtime", "protocol", "nix", ".cargo"]
+productionFiles = ["monk.cabal", "cabal.project", "cabal.project.freeze", "cabal.project.local", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "devenv.nix", "devenv.yaml", "devenv.lock", "devenv.local.nix", "devenv.local.yaml", "Setup.hs"]
+buildDirs = productionDirs <> ["test", "support-test", "benchmark", "scripts", "harness-support", "docs", ".github", "tooling", "tooling-app", "tooling-test"]
 buildFiles = productionFiles <> ["README.md", "CHANGELOG.md", "LICENSE", "LICENSE.md", ".hlint.yaml", ".ormolu", ".gitignore"]
-ignoredDirs = ["__pycache__", ".git", ".devenv", ".direnv", "artifacts", "dist", "result"]
+ignoredDirs = ["__pycache__", ".git", ".devenv", ".direnv", "artifacts", "dist", "result", "target"]
 generatedSuffixes = [".pyc", ".pyo", ".o", ".hi", ".dyn_o", ".dyn_hi", ".hie"]
 
 -- Python's sorted-key JSON spelling is part of the historic fingerprint format.
@@ -94,7 +94,7 @@ runVerification output binaryPaths command = do
   before <- sourceIdentity root
   executable <- getExecutablePath
   collectorHash <- digestFile executable
-  tools <- catMaybes <$> forM ["ghc", "cabal", "bash", "fish"] (\name -> fmap (name,) <$> findExecutable name)
+  tools <- catMaybes <$> forM ["ghc", "cabal", "cargo", "rustc", "bash", "fish"] (\name -> fmap (name,) <$> findExecutable name)
   env <- getEnvironment
   let names = ["NIX_GHC", "NIX_GHCPKG", "NIX_GHC_LIBDIR", "CABAL_CONFIG", "LC_ALL", "LANG", "TMPDIR"]
       selected = object [fromString key .= lookup key env | key <- names]

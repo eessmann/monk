@@ -1,0 +1,125 @@
+# Shared native ABI 2 identity. Operation rows map the Haskell constructor to
+# the exact capability token printed by --describe.
+abi 2
+profile bash53-i64
+target x86_64-linux
+target aarch64-linux
+target aarch64-darwin
+operation NativeArgv argv
+operation NativePlatformBytes bytes-platform
+operation NativeChildCapture child-capture
+operation NativeChildRun child-run
+operation NativeDescriptorState descriptor-state
+operation NativeDirectory directory
+operation NativeEcho echo
+operation NativeExec exec-site
+operation NativeExpansion expansion
+operation NativeGlob glob
+operation NativeInteger integer
+operation NativeLaunch launch
+operation NativePattern pattern
+operation NativePatternParts pattern-parts
+operation NativePipePaths pipe-paths
+capability printf
+operation NativeSession session
+operation NativeSplit split
+operation NativeWrite write-builtin
+
+# Wire opcodes are distinct from advertised capabilities. The namespace selects
+# the CLI operation, session request, integer primitive/batch token, or pattern
+# primitive, or compiled session body kind. Operand layouts and accepted combinations remain in the dispatchers.
+
+opcode cli argv
+opcode cli bytes-platform
+opcode cli child-capture
+opcode cli child-capture-session
+opcode cli child-run
+opcode cli child-run-session
+opcode cli descriptor-state
+opcode cli directory-diagnostic
+opcode cli directory-initial-oldpwd
+opcode cli directory-path-bound
+opcode cli directory-physical
+opcode cli directory-stack
+opcode cli directory-validate
+opcode cli echo
+opcode cli exec-site
+opcode cli expansion
+opcode cli glob
+opcode cli integer
+opcode cli launch
+opcode cli pattern
+opcode cli pattern-parts
+opcode cli pipe-paths
+opcode cli printf
+opcode cli raise-signal
+opcode cli session-client
+opcode cli session-directory-diagnostic
+opcode cli session-exec-error
+opcode cli session-guardian
+opcode cli session-prepare
+opcode cli session-run
+opcode cli session-write
+opcode cli split
+opcode cli write-builtin
+
+opcode session capture
+opcode session fd-close
+opcode session fd-data
+opcode session fd-dup
+opcode session fd-endpoint
+opcode session fd-open
+opcode session fd-pop
+opcode session fd-push
+opcode session fd-reset
+opcode session finish-signal
+opcode session ping
+opcode session read
+opcode session run
+opcode session spawn
+opcode session substitution
+opcode session substitution-release
+opcode session wait
+
+opcode integer add
+opcode integer and
+opcode integer batch
+opcode integer div
+opcode integer eq
+opcode integer ge
+opcode integer gt
+opcode integer invert
+opcode integer le
+opcode integer logical-and
+opcode integer logical-or
+opcode integer lt
+opcode integer mul
+opcode integer ne
+opcode integer neg
+opcode integer not
+opcode integer or
+opcode integer pos
+opcode integer pow
+opcode integer push
+opcode integer read
+opcode integer rem
+opcode integer shl
+opcode integer shr
+opcode integer sub
+opcode integer xor
+
+opcode pattern match
+opcode pattern replace-all
+opcode pattern replace-first
+opcode pattern trim-prefix-long
+opcode pattern trim-prefix-short
+opcode pattern trim-suffix-long
+opcode pattern trim-suffix-short
+
+opcode body body
+opcode body builtin
+opcode body directory-output
+opcode body external
+opcode body external-site
+opcode body pipeline
+opcode body snapshot

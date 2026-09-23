@@ -1,0 +1,52 @@
+# Native Rust runtime implementation
+
+Owned files: `runtime/src/{native,types,launch,exec,child,main}.rs`, `runtime/src/native/tests.rs`.
+
+Implemented native process execution using maintained libc ABI types/constants with private RAII action/attribute guards, positive POSIX spawn errno handling, explicit byte PATH search, cwd descriptor actions, and no ENOEXEC source interpretation. Source descriptor maps own `OwnedFd` capabilities and duplicate above every destination before setup. Parent descriptor, pipe, I/O and file operations use rustix; parent child reaping uses rustix raw wait status and fixed-signal operations use nix. The ignored-INT/QUIT asynchronous path prepares all strings, descriptor moves, signal actions, masks and acknowledgement pipe before fork. Its child branch performs direct libc operations, then execve or _exit; it never returns through Rust destructors.
+
+A pre-main Rust initialization section snapshots fd0..5 and inherited ignored INT/QUIT, then retains OwnedFd null reservations for absent fd0..2. The pinned build uses `-Zon-broken-pipe=inherit`. Failed direct exec restores standard reservations, original descriptor flags, signal dispositions and mask before trying the next explicit PATH candidate or reporting the source diagnostic. Signal ownership uses atomic notification and non-restarting handlers; SIGCHLD has a separate notification consumed by the session owner. A descriptor-free heartbeat thread targets only the owning pthread every 10ms to close lost-wakeup races. The guard temporarily unblocks SIGCHLD, stops and joins the thread before restoring handlers and the original mask. EvaluatorWatch queries rustix waitid with NOWAIT; it never reaps and treats ECHILD as cancellation. Blocking native writes and acknowledgement reads stop retrying when the owner is cancelled.
+
+SourceFd and DescriptorMask wrap private non-generic nightly pattern types. Constructors range-check before representation-preserving transmute; safe callers cannot construct invalid values. SourceFd accepts 0 through i32::MAX - 1; session manifest limits belong at adoption. Owned and borrowed OS descriptors remain distinct.
+
+Child transport preserves raw bytes, strips captured NUL with one immediate warning, removes final newlines only after EOF, restores closed source stdio inside Fish, and removes private files before publishing a result packet. Launch propagates the actual terminating signal after owned evaluator cleanup. Session child execution is a typed callback to the session module.
+
+CLI dispatch covers all ABI2 operations including direct-output, fixed SIGPIPE reproduction, platform byte hex validation and bounded real-pipe alias probing. All modules are exported and the assembled binary builds. Session-prepare decodes exactly one NUL-terminated script frame before capsule preparation.
+
+PreparedLaunch owns every prepared byte string, cwd and descriptor; launch consumes the plan. RunningChild::complete consumes the running child and produces CompletedChild with only pid/outcome observations. Launch and child final waits use this consuming path. EndpointLease consumes its descriptor in transfer; root uses it for producer endpoint adoption into the semantic table.
+
+Unsafe resource operations are confined to native.rs and its private native submodules. The scalar pattern wrappers separately use checked representation conversions. Descriptor inventory uses raw fcntl because absent slots cannot validly be wrapped as BorrowedFd; ordinary owned and borrowed descriptor operations use rustix.
+
+## Verification to date
+
+- First attempted native tests failed because Cargo was not on PATH; the next isolated Rust harness compile recorded missing pattern feature/coercions/traits and absent rustix Darwin SEARCH spelling. Fixed using private validated conversion, explicit traits and maintained libc::O_SEARCH wrapped in rustix OFlags.
+- Standalone harness built actual assigned source paths with rustix 1.1.5, nix 0.31.3, libc 0.2.189 under final pinned nightly 2026-09-23: 16 tests passed plus 1 compile-fail documentation test. The ignored probe is deliberately run by the parent subprocess test; it is not an unverified platform skip. Final integrated native-only tests passed 12 tests, with both deliberately ignored child probe entrypoints invoked by real parent subprocess tests.
+- Tests cover owned CLOEXEC duplication, literal PATH/empty components, EACCES precedence, no ENOEXEC fallback, exit/signal identity, cwd identity across rename, async INT/QUIT ignore preservation, descriptor snapshot before main, retained null reservations, reversible failed exec, raw child frames, masks and source descriptor bounds.
+- Full project cargo build passed with integrated main/session/capsule.
+- Existing native-launcher and portable suites caught tempfile default directory permissions; fixed creation to explicit 0700 directories and 0600 files, then reran successfully.
+- All five assigned authoritative native suites passed on frozen candidate SHA256 `50736a9a8db057dcf77bf7431fb5ddfca692016f9ce859d7b1f0acac7f472008`: exec, direct-output, signals, portable, native-launcher. Hash-bound receipts: `artifacts/rust-runtime-native-candidate-v2/{exec,direct-output,signals,portable,native-launcher}.json`. Native-launcher requires TMPDIR=/private/tmp so managed publication does not traverse the default /var symlink. The publication guard was not weakened.
+- Review followups after frozen-v2 receipts: raw-fcntl inventory avoids borrowed absent slots; bootstrap manifest adoption validates the entire descriptor set before allocation, duplicates above all originals and closes originals exactly once; source watcher heartbeat closes previously-delivered SIGCHLD races; rustix raw wait status preserves Linux RT signals 34/64; terminate checks for ECHILD before signalling a possibly recycled PID. Native unit regressions pass after these changes. Root owns final whole-runtime conformance receipts for the final integrated binary.
+- Heartbeat blackbox verified cancellation of a blocked pipe write and an empty read begun after the evaluator had already exited and been reaped, including originally blocked SIGCHLD and mask restoration. Pure wait-status regressions cover Linux real-time 34 and64; an actual RTMIN process regression is target-gated for Linux.
+- Local cargo check passed for aarch64-unknown-linux-musl and x86_64-unknown-linux-musl using the final pinned toolchain and installed target libraries. This is compilation evidence only; no Linux execution or remote host access occurred.
+
+Only aarch64 macOS native behavior has been executed. Linux and older macOS deployment/runtime behavior remain evidence gaps; no such claims are made.
+
+## Final directory capability boundary
+
+`WorkingDirectory` owns only a descriptor validated with fstat as a directory. `BorrowedDirectory` can be obtained from that owner or by checking a borrowed descriptor. Spawn preparation, native spawn, execution diagnostics, supervised jobs, and source opens accept this distinct capability; SCM transport explicitly consumes it back into OwnedFd and validates it again on receive. Pipe/file runtime rejection and positive/negative downstream type controls pass, including rejection of generic BorrowedFd as cwd and a directory borrow outliving its owner. Native suite is now 13 passing tests plus two independently invoked subprocess probe entrypoints.
+
+## Final private boundary correction
+
+The production `native` module, bounded scalar implementation, CLI implementation, and execution modules are private. The binary calls only `monk_runtime::run_cli()`. A small public `capabilities` facade re-exports safe typed directory/launch/child/endpoint/scalar capabilities for downstream ownership controls; it exposes no raw adoption or signal authority. `adopt_inherited` is crate-private with an explicit exclusive inherited-descriptor ownership precondition, documented at the guardian caller. The package has `publish = false`.
+
+The direct heartbeat regression moved from the integration suite into private native unit tests while retaining a bounded isolated subprocess. The integration manifest regression duplicates through rustix. New compile-fail consumers verify that the native module, raw adoption through the facade, and signal authority through the facade are inaccessible; the positive typed lifecycle control still compiles.
+
+After the privacy move, `cargo fmt --all`, all-target Clippy with `-D warnings`, and full Cargo tests passed against the exact Bash oracle `/nix/store/s0psayl7zvkvwdcqc8fy1sbv8rlf1yq8-bash-5.3p9/bin/bash`: 45 unit tests, four lifecycle integration tests, 12 pure semantic tests, the downstream compile-control harness, and the compile-fail doctest. Two explicit subprocess probe entrypoints and the separately invoked frozen-Haskell semantic replay remain marked ignored by the default suite. Performance evidence recorded before this source change remains scoped to its recorded SHA until remeasurement.
+
+## User-requested Clap CLI
+
+The private CLI now uses exact `clap = 4.6.7` with only `std` and `derive`, default features disabled. `ParsedCli` owns positional cardinality and OsString extraction. An inserted parser-only end-of-options marker prevents Clap from interpreting any original argument as its own option; the checked `Invocation` conversion accepts only standalone `--describe` or ordered `--abi 2 OPERATION [opaque argv...]`. Conversion to bytes follows OsString parsing, preserving invalid UTF-8. Help/version handling is disabled, parser errors map to the existing status-125 diagnostic, target-description validation still precedes parsing, and operation dispatch/input/error ordering is unchanged.
+
+After this change, formatting, all-target Clippy with warnings denied, and full Cargo tests passed using the exact pinned Bash and Fish. Coordinator-owned blackbox CLI differential checks are the next validation step. Performance and packaging must use a newly frozen Clap-enabled binary; neither earlier frozen runtime was overwritten.
+
+
+Final Clap performance refresh: `docs/evidence/rust-runtime-performance-2026-09-23.json` and `performance-report.md` now measure final release SHA `5174a6e287204bf63c71e14b7d6d97ef0017ac467a2e3dfe7cacf3b8529a27a0`. The fresh quiet-window run completed 20 paired samples for each of five workloads with exact byte/status equality. Earlier measured evidence remains preserved as a separate prior snapshot; the intermediate private/opcode-only preparation was never measured.

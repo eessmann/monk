@@ -16,6 +16,7 @@ import Monk.Tooling.Evidence.Performance (aggregate)
 import Monk.Tooling.Evidence.Portable (freezePortable, insertFields, portableExecute, portableTranslate, strengthenedCases)
 import Monk.Tooling.Evidence.Profile (runProfile)
 import Monk.Tooling.Evidence.Trace (parseTrace, runTrace)
+import Monk.Tooling.Evidence.Verification (productionIdentity, sourceIdentity)
 import System.Directory (copyFile, copyFileWithMetadata, createDirectory, createDirectoryIfMissing, doesFileExist, findExecutable, getCurrentDirectory, getTemporaryDirectory, listDirectory, removeDirectoryRecursive, removeFile)
 import System.Environment (getEnvironment, setEnv, unsetEnv)
 import System.Exit (ExitCode (..))
@@ -33,6 +34,21 @@ tests =
         let input = B.pack [0, 255, 10]
         base64 input @?= "AP8K"
         unbase64 "AP8K" @?= Right input,
+      testCase "Rust sources and toolchain metadata enter production identity but target output does not" $ withScratch $ \root -> do
+        forM_ ["runtime/src", ".cargo", "protocol", "target/debug"] $ \directory -> createDirectoryIfMissing True (root <> "/" <> directory)
+        forM_ ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "runtime/Cargo.toml", "runtime/src/lib.rs", ".cargo/config.toml", "protocol/abi2.tsv"] $ \path -> B.writeFile (root <> "/" <> path) "initial"
+        initial <- sourceIdentity root
+        initialProduction <- either fail pure (productionIdentity initial)
+        rows <- either fail pure (arrayField "files" initialProduction)
+        let paths = [path | row <- rows, Right (String path) <- [field "path" row]]
+        forM_ ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "runtime/Cargo.toml", "runtime/src/lib.rs", ".cargo/config.toml", "protocol/abi2.tsv"] $ \path ->
+          assertBool ("missing Rust input from production identity: " <> path) (T.pack path `elem` paths)
+        B.writeFile (root <> "/target/debug/monk-runtime") "generated"
+        afterTarget <- sourceIdentity root
+        field "sha256" afterTarget @?= field "sha256" initial
+        B.writeFile (root <> "/runtime/src/lib.rs") "changed"
+        afterSource <- sourceIdentity root
+        assertBool "Rust source edit did not change evidence identity" (field "sha256" afterSource /= field "sha256" initial),
       testCase "nonzero matching exit is a match and timeout is unavailable" $ do
         let baseline = Observation "completed" 7 "" "error\n" 1
             timeout = baseline {status = "timeout"}

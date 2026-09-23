@@ -9,6 +9,7 @@ import Data.ByteString.Lazy qualified as BL
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Evidence qualified
+import Monk.Runtime.Abi2 (abiCapabilities)
 import Monk.Tooling.Package (Linkage (..), Target (..), attestExecution, inspectLinkage, nativeCheckReceipt, packageReport, readTarget, requiredNativeSuites, verifyArtifactIdentity, verifyDescription)
 import Monk.Tooling.Process (ProcessResult (..), ProcessSpec (..), runProcess)
 import Monk.Tooling.Summary (compact, summaryReport)
@@ -64,7 +65,9 @@ main =
                 _ -> assertBool "missing platform requirements" False
             _ -> assertBool "expected object report" False,
         testCase "description must match ABI profile and target" $ do
-          verifyDescription Aarch64Linux "monk-runtime 2 bash53-i64\necho integer\ntarget aarch64-linux\n" @?= Right ["echo", "integer"]
+          let capabilities = T.pack abiCapabilities
+          verifyDescription Aarch64Linux ("monk-runtime 2 bash53-i64\n" <> capabilities <> "\ntarget aarch64-linux\n") @?= Right (T.words capabilities)
+          assertLeft "ABI/profile/target" (verifyDescription Aarch64Linux "monk-runtime 2 bash53-i64\necho integer\ntarget aarch64-linux\n")
           assertLeft "ABI/profile/target" (verifyDescription Aarch64Linux "monk-runtime 2 bash53-i64\necho\ntarget aarch64-darwin\n"),
         testCase "native attestation requires the exact packaged artifact" $ do
           let report = packageReport Aarch64Linux (Linkage [] Nothing) "signed-final-artifact" "test host"
@@ -75,7 +78,7 @@ main =
           assertLeft "unknown target" (readTarget "x86-darwin"),
         testCase "execution attestation verifies the release report and description" $ do
           let report = packageReport Aarch64Linux (Linkage [] Nothing) "runtime" "test host"
-              description = "monk-runtime 2 bash53-i64\necho integer\ntarget aarch64-linux\n"
+              description = "monk-runtime 2 bash53-i64\n" <> T.pack abiCapabilities <> "\ntarget aarch64-linux\n"
               receipts = [nativeCheckReceipt suite "runtime" "checker" | suite <- requiredNativeSuites]
               checker = "d2d2328e3359f3de3515871090d1316cbcdc5383204c204f9390788c3ef8618f"
           case attestExecution report description checker receipts of

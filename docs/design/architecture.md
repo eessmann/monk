@@ -112,10 +112,11 @@ runtime operations, not a second Bash interpreter.
 
 `Session` materializes framed requests and private replies. The runtime owns
 virtual user descriptors, launches executable or already generated Fish child
-regions, and observes process termination. C launch actions are prepared before
-creating a child; ordinary foreground launches use POSIX spawn, while ignored
-asynchronous INT/QUIT requires a bounded C-only fork/exec path. No GHC code runs
-between fork and exec. Separate
+regions, and observes process termination. The Rust runtime prepares owned launch
+actions before creating a child; ordinary foreground launches use POSIX spawn,
+while ignored INT/QUIT dispositions require a bounded native fork/exec path.
+That child performs only audited async-signal-safe libc calls over precomputed
+pointers, without allocation, unwinding or general destructors. Separate
 control transport carries scalars, dense array vectors, argv and definition
 closures without reusing script stdin. Ordinary child script/state transport
 uses an owned private capsule with independent file offsets. Process
@@ -240,3 +241,34 @@ A pure lexical runtime check enforces that obligation before parent cd, using
 the actual PWD and operand; a violation returns/exits with status 125 before
 the attempted directory operation. This guard performs no filesystem target
 precheck.
+
+## Rust runtime ownership
+
+Cargo is the sole producer of `monk-runtime`. The compiler and publication
+remain Haskell, with a private `monk-compiler-support` library retaining the
+integer specification, SHA-256, generated ABI metadata and provider validation.
+`protocol/abi2.tsv` generates committed Haskell and Rust tables; the drift check
+runs before builds. It preserves ABI 2 spellings and capability order.
+
+The runtime uses edition 2024, resolver 3 and nightly 2026-09-23 through the same
+`rust-toolchain.toml` in Cargo, devenv and CI. `rustix` owns descriptor, byte-I/O,
+filesystem, socket and polling boundaries; `nix` provides suitable process and
+signal operations. Remaining native calls use maintained `libc` bindings in
+`runtime/src/native*`. There are no project C sources.
+
+Source descriptors, OS descriptor owners, borrowed descriptors, prepared
+launches, running/completed children and endpoint leases are distinct types.
+Private pattern types bound descriptor numbers, stream masks and shift counts;
+checked scalar conversions are documented and tested under Miri. Consuming
+launch/completion/transfer methods prohibit reuse. One owner reaps and caches
+jobs; a completed background job remains explicitly waitable, and dropping
+an asynchronous job does not kill it. Guardian leases own cross-process cleanup.
+
+Pre-main constructors retain original stream presence and ignored INT/QUIT.
+Rust's reserved standard descriptors stay valid internally, while child execution
+restores actual source-stream absence. Failed exec attempts restore descriptor
+reservations and signal state. `-Zon-broken-pipe=inherit` plus explicit operation
+policy preserves actual SIGPIPE termination. Owner handlers only notify; a
+bounded wake thread signals the owner thread so a signal just before a blocking
+syscall cannot strand it. That thread never launches, reaps or owns descriptors.
+All process-global state changes and lifecycle decisions remain with the owner.

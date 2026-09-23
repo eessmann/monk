@@ -1,6 +1,6 @@
 # Translator semantic audit
 
-Refreshed 2026-09-22 for portable runtime ownership and broader admission. This document replaces the
+Refreshed 2026-09-23 for the typed Rust runtime replacement; admission is unchanged. This document replaces the
 older blanket exactness claims based on the 339-test suite.
 
 ## Contract and evidence
@@ -21,6 +21,11 @@ A constructor's presence in the implementation is not evidence of exactness.
 An opt-in permits only its named approximation. Rejected input produces no
 executable artifact in either normal or strict translation. Caller promises
 are obligations, not runtime proofs about arbitrary functions or handlers.
+
+The runtime replacement preserves this semantic envelope. Ownership/type tests
+prevent invalid resource reuse but do not establish Bash equivalence by
+themselves: byte, process, signal, publication and packaged execution evidence
+remain independent requirements. See [Rust migration verification](rust-runtime-verification.md).
 
 ## Reproduced main defects
 
@@ -141,7 +146,7 @@ precheck.
 
 ## Native materialization and failure flow
 
-Generated support uses native Fish and the versioned Haskell runtime described
+Generated support uses native Fish and the versioned Rust runtime described
 in [the runtime specification](native-runtime.md). No Monk-generated Python support remains.
 Helpers consume framed bytes and typed bounded operations. Native images are
 opaque captured products; generation identity includes role, path, mode and

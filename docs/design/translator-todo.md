@@ -1,9 +1,22 @@
 # Translator redesign and release evidence
 
-Last refreshed: 2026-09-22. The current implementation follows the approved
+Last refreshed: 2026-09-23. The compiler follows the approved
 [portable exact-coverage plan](../superpowers/plans/2026-09-22-portable-exact.md)
 from base `c2bd371`. It extends the existing semantic architecture; historical
 checkpoints below retain their original evidence and dates.
+
+## Rust runtime replacement, 2026-09-23
+
+The production executable is Rust 2024 on pinned nightly 2026-09-23; Cargo and
+Cabal are orchestrated explicitly through devenv. Haskell execution modules and
+project C sources were removed after the existing native conformance suites
+passed on Rust candidates. The compiler keeps its pure integer specification,
+typed Fish DSL, admission and publication ownership. ABI 2 and `bash53-i64`
+remain unchanged. The [migration report](rust-runtime-verification.md) separates
+baseline, final-binary, package, type/Miri and performance evidence. Historical
+counts below remain historical; Linux native execution and minimum-OS checks
+are still incomplete gates. The user prohibits use of ccs-ci.
+
 
 ## Portable coverage implementation, 2026-09-22
 

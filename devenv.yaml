@@ -12,5 +12,10 @@ inputs:
   # Keep the reference shell versions fixed in devenv.lock.
   nixpkgs-reference:
     url: github:NixOS/nixpkgs/nixos-unstable
+  rust-overlay:
+    url: github:oxalica/rust-overlay
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
 
 allow_unfree: true

@@ -1,13 +1,18 @@
 # Reproducible development and native runtime packages
 
 Use standalone devenv 2.3.1 or newer. `devenv.yaml` declares
-`github:input-output-hk/haskell.nix` and `github:NixOS/nixpkgs/nixos-unstable`.
+`github:input-output-hk/haskell.nix`, `github:NixOS/nixpkgs/nixos-unstable`,
+and `github:oxalica/rust-overlay`.
 Exact revisions belong in `devenv.lock`, including the independently locked tool
 and reference package sets. haskell.nix's nested `nixpkgs` input follows the root
 `nixpkgs` input. `follows: nixpkgs` names that input; the branch belongs in its URL,
 not in a `follows: nixpkgs/nixos-unstable` path.
 `cabal.project` supplies the shared Hackage index-state and development flags.
 The default compiler is GHC 9.14.1; compatibility uses GHC 9.12.2.
+The native runtime uses Rust 2024. `rust-toolchain.toml` pins the 2026-09-23
+nightly with rustfmt, Clippy, Miri, and standard libraries for both Linux musl
+targets and aarch64 Darwin. `languages.rust.toolchainFile` selects it through
+devenv's locked rust-overlay. Cargo dependencies are fixed in `Cargo.lock`.
 
 Configure the upstream IOG binary cache before the first shell evaluation.
 For a single command, without changing machine configuration:
@@ -31,6 +36,9 @@ devenv shell -- monk-quality
 devenv shell -- monk-benchmark
 devenv shell -- monk-docs
 devenv shell -- monk-sdist
+devenv shell -- monk-rust-build
+devenv shell -- monk-rust-test
+devenv shell -- monk-rust-quality
 devenv -O monk.compiler:string ghc9122 shell -- monk-build
 devenv -O monk.fishChannel:string moving shell -- monk-integration
 ```
@@ -46,6 +54,10 @@ Use targeted updates such as `devenv update haskell-nix`, `devenv update nixpkgs
 or `devenv update nixpkgs-tools`. A bare `devenv update` also advances
 `nixpkgs-reference`; update that input only when deliberately changing the
 reference pair and its version assertions in `nix/reference-runtimes.nix`.
+Update `rust-overlay` separately when changing the Rust toolchain; verify the
+new manifest has every configured component and target before changing the
+toolchain file. `bash scripts/generate-abi-metadata.sh --check` verifies that
+the Haskell and Rust ABI constants match `protocol/abi2.tsv`.
 Check IOG cache availability after changing the compiler package set: following
 the root nixpkgs does not guarantee it matches haskell.nix's tested revision.
 CI reads its standalone devenv bootstrap revision from the `nixpkgs-tools` lock
@@ -66,8 +78,9 @@ devenv build outputs.runtime.aarch64-linux
 devenv build outputs.runtime.aarch64-darwin
 ```
 
-Linux outputs use a musl package set and static executable linking. Darwin
-uses static Haskell libraries and must pass the Apple-system-only dynamic
+`outputs.runtime` builds the Cargo runtime from the locked workspace.
+Linux packages use a musl package set and static executable linking.
+Darwin packages must pass the Apple-system-only dynamic
 library check. Every output contains `bin/monk-runtime` and
 `share/monk/package-evidence.json`. The build fails if the artifact has the
 wrong architecture, a Linux interpreter/DT_NEEDED entry, or a non-Apple Darwin

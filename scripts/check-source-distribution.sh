@@ -22,8 +22,12 @@ tar -xzf "$work_directory/monk-0.4.0.tar.gz" -C "$work_directory"
   cd "$work_directory/monk-0.4.0"
   printf 'packages: .\n' > cabal.project
   cabal check
+  bash scripts/generate-abi-metadata.sh --check
+  cargo test --locked --package monk-runtime
+  cargo build --locked --release --package monk-runtime
   cabal "${cabal_options[@]}" build all --builddir="$work_directory/unpacked-build" --enable-tests --enable-benchmarks "${build_options[@]}"
-  cabal "${cabal_options[@]}" install exe:monk exe:monk-runtime exe:monk-tool --builddir="$work_directory/unpacked-build" --installdir="$work_directory/bin" --install-method=copy "${build_options[@]}"
+  cabal "${cabal_options[@]}" install exe:monk exe:monk-tool --builddir="$work_directory/unpacked-build" --installdir="$work_directory/bin" --install-method=copy "${build_options[@]}"
+  install -m 755 target/release/monk-runtime "$work_directory/bin/monk-runtime"
   export PATH="$work_directory/bin:$PATH"
   printf '%s\n' "printf '%s:%s\\n' 'éλ' \"\$1\"; set -- '' 'two words'; printf '<%s>\\n' \"\$@\"" > 'smoke-éλ.bash'
   printf '%s\n' 'x=value; echo "$x"' >> 'smoke-éλ.bash'

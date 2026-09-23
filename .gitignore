@@ -22,6 +22,7 @@ cabal.project.local
 .ghc.environment.*
 .HTF/
 .hie/
+target/
 # Stack
 .stack-work/
 stack.yaml.lock

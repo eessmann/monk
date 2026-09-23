@@ -88,7 +88,7 @@ resources required by generated helpers.
 
 Requirements enumerate commands, typed Fish/platform capabilities, and native
 runtime ABI, profile and operation sets. Generated support uses Fish plus the
-Haskell `monk-runtime`; Python is only a development/evidence tool. ABI 2 accepts
+Rust `monk-runtime`; Python is only a development/evidence tool. ABI 2 accepts
 fixed operations over NUL-terminated byte frames. Zero frames and one empty
 frame are distinct; NUL cannot occur inside a shell value. Child stdout/stderr
 and original stdin are separate from framed control input. Captures remove
@@ -102,13 +102,14 @@ execution. Managed output captures and validates provider bytes while planning,
 then publishes and selects that exact executable at mode 0700. Children and
 exported functions retain the selected generation across later publications.
 
-The runtime uses raw bytes, explicit processes and POSIX descriptors. A C
-startup constructor records descriptors before GHC initialization. Process
-launch actions are prepared in the parent and executed by POSIX spawn or a
-bounded C-only fork/exec path for ignored asynchronous INT/QUIT dispositions,
-with explicit signal, cwd and descriptor ownership. No Haskell runs in the
-post-fork child. The executable ignores ambient
-GHC RTS options. Ordinary child script/state capsules use private mode-0600
+The runtime uses raw bytes, explicit processes and owned POSIX descriptors. A
+Rust pre-main constructor records stream presence and inherited signal policy
+before standard-library startup. Parent-prepared POSIX-spawn actions or a bounded
+native fork/exec path preserve ignored INT/QUIT, cwd identity and descriptor
+ownership. Post-fork code calls only async-signal-safe libc operations using
+precomputed pointers. It neither allocates nor unwinds. The Rust runtime has no
+GHC RTS and ignores ambient `GHCRTS`.
+Ordinary child script/state capsules use private mode-0600
 files in a mode-0700 directory and do not require procfs or descriptor-path
 reopening. Streaming process substitution uses real pipe endpoints and a
 separate checked `/dev/fd/N` pipe-alias capability; it does not require an

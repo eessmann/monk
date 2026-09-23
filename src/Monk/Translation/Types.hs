@@ -59,6 +59,7 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Language.Fish.DSL (SourceRange)
+import Monk.Runtime.Abi2 (abiOperationName)
 import Monk.Runtime.NativeTarget (runtimeABI)
 
 -- | Translation is exact under the selected profile and caller contract.
@@ -150,25 +151,9 @@ data NativeOperation
   deriving stock (Show, Eq, Ord, Enum, Bounded)
 
 nativeOperationName :: NativeOperation -> Text
-nativeOperationName = \case
-  NativeInteger -> "integer"
-  NativeSplit -> "split"
-  NativeArgv -> "argv"
-  NativeEcho -> "echo"
-  NativePattern -> "pattern"
-  NativePatternParts -> "pattern-parts"
-  NativePlatformBytes -> "bytes-platform"
-  NativeGlob -> "glob"
-  NativeChildRun -> "child-run"
-  NativeChildCapture -> "child-capture"
-  NativeDescriptorState -> "descriptor-state"
-  NativeDirectory -> "directory"
-  NativeSession -> "session"
-  NativeExec -> "exec-site"
-  NativeWrite -> "write-builtin"
-  NativeLaunch -> "launch"
-  NativeExpansion -> "expansion"
-  NativePipePaths -> "pipe-paths"
+nativeOperationName operation = case abiOperationName (show operation) of
+  Just name -> toText name
+  Nothing -> error "NativeOperation is missing from protocol/abi2.tsv"
 
 nativeRuntimeRequirement :: NativeOperation -> Text -> RuntimeRequirement
 nativeRuntimeRequirement operation reason =
