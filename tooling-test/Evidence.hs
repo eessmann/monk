@@ -34,6 +34,11 @@ tests =
         let input = B.pack [0, 255, 10]
         base64 input @?= "AP8K"
         unbase64 "AP8K" @?= Right input,
+      testCase "base64 rejects noncanonical padding and trailing data" $
+        forM_ ["AB==", "AAF=", "AA==AA==", "AA", "AA==\n", "ĀA=="] $ \encoded ->
+          case unbase64 encoded of
+            Left _ -> pure ()
+            Right _ -> assertBool ("accepted noncanonical base64: " <> T.unpack encoded) False,
       testCase "Rust sources and toolchain metadata enter production identity but target output does not" $ withScratch $ \root -> do
         forM_ ["runtime/src", ".cargo", "protocol", "target/debug"] $ \directory -> createDirectoryIfMissing True (root <> "/" <> directory)
         forM_ ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "runtime/Cargo.toml", "runtime/src/lib.rs", ".cargo/config.toml", "protocol/abi2.tsv"] $ \path -> B.writeFile (root <> "/" <> path) "initial"

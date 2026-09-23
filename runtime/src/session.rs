@@ -2,6 +2,9 @@
 use crate::abi2::opcode::{body as body_opcode, session as opcode};
 
 mod jobs;
+mod request;
+use request::{Body, Direction, LaunchMode, Operation, Request};
+mod client;
 mod table;
 use crate::{
     capsule,
@@ -11,6 +14,7 @@ use crate::{
     types::SourceFd,
 };
 use capsule::invalid;
+pub use client::{child, client, directory_diagnostic, exec_error, writer};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use std::{
     collections::BTreeMap,
@@ -51,7 +55,8 @@ fn reply(code: i32, pid: Option<i32>) -> Bytes {
 fn clean_environment(mut env: native::Environment) -> native::Environment {
     env.retain(|(name, _)| {
         ![
-            b"MONK_SESSION_SOCKET".as_slice(),
+            b"MONK_WORKSPACE_LEASE".as_slice(),
+            b"MONK_SESSION_SOCKET",
             b"MONK_SESSION_TOKEN",
             b"MONK_SESSION_REPLY",
             b"MONK_SESSION_FDS",
@@ -80,6 +85,7 @@ fn write_stream(streams: &Streams, number: i32, bytes: &[u8]) -> io::Result<()> 
 }
 struct Owner {
     table: table::Table,
+    workspaces: capsule::WorkspaceOwner,
     diagnostic: Option<OwnedFd>,
     endpoints: BTreeMap<SourceFd, crate::types::EndpointLease>,
     jobs: BTreeMap<i32, jobs::Job>,
@@ -132,7 +138,7 @@ impl Owner {
         diagnostics: &Streams,
         origin: &[u8],
         line: &[u8],
-        args: &[Bytes],
+        args: &[&[u8]],
     ) -> io::Result<i32> {
         let prefix = [origin, b": line ", line, b": wait: "].concat();
         let diagnostic =
@@ -172,7 +178,7 @@ impl Owner {
                 }
                 self.wait(pid)?
             } else {
-                diagnostic(&[b"`", arg.as_slice(), b"': not a pid or valid job spec\n"].concat())?;
+                diagnostic(&[b"`", *arg, b"': not a pid or valid job spec\n"].concat())?;
                 1
             };
         }
@@ -204,345 +210,213 @@ impl Owner {
         Ok(reply(1, None))
     }
     fn request(&mut self, token: &[u8], fds: Vec<OwnedFd>, bytes: &[u8]) -> io::Result<Bytes> {
-        let frames = protocol::decode(bytes).map_err(|_| invalid("invalid session frames"))?;
-        let [authentication, operation, mask, rest @ ..] = frames.as_slice() else {
-            return Err(invalid("invalid session request"));
-        };
-        if authentication != token {
-            return Err(invalid("unauthenticated session request"));
-        }
-        let mask = u8::try_from(integer(mask)?)
-            .ok()
-            .and_then(|m| crate::types::DescriptorMask::new(m).ok())
-            .ok_or_else(|| invalid("invalid descriptor mask"))?;
-        let needs_cwd = [
-            opcode::RUN,
-            opcode::SPAWN,
-            opcode::CAPTURE,
-            opcode::SUBSTITUTION,
-            opcode::FD_OPEN,
-        ]
-        .contains(&operation.as_slice());
-        let count = mask.get().count_ones() as usize;
-        if fds.len() != count + usize::from(needs_cwd) {
-            return Err(invalid("invalid session descriptor mask"));
-        }
-        let mut fds = fds.into_iter();
-        let mut inherited = Streams::new();
-        for n in 0..3 {
-            if mask.contains(source(n)?) {
-                inherited.insert(source(n)?, fds.next().unwrap());
-            }
-        }
-        let cwd = fds
-            .next()
-            .map(native::WorkingDirectory::from_owned)
-            .transpose()?;
-        let mut streams = self.table.merged(&inherited)?;
+        let request = Request::decode(token, fds, bytes)?;
+        let mut streams = self.table.merged(&request.inherited)?;
         let diagnostics = self.diagnostics(&streams)?;
-        match (operation.as_slice(), rest) {
-            (opcode::SUBSTITUTION_RELEASE, []) => {
+        match request.operation {
+            Operation::Release => {
                 self.endpoints.clear();
                 Ok(reply(0, None))
             }
-            (opcode::FD_RESET, []) => {
+            Operation::Reset => {
                 self.table.reset();
                 Ok(reply(0, None))
             }
-            (opcode::FD_PUSH, []) => {
+            Operation::Push => {
                 self.table.push()?;
                 Ok(reply(0, None))
             }
-            (opcode::FD_POP, []) => {
-                self.table.pop(1)?;
+            Operation::Pop(count) => {
+                self.table.pop(count)?;
                 Ok(reply(0, None))
             }
-            (opcode::FD_POP, [count]) => {
-                self.table.pop(
-                    usize::try_from(integer(count)?).map_err(|_| invalid("invalid scope pop"))?,
-                )?;
+            Operation::Close(number) => {
+                self.table.set(number, None);
                 Ok(reply(0, None))
             }
-            (opcode::FD_CLOSE, [number]) => {
-                self.table.set(source_bytes(number)?, None);
+            Operation::Data(number, value) => {
+                self.table.data(number, value)?;
                 Ok(reply(0, None))
             }
-            (opcode::FD_DATA, [number, value]) => {
-                self.table.data(source_bytes(number)?, value)?;
-                Ok(reply(0, None))
-            }
-            (opcode::FD_OPEN, [_, origin, line, number, mode, path]) => {
-                let result = self.table.open(
-                    source_bytes(number)?,
-                    cwd.as_ref().unwrap().borrow(),
-                    mode,
-                    path,
-                    || ensure_active(&mut self.evaluator),
-                );
-                match result {
+            Operation::Open {
+                cwd,
+                origin,
+                line,
+                number,
+                mode,
+                path,
+            } => {
+                match self.table.open(number, cwd.borrow(), mode, path, || {
+                    ensure_active(&mut self.evaluator)
+                }) {
                     Ok(()) => Ok(reply(0, None)),
                     Err(e) => self.descriptor_failure(&diagnostics, origin, line, path, e),
                 }
             }
-            (opcode::FD_DUP, [origin, line, target, original]) => {
-                let result = (|| {
-                    let number = source_bytes(target)?;
-                    let original = streams
-                        .get(&source_bytes(original)?)
-                        .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))?;
-                    self.table
-                        .set(number, Some(native::duplicate_private(original.as_fd())?));
-                    Ok(())
-                })();
+            Operation::Dup {
+                origin,
+                line,
+                target,
+                original,
+                spelling,
+            } => {
+                let result = streams
+                    .get(&original)
+                    .ok_or_else(|| io::Error::from_raw_os_error(libc::EBADF))
+                    .and_then(|fd| native::duplicate_private(fd.as_fd()));
                 match result {
-                    Ok(()) => Ok(reply(0, None)),
-                    Err(e) => self.descriptor_failure(&diagnostics, origin, line, original, e),
-                }
-            }
-            (opcode::FD_ENDPOINT, [origin, line, target, lease]) => {
-                let result = (|| {
-                    let target = source_bytes(target)?;
-                    let lease = source_bytes(lease)?;
-                    let Some(endpoint) = self.endpoints.remove(&lease) else {
-                        return Ok(false);
-                    };
-                    self.table.set(target, Some(endpoint.transfer()));
-                    Ok(true)
-                })();
-                match result {
-                    Ok(true) => Ok(reply(0, None)),
-                    Ok(false) => Ok(reply(125, None)),
-                    Err(e) => self.descriptor_failure(&diagnostics, origin, line, lease, e),
-                }
-            }
-            (
-                opcode::READ,
-                [
-                    origin,
-                    line,
-                    number,
-                    raw,
-                    delimiter,
-                    count,
-                    ifs,
-                    mode,
-                    names,
-                ],
-            ) => {
-                let count = integer(count)?;
-                let names = integer(names)?;
-                let destination = match mode.as_slice() {
-                    b"reply" => crate::read::Destination::Reply,
-                    b"scalar" if names > 0 => crate::read::Destination::Scalars(names as usize),
-                    b"array" => crate::read::Destination::Array,
-                    _ => return Err(invalid("invalid read destination")),
-                };
-                if (raw != b"0" && raw != b"1") || count < -1 {
-                    return Err(invalid("invalid read flags"));
-                }
-                let config = crate::read::Config {
-                    raw: raw == b"1",
-                    delimiter: delimiter.first().copied().unwrap_or(0),
-                    limit: if count < 0 {
-                        None
-                    } else {
-                        Some(count as usize)
-                    },
-                    ifs: ifs.clone(),
-                    destination,
-                };
-                if let Some(fd) = streams.get(&source_bytes(number)?) {
-                    match crate::read::descriptor_interruptible(&config, fd.as_fd(), || {
-                        self.interrupted()
-                    }) {
-                        Ok((code, values)) => {
-                            let mut result = vec![b"ok".to_vec(), decimal(code), b"1".to_vec()];
-                            result.extend(values);
-                            Ok(protocol::encode(&result))
-                        }
-                        Err(error) => {
-                            write_stream(
-                                &diagnostics,
-                                2,
-                                &[
-                                    origin.as_slice(),
-                                    b": line ",
-                                    line,
-                                    b": read: ",
-                                    number,
-                                    b": read error: ",
-                                    &native::native_error_message(&error),
-                                    b"\n",
-                                ]
-                                .concat(),
-                            )?;
-                            Ok(protocol::encode(&[
-                                b"ok".to_vec(),
-                                b"1".to_vec(),
-                                b"0".to_vec(),
-                            ]))
-                        }
+                    Ok(fd) => {
+                        self.table.set(target, Some(fd));
+                        Ok(reply(0, None))
                     }
-                } else {
-                    write_stream(
-                        &diagnostics,
-                        2,
-                        &[
-                            origin.as_slice(),
-                            b": line ",
-                            line,
-                            b": read: ",
-                            number,
-                            b": invalid file descriptor: Bad file descriptor\n",
-                        ]
-                        .concat(),
-                    )?;
-                    Ok(protocol::encode(&[
-                        b"ok".to_vec(),
-                        b"1".to_vec(),
-                        b"0".to_vec(),
-                    ]))
+                    Err(e) => self.descriptor_failure(&diagnostics, origin, line, spelling, e),
                 }
             }
-            (opcode::FINISH_SIGNAL, [signal]) if signal == b"13" => {
+            Operation::Endpoint { target, lease } => {
+                if let Some(endpoint) = self.endpoints.remove(&lease) {
+                    self.table.set(target, Some(endpoint.transfer()));
+                    Ok(reply(0, None))
+                } else {
+                    Ok(reply(125, None))
+                }
+            }
+            Operation::Read {
+                origin,
+                line,
+                number,
+                spelling,
+                config,
+            } => {
+                let result = streams.get(&number).map(|fd| {
+                    crate::read::descriptor_interruptible(&config, fd.as_fd(), || {
+                        self.interrupted()
+                    })
+                });
+                match result {
+                    Some(Ok((code, values))) => {
+                        let mut result = vec![b"ok".to_vec(), decimal(code), b"1".to_vec()];
+                        result.extend(values);
+                        Ok(protocol::encode(&result))
+                    }
+                    failure => {
+                        let message = match failure {
+                            Some(Err(error)) => [
+                                b": read error: ".as_slice(),
+                                &native::native_error_message(&error),
+                                b"\n",
+                            ]
+                            .concat(),
+                            _ => b": invalid file descriptor: Bad file descriptor\n".to_vec(),
+                        };
+                        write_stream(
+                            &diagnostics,
+                            2,
+                            &[origin, b": line ", line, b": read: ", spelling, &message].concat(),
+                        )?;
+                        Ok(protocol::encode_borrowed(&[b"ok", b"1", b"0"]))
+                    }
+                }
+            }
+            Operation::FinishSignal => {
                 self.finish_signal = Some(13);
                 Ok(reply(0, None))
             }
-            (opcode::PING, []) => Ok(reply(0, Some(std::process::id() as i32))),
-            (opcode::WAIT, [origin, line, args @ ..]) => {
-                let code = self.wait_arguments(&diagnostics, origin, line, args)?;
+            Operation::Ping => Ok(reply(0, Some(std::process::id() as i32))),
+            Operation::Wait { origin, line, args } => {
+                let code = self.wait_arguments(&diagnostics, origin, line, &args)?;
                 Ok(reply(code, None))
             }
-            (mode, [_, count, payload @ ..])
-                if [
-                    opcode::RUN,
-                    opcode::SPAWN,
-                    opcode::CAPTURE,
-                    opcode::SUBSTITUTION,
-                ]
-                .contains(&mode) =>
-            {
-                let count = usize::try_from(integer(count)?)
-                    .map_err(|_| invalid("invalid environment count"))?;
-                if count > payload.len() / 2 {
-                    return Err(invalid("invalid environment count"));
+            Operation::Launch {
+                cwd,
+                environment,
+                mode,
+                body,
+            } => match mode {
+                LaunchMode::Substitution(direction) => {
+                    let (reader, writer) = native::private_pipe()?;
+                    let (endpoint, producer, target) = match direction {
+                        Direction::Input => (reader, writer, 1),
+                        Direction::Output => (writer, reader, 0),
+                    };
+                    streams.insert(source(target)?, producer);
+                    let mut job = jobs::start(
+                        true,
+                        self.diagnostic.as_ref().map(AsFd::as_fd),
+                        &streams,
+                        cwd.borrow(),
+                        &environment,
+                        body,
+                        &self.workspaces,
+                    )?;
+                    let number = self
+                        .endpoints
+                        .keys()
+                        .map(|fd| fd.get())
+                        .max()
+                        .unwrap_or(255)
+                        .max(255)
+                        + 1;
+                    self.endpoints
+                        .insert(source(number)?, crate::types::EndpointLease::new(endpoint));
+                    job.substitution = true;
+                    let pid = job.pid();
+                    self.supersede();
+                    self.jobs.insert(pid, job);
+                    Ok(protocol::encode(&[
+                        b"ok".to_vec(),
+                        b"0".to_vec(),
+                        decimal(pid),
+                        format!("/dev/fd/{number}").into_bytes(),
+                        decimal(number),
+                    ]))
                 }
-                let mut env = Vec::new();
-                for pair in payload[..count * 2].as_chunks::<2>().0 {
-                    if pair[0].is_empty() || pair[0].contains(&b'=') {
-                        return Err(invalid("invalid environment name"));
+                LaunchMode::Capture(warning) => {
+                    self.capture(&streams, cwd.borrow(), &environment, warning, body)
+                }
+                mode => {
+                    for (n, fd) in &self.endpoints {
+                        streams.insert(*n, native::duplicate_private(fd.as_fd())?);
                     }
-                    env.push((pair[0].clone(), pair[1].clone()));
-                }
-                let body = &payload[count * 2..];
-                let cwd = cwd.as_ref().unwrap().borrow();
-                match body {
-                    [direction, kind, operands @ ..]
-                        if mode == opcode::SUBSTITUTION
-                            && (direction == b"input" || direction == b"output") =>
-                    {
-                        let (reader, writer) = native::private_pipe()?;
-                        let (endpoint, producer, target) = if direction == b"input" {
-                            (reader, writer, 1)
-                        } else {
-                            (writer, reader, 0)
-                        };
-                        streams.insert(source(target)?, producer);
-                        let mut job = jobs::start(
-                            true,
-                            self.diagnostic.as_ref().map(AsFd::as_fd),
-                            &streams,
-                            cwd,
-                            &env,
-                            kind,
-                            operands,
+                    let asynchronous = matches!(mode, LaunchMode::Spawn);
+                    if asynchronous {
+                        let null = rustix::fs::open(
+                            "/dev/null",
+                            rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC,
+                            rustix::fs::Mode::empty(),
                         )?;
-                        let number = self
-                            .endpoints
-                            .keys()
-                            .map(|fd| fd.get())
-                            .max()
-                            .unwrap_or(255)
-                            .max(255)
-                            + 1;
-                        let lease = source(number)?;
-                        self.endpoints
-                            .insert(lease, crate::types::EndpointLease::new(endpoint));
-                        job.substitution = true;
-                        let pid = job.pid();
+                        streams.insert(source(0)?, native::duplicate_private(null.as_fd())?);
+                    }
+                    let result = jobs::start(
+                        asynchronous,
+                        self.diagnostic.as_ref().map(AsFd::as_fd),
+                        &streams,
+                        cwd.borrow(),
+                        &environment,
+                        body,
+                        &self.workspaces,
+                    );
+                    self.endpoints.clear();
+                    let job = result?;
+                    let pid = job.pid();
+                    if asynchronous {
                         self.supersede();
-                        self.jobs.insert(pid, job);
-                        Ok(protocol::encode(&[
-                            b"ok".to_vec(),
-                            b"0".to_vec(),
-                            decimal(pid),
-                            format!("/dev/fd/{number}").into_bytes(),
-                            decimal(number),
-                        ]))
                     }
-                    [warning, kind, operands @ ..]
-                        if mode == opcode::CAPTURE && kind == body_opcode::SNAPSHOT =>
-                    {
-                        self.capture(&streams, cwd, &env, warning, operands)
+                    self.jobs.insert(pid, job);
+                    drop(streams);
+                    if asynchronous {
+                        Ok(reply(0, Some(pid)))
+                    } else {
+                        let status = self.wait(pid);
+                        if status.is_err()
+                            && let Some(job) = self.jobs.get_mut(&pid)
+                        {
+                            job.terminate();
+                        }
+                        self.jobs.remove(&pid);
+                        Ok(reply(status?, Some(pid)))
                     }
-                    [kind, operands @ ..]
-                        if [
-                            body_opcode::EXTERNAL,
-                            body_opcode::EXTERNAL_SITE,
-                            body_opcode::BODY,
-                            body_opcode::SNAPSHOT,
-                            body_opcode::BUILTIN,
-                            body_opcode::DIRECTORY_OUTPUT,
-                            body_opcode::PIPELINE,
-                        ]
-                        .contains(&kind.as_slice()) =>
-                    {
-                        for (n, fd) in &self.endpoints {
-                            streams.insert(*n, native::duplicate_private(fd.as_fd())?);
-                        }
-                        let asynchronous = mode == opcode::SPAWN;
-                        if asynchronous {
-                            let null = rustix::fs::open(
-                                "/dev/null",
-                                rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::CLOEXEC,
-                                rustix::fs::Mode::empty(),
-                            )?;
-                            streams.insert(source(0)?, native::duplicate_private(null.as_fd())?);
-                        }
-                        let result = jobs::start(
-                            asynchronous,
-                            self.diagnostic.as_ref().map(AsFd::as_fd),
-                            &streams,
-                            cwd,
-                            &env,
-                            kind,
-                            operands,
-                        );
-                        self.endpoints.clear();
-                        let job = result?;
-                        let pid = job.pid();
-                        if asynchronous {
-                            self.supersede();
-                        }
-                        self.jobs.insert(pid, job);
-                        drop(streams);
-                        if asynchronous {
-                            Ok(reply(0, Some(pid)))
-                        } else {
-                            let status = self.wait(pid);
-                            if status.is_err()
-                                && let Some(job) = self.jobs.get_mut(&pid)
-                            {
-                                job.terminate();
-                            }
-                            self.jobs.remove(&pid);
-                            Ok(reply(status?, Some(pid)))
-                        }
-                    }
-                    _ => Err(invalid("unknown compiled session body kind")),
                 }
-            }
-            _ => Err(invalid("unknown session operation")),
+            },
         }
     }
     fn capture(
@@ -551,7 +425,7 @@ impl Owner {
         cwd: native::BorrowedDirectory<'_>,
         env: &native::Environment,
         warning: &[u8],
-        operands: &[Bytes],
+        body: Body<'_>,
     ) -> io::Result<Bytes> {
         let (reader, writer) = native::private_pipe()?;
         let mut output = table::copy(streams)?;
@@ -562,38 +436,19 @@ impl Owner {
             &output,
             cwd,
             env,
-            body_opcode::SNAPSHOT,
-            operands,
+            body,
+            &self.workspaces,
         )?;
         let pid = job.pid();
         self.jobs.insert(pid, job);
         drop(output);
+        let diagnostics = self.diagnostics(streams)?;
         let result = (|| {
-            let mut value = Vec::new();
-            let mut chunk = [0; 65536];
-            let mut warned = false;
-            loop {
-                let n = match rustix::io::read(&reader, &mut chunk) {
-                    Ok(n) => n,
-                    Err(rustix::io::Errno::INTR) => {
-                        self.interrupted()?;
-                        continue;
-                    }
-                    Err(e) => return Err(e.into()),
-                };
-                if n == 0 {
-                    break;
-                }
-                let bytes = &chunk[..n];
-                if bytes.contains(&0) && !warned {
-                    write_stream(&self.diagnostics(streams)?, 2, warning)?;
-                    warned = true;
-                }
-                value.extend(bytes.iter().copied().filter(|b| *b != 0));
-            }
-            while value.last() == Some(&10) {
-                value.pop();
-            }
+            let value = crate::capture::drain(
+                reader.as_fd(),
+                || self.interrupted(),
+                || write_stream(&diagnostics, 2, warning),
+            )?;
             let code = self.wait(pid)?;
             Ok(protocol::encode(&[b"ok".to_vec(), decimal(code), value]))
         })();
@@ -607,9 +462,12 @@ impl Owner {
     }
 }
 
-pub fn dispatch(args: &[Bytes]) -> io::Result<i32> {
-    // Adopt the entire inherited set before capsule/diagnostic/socket acquisition.
-    let table = table::Table::new()?;
+pub(crate) fn inherited_numbers() -> io::Result<Vec<i32>> {
+    table::inherited_numbers()
+}
+
+pub fn dispatch(args: &[Bytes], inherited: Streams) -> io::Result<i32> {
+    let table = table::Table::from_inherited(inherited);
     let (code, signal) = match args {
         [flag, directory, token, rest @ ..] if flag == b"--capsule" => {
             let lease = capsule::acquire(directory, token)?;
@@ -634,7 +492,7 @@ fn run(table: table::Table, script: &[u8], arguments: &[Bytes]) -> io::Result<(i
     } else {
         None
     };
-    let directory = capsule::workspace("monk-session-")?;
+    let directory = capsule::WorkspaceOwner::new("monk-session-")?;
     let socket_path = capsule::bytes(&directory.path().join("control"));
     let listener = transport::listen(&socket_path)?;
     let token = capsule::token()?;
@@ -681,6 +539,7 @@ fn run(table: table::Table, script: &[u8], arguments: &[Bytes]) -> io::Result<(i
     )?;
     let mut owner = Owner {
         table,
+        workspaces: directory,
         diagnostic,
         endpoints: BTreeMap::new(),
         jobs: BTreeMap::new(),
@@ -688,6 +547,11 @@ fn run(table: table::Table, script: &[u8], arguments: &[Bytes]) -> io::Result<(i
         finish_signal: None,
     };
     let _watch = native::EvaluatorWatch::new(owner.evaluator.pid())?;
+    rustix::fs::fcntl_setfl(
+        &listener,
+        rustix::fs::fcntl_getfl(&listener)? | rustix::fs::OFlags::NONBLOCK,
+    )?;
+    let mut peers: Vec<transport::Peer> = Vec::new();
     let result = (|| loop {
         if let Some(signal) = native::pending_signal() {
             break Ok((128 + signal, Some(signal)));
@@ -698,254 +562,66 @@ fn run(table: table::Table, script: &[u8], arguments: &[Bytes]) -> io::Result<(i
         for job in owner.jobs.values_mut() {
             job.poll()?;
         }
-        let ready = match poll(
-            &mut [PollFd::new(&listener, PollFlags::IN)],
+        peers.retain(|peer| !peer.done());
+        let mut watched = vec![PollFd::new(&listener, PollFlags::IN)];
+        watched.extend(
+            peers
+                .iter()
+                .map(|peer| PollFd::from_borrowed_fd(peer.fd(), peer.events())),
+        );
+        match poll(
+            &mut watched,
             Some(&Timespec {
                 tv_sec: 0,
                 tv_nsec: 1_000_000,
             }),
         ) {
-            Ok(n) => n,
+            Ok(_) => {}
             Err(rustix::io::Errno::INTR) => continue,
             Err(e) => break Err(e.into()),
-        };
-        if ready == 0 {
-            continue;
         }
-        let connection = match transport::accept(listener.as_fd()) {
-            Ok(c) => c,
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => break Err(e),
-        };
-        let response =
-            match transport::receive_interruptible(connection.as_fd(), || owner.interrupted()) {
-                Ok((fds, bytes)) => owner
-                    .request(&token, fds, &bytes)
-                    .unwrap_or_else(|_| reply(125, None)),
-                Err(_) => reply(125, None),
-            };
-        let _ = transport::write(connection.as_fd(), &response);
+        let ready = watched
+            .iter()
+            .map(|fd| !fd.revents().is_empty())
+            .collect::<Vec<_>>();
+        drop(watched);
+        for (peer, ready) in peers.iter_mut().zip(&ready[1..]) {
+            if !ready {
+                continue;
+            }
+            match peer.advance() {
+                Ok(Some((fds, bytes))) => peer.reply(
+                    owner
+                        .request(&token, fds, &bytes)
+                        .unwrap_or_else(|_| reply(125, None)),
+                ),
+                Ok(None) => {}
+                Err(_) => peer.reject(reply(125, None)),
+            }
+        }
+        if ready[0] {
+            match transport::accept(listener.as_fd()).and_then(transport::Peer::new) {
+                Ok(peer) => peers.push(peer),
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) => {}
+                Err(e) => break Err(e),
+            }
+        }
     })();
     owner.endpoints.clear();
     if owner.evaluator.try_wait()?.is_none() {
         let _ = owner.evaluator.terminate();
     }
+    let background = owner.jobs.values_mut().try_fold(false, |live, job| {
+        job.poll().map(|status| live || status.is_none())
+    })?;
+    let workspaces = owner.workspaces;
+    drop(owner.jobs);
+    if !background {
+        workspaces.finish()?;
+    }
     result
-}
-fn publish(private_reply: bool, value: &[u8]) -> io::Result<()> {
-    if private_reply {
-        std::fs::write(capsule::path(&variable("MONK_SESSION_REPLY")?), value)
-    } else {
-        native::write_all(native::inherited_fd(1)?.as_fd(), value)
-    }
-}
-pub fn client(private_reply: bool) -> io::Result<i32> {
-    let action = (|| {
-        if private_reply {
-            publish(true, b"")?;
-        }
-        let socket = variable("MONK_SESSION_SOCKET")?;
-        let token = variable("MONK_SESSION_TOKEN")?;
-        let input = transport::read_all(native::inherited_fd(0)?.as_fd())?;
-        let frames = protocol::decode(&input).map_err(|_| invalid("invalid session request"))?;
-        let [operation, mask, operands @ ..] = frames.as_slice() else {
-            return Err(invalid("invalid session request"));
-        };
-        let mask_value = u8::try_from(integer(mask)?)
-            .ok()
-            .and_then(|n| crate::types::DescriptorMask::new(n).ok())
-            .ok_or_else(|| invalid("invalid descriptor mask"))?;
-        let mut descriptors = Vec::new();
-        for n in 0..3 {
-            if mask_value.contains(source(n)?) {
-                if !native::initial_descriptor_open(n + 3) {
-                    return Err(invalid("missing user stream"));
-                }
-                descriptors.push(native::inherited_fd(n + 3)?);
-            }
-        }
-        let mut payload = vec![token, operation.clone(), mask.clone()];
-        if [opcode::RUN, opcode::SPAWN, opcode::SUBSTITUTION].contains(&operation.as_slice()) {
-            let env = clean_environment(native::environment());
-            payload.extend([Vec::new(), decimal(env.len())]);
-            payload.extend(environment_frames(&env));
-        } else if operation == opcode::FD_OPEN {
-            payload.push(Vec::new());
-        }
-        payload.extend_from_slice(operands);
-        if [
-            opcode::RUN,
-            opcode::SPAWN,
-            opcode::SUBSTITUTION,
-            opcode::FD_OPEN,
-        ]
-        .contains(&operation.as_slice())
-        {
-            descriptors.push(native::open_working_directory()?.into_owned());
-        }
-        transport::request(
-            &socket,
-            &descriptors.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
-            &protocol::encode(&payload),
-        )
-    })();
-    publish(private_reply, &action.unwrap_or_else(|_| reply(125, None)))?;
-    Ok(0)
-}
-pub fn child(capture: bool, request: crate::child::Request) -> io::Result<(i32, Bytes)> {
-    let socket = variable("MONK_SESSION_SOCKET")?;
-    let token = variable("MONK_SESSION_TOKEN")?;
-    let env = clean_environment(native::environment());
-    let values = protocol::decode(&request.state).map_err(|_| invalid("invalid child state"))?;
-    let mut frames = vec![
-        token,
-        if capture {
-            opcode::CAPTURE.to_vec()
-        } else {
-            opcode::RUN.to_vec()
-        },
-        decimal(request.mask.get()),
-        Vec::new(),
-        decimal(env.len()),
-    ];
-    frames.extend(environment_frames(&env));
-    if capture {
-        frames.push(request.warning);
-    }
-    frames.extend([
-        body_opcode::SNAPSHOT.to_vec(),
-        request.script,
-        request.level,
-    ]);
-    frames.extend(values);
-    let mut descriptors = Vec::new();
-    for n in 0..3 {
-        if request.mask.contains(source(n)?) {
-            descriptors.push(native::inherited_fd(if n == 0 { 3 } else { n })?);
-        }
-    }
-    descriptors.push(native::open_working_directory()?.into_owned());
-    let response = transport::request(
-        &socket,
-        &descriptors.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
-        &protocol::encode(&frames),
-    )?;
-    match protocol::decode(&response)
-        .map_err(|_| invalid("invalid child response"))?
-        .as_slice()
-    {
-        [ok, status, value] if ok == b"ok" => Ok((
-            integer(status)? as i32,
-            if capture { value.clone() } else { Vec::new() },
-        )),
-        _ => Err(invalid("invalid child session reply")),
-    }
-}
-pub fn directory_diagnostic() -> io::Result<i32> {
-    let input = transport::read_all(native::inherited_fd(0)?.as_fd())?;
-    let (origin, line, name, message) = crate::directory::diagnostic(&input)
-        .map_err(|_| invalid("invalid directory diagnostic"))?;
-    if message.is_empty() {
-        return Ok(0);
-    }
-    let socket = variable("MONK_SESSION_SOCKET")?;
-    let token = variable("MONK_SESSION_TOKEN")?;
-    let env = clean_environment(native::environment());
-    let error_open = native::initial_descriptor_open(2);
-    let mut frames = vec![
-        token,
-        opcode::RUN.to_vec(),
-        if error_open {
-            b"4".to_vec()
-        } else {
-            b"0".to_vec()
-        },
-        Vec::new(),
-        decimal(env.len()),
-    ];
-    frames.extend(environment_frames(&env));
-    frames.extend([
-        body_opcode::DIRECTORY_OUTPUT.to_vec(),
-        origin,
-        line,
-        name,
-        b"2".to_vec(),
-        message,
-    ]);
-    let mut descriptors = Vec::new();
-    if error_open {
-        descriptors.push(native::inherited_fd(2)?);
-    }
-    descriptors.push(native::open_working_directory()?.into_owned());
-    let response = transport::request(
-        &socket,
-        &descriptors.iter().map(AsFd::as_fd).collect::<Vec<_>>(),
-        &protocol::encode(&frames),
-    )?;
-    match protocol::decode(&response)
-        .map_err(|_| invalid("invalid directory session reply"))?
-        .as_slice()
-    {
-        [ok, status, _] if ok == b"ok" => Ok(integer(status)? as i32),
-        _ => Err(invalid("invalid directory session response")),
-    }
-}
-pub fn writer(args: &[Bytes]) -> io::Result<i32> {
-    let [directory, path, origin, line, name] = args else {
-        return Err(invalid("invalid native writer arguments"));
-    };
-    let result = (|| {
-        let file = std::fs::File::open(capsule::path(path))?;
-        std::fs::remove_file(capsule::path(path))?;
-        std::fs::remove_dir(capsule::path(directory))?;
-        let mut chunk = [0; 65536];
-        loop {
-            let n = rustix::io::read(&file, &mut chunk)?;
-            if n == 0 {
-                break;
-            }
-            if !native::initial_descriptor_open(1) {
-                return Err(io::Error::from_raw_os_error(libc::EBADF));
-            }
-            native::write_all(native::inherited_fd(1)?.as_fd(), &chunk[..n])?;
-        }
-        Ok(())
-    })();
-    match result {
-        Ok(()) => Ok(0),
-        Err(error) => {
-            if native::initial_descriptor_open(2) {
-                let _ = native::write_all(
-                    native::inherited_fd(2)?.as_fd(),
-                    &[
-                        origin.as_slice(),
-                        b": line ",
-                        line,
-                        b": ",
-                        name,
-                        b": write error: ",
-                        &native::native_error_message(&error),
-                        b"\n",
-                    ]
-                    .concat(),
-                );
-            }
-            Ok(1)
-        }
-    }
-}
-pub fn exec_error(args: &[Bytes]) -> io::Result<i32> {
-    let [directory, path, code] = args else {
-        return Err(invalid("invalid failed executable diagnostic arguments"));
-    };
-    let code = integer(code)? as i32;
-    let file = std::fs::File::open(capsule::path(path))?;
-    std::fs::remove_file(capsule::path(path))?;
-    std::fs::remove_dir(capsule::path(directory))?;
-    if native::initial_descriptor_open(2)
-        && let Ok(value) = transport::read_all(file.as_fd())
-    {
-        let _ = native::write_all(native::inherited_fd(2)?.as_fd(), &value);
-    }
-    Ok(code)
 }

@@ -76,11 +76,8 @@ in {
       tool="$(cabal list-bin exe:monk-tool)"
       export PATH="$PWD/target/debug:$PATH"
       MONK_INTEGRATION=1 cabal test all --test-show-details=direct
-      for suite in callback-diagnostics descriptors direct-output directory-signals exec expansion native-launcher pattern-parts portable printf process-substitution protocol read session signals; do
-        "$tool" runtime check --suite "$suite" --runtime "$runtime" --monk "$monk"
-      done
+      "$tool" runtime check --all --runtime "$runtime" --monk "$monk"
       "$tool" runtime check --suite digest --runtime "$(cabal list-bin test:compiler-support-test)"
-      bash test/native/child-transport.sh "$runtime"
       "$tool" boundaries check --report artifacts/public-boundaries.json
     '';
     scripts.monk-quality.exec = ''
@@ -113,6 +110,7 @@ in {
     outputs.reference = reference;
     outputs.testPrograms = { coreutils = tools.coreutils; };
     outputs.tooling = project.hsPkgs.monk.components.exes.monk-tool;
+    outputs.translator = project.hsPkgs.monk.components.exes.monk;
     outputs.compiler = hp.haskell-nix.compiler.${config.monk.compiler};
     outputs.runtime = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]
       (system: import ./nix/release.nix {

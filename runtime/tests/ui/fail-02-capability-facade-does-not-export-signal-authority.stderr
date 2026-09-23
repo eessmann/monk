@@ -1,0 +1,5 @@
+error[E0433]: cannot find `SignalGuard` in `capabilities`
+ --> tests/ui/fail-02-capability-facade-does-not-export-signal-authority.rs:2:48
+  |
+2 | pub fn bad(){let _=monk_runtime::capabilities::SignalGuard::install();}
+  |                                                ^^^^^^^^^^^ could not find `SignalGuard` in `capabilities`

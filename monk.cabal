@@ -31,6 +31,8 @@ extra-source-files:  cabal.project
                      runtime/src/*.rs
                      runtime/src/**/*.rs
                      runtime/tests/*.rs
+                     runtime/tests/**/*.rs
+                     runtime/tests/**/*.stderr
                      protocol/abi2.tsv
                      devenv.nix
                      devenv.yaml
@@ -40,6 +42,7 @@ extra-source-files:  cabal.project
                      test/native/*.sh
                      test/fixtures/**/*.bash
                      test/fixtures/**/*.fish
+                     test/fixtures/**/*.json
                      test/fixtures/**/*.args
                      test/fixtures/**/*.stdin
                      test/fixtures/**/*.mode
@@ -68,19 +71,7 @@ flag development
   default:             False
   manual:              True
 
-common common-options
-  build-depends:       base >= 4.21 && <5
-                     , relude ^>= 1.2.2
-                     , ShellCheck ^>= 0.11
-                     , prettyprinter ^>= 1.7
-                     , extra ^>= 1.8
-                     , safe-exceptions ^>= 0.1.7
-                     , mtl ^>= 2.3
-
-  -- Use relude as the Prelude via mixins.
-  mixins:              base hiding (Prelude)
-                     , relude (Relude as Prelude)
-                     , relude
+common warnings
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities
@@ -104,6 +95,15 @@ common common-options
   if flag(development)
     ghc-options:       -Werror
 
+common common-options
+  import:              warnings
+  build-depends:       base >= 4.21 && <5
+                     , relude ^>= 1.2.2
+
+  -- Use relude as the Prelude via mixins.
+  mixins:              base hiding (Prelude)
+                     , relude (Relude as Prelude)
+                     , relude
   default-language:    GHC2024
   default-extensions:  ApplicativeDo
                        DefaultSignatures
@@ -122,51 +122,98 @@ library
                      , Monk.AST
                      , Monk.Source
                      , Monk.Translation
-                     , Monk.Translation.Types
-                     , Language.Fish.DSL
                      , Monk.Diagnostics
                      , Monk.Output
-  build-depends:       monk:monk-compiler-support
-                     , process ^>= 1.6
+  reexported-modules:  Monk.Translation.Types
+                     , Language.Fish.DSL
+  other-modules:       Monk.Source.Product
+                     , Monk.Translation.Parser
+  build-depends:       monk:monk-foundation
+                     , monk:monk-host
+                     , monk:monk-compiler
+                     , monk:monk-publication
+                     , ShellCheck ^>= 0.11
                      , containers >= 0.7 && < 0.9
-                     , aeson ^>= 2.2
                      , bytestring ^>= 0.12
                      , text ^>= 2.1
-                     , unix >= 2.8 && < 2.9
                      , directory ^>= 1.3
                      , filepath ^>= 1.5
-  other-modules:       Language.Fish.Translator.Traps
-                     , Language.Fish.Translator.Session
-                     , Language.Fish.Translator.Native
-                     , Language.Fish.Translator.NativeRuntime
-                     , Language.Fish.Translator.Statistics
-                     , Language.Fish.Translator.Directory
-                     , Monk.Output.Runtime
-                     , Language.Fish.AST
-                     , Language.Bash.Plan
-                     , Language.Bash.Plan.Effects
-                     , Language.Bash.Plan.Normalize
-                     , Language.Bash.Plan.Directory
-                     , Language.Fish.Translator.Binding
-                     , Language.Fish.Translator.Child
-                     , Language.Fish.Translator.Pattern
-                     , Language.Fish.Translator.Plan
-                     , Language.Bash.Arithmetic.Plan
-                     , Language.Bash.Arithmetic.Source
-                     , Language.Fish.Translator.ArithmeticPlan
-                     , Language.Fish.Translator.ArithmeticDiagnostic
+
+library monk-foundation
+  import:              warnings
+  default-language:    GHC2024
+  default-extensions:  OverloadedStrings
+  visibility:          private
+  hs-source-dirs:      foundation-src
+  exposed-modules:     Monk.Runtime.Abi2
+                     , Monk.Runtime.Digest
+                     , Monk.Runtime.Integer
+                     , Monk.Runtime.NativeTarget
+                     , Monk.Source.Location
                      , Monk.Translation.Contract
-                     , Monk.Translation.ParseDiagnostics
+                     , Monk.Translation.Types
+  build-depends:       base >=4.21 && <5
+                     , cryptohash-sha256 ^>=0.11.102
+                     , relude ^>=1.2.2
+                     , aeson ^>=2.2
+                     , containers >=0.7 && <0.9
+                     , text ^>=2.1
+                     , bytestring ^>=0.12
+
+library monk-host
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      host-src
+  exposed-modules:     Monk.Host.Process
+                     , Monk.Output.Runtime
+                     , Monk.Runtime.Compatibility
                      , Monk.Source.Environment
-                     , Monk.Source.Product
-                     , Monk.Output.Publication
+  build-depends:       monk:monk-foundation
+                     , async ^>=2.2
+                     , stm ^>=2.5
+                     , bytestring ^>=0.12
+                     , containers >=0.7 && <0.9
+                     , directory ^>=1.3
+                     , filepath ^>=1.5
+                     , process ^>=1.6
+                     , text ^>=2.1
+                     , unix >=2.8 && <2.9
+
+library monk-compiler
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      compiler-src
+  exposed-modules:     Language.Bash.Arithmetic.Plan
+                     , Language.Bash.Arithmetic.Source
+                     , Language.Bash.Parser
+                     , Language.Bash.Plan
+                     , Language.Bash.Plan.Control
+                     , Language.Bash.Plan.Directory
+                     , Language.Bash.Plan.Effects
+                     , Language.Bash.Plan.Facts
+                     , Language.Bash.Plan.Identity
+                     , Language.Bash.Plan.Normalize
+                     , Language.Bash.Plan.Normalize.Commands
+                     , Language.Bash.Plan.Normalize.Context
+                     , Language.Bash.Plan.Normalize.Control
+                     , Language.Bash.Plan.Normalize.Flow
+                     , Language.Bash.Plan.Normalize.Literal
+                     , Language.Bash.Plan.Normalize.Sources
+                     , Language.Bash.Plan.Normalize.State
+                     , Language.Bash.Plan.Normalize.Syntax
+                     , Language.Bash.Plan.Normalize.Words
+                     , Language.Bash.Plan.Operator
+                     , Language.Fish.AST
                      , Language.Fish.AST.Common
                      , Language.Fish.AST.Example
                      , Language.Fish.AST.Types
+                     , Language.Fish.DSL
+                     , Language.Fish.DSL.Argument
+                     , Language.Fish.DSL.Executable
                      , Language.Fish.DSL.Internal
                      , Language.Fish.DSL.Lower
+                     , Language.Fish.DSL.Name
                      , Language.Fish.DSL.Types
-
                      , Language.Fish.Pretty
                      , Language.Fish.Pretty.Command
                      , Language.Fish.Pretty.Expr
@@ -174,16 +221,76 @@ library
                      , Language.Fish.Pretty.Pattern
                      , Language.Fish.Pretty.Redirect
                      , Language.Fish.Pretty.Statement
+                     , Language.Fish.Translator.ArithmeticDiagnostic
+                     , Language.Fish.Translator.ArithmeticPlan
+                     , Language.Fish.Translator.Binding
+                     , Language.Fish.Translator.Boundary
+                     , Language.Fish.Translator.Child
+                     , Language.Fish.Translator.Context
+                     , Language.Fish.Translator.Directory
+                     , Language.Fish.Translator.Emission
+                     , Language.Fish.Translator.HelperRegistry
+                     , Language.Fish.Translator.Identifier
+                     , Language.Fish.Translator.Invocation
+                     , Language.Fish.Translator.Materialize
+                     , Language.Fish.Translator.Native
+                     , Language.Fish.Translator.NativeRuntime
+                     , Language.Fish.Translator.Pattern
+                     , Language.Fish.Translator.Plan
+                     , Language.Fish.Translator.Primitive
+                     , Language.Fish.Translator.Region
+                     , Language.Fish.Translator.Session
+                     , Language.Fish.Translator.Session.Request
+                     , Language.Fish.Translator.Statement
+                     , Language.Fish.Translator.Statistics
+                     , Language.Fish.Translator.Traps
+                     , Language.Fish.Translator.Words
+                     , Monk.Compiler.Artifact
+                     , Monk.Compiler.Context
+                     , Monk.Compiler.Index
+                     , Monk.Translation.ParseDiagnostics
+  build-depends:       monk:monk-foundation
+                     , singletons ^>=3.0
+                     , ShellCheck ^>=0.11
+                     , prettyprinter ^>=1.7
+                     , mtl ^>=2.3
+                     , containers >=0.7 && <0.9
+                     , bytestring ^>=0.12
+                     , text ^>=2.1
+                     , filepath ^>=1.5
 
-                     , Language.Bash.Parser
-
-library monk-harness-support
+library monk-publication
   import:              common-options
   visibility:          private
-  hs-source-dirs:      src
+  hs-source-dirs:      publication-src
+  exposed-modules:     Monk.Output.Publication
+                     , Monk.Output.Publication.Lock
+                     , Monk.Output.Publication.Manifest
+                     , Monk.Output.Publication.Plan
+                     , Monk.Output.Publication.Posix
+  other-modules:       Monk.Output.Publication.Types
+                     , Monk.Output.Publication.Lease
+  build-depends:       monk:monk-foundation
+                     , monk:monk-host
+                     , bytestring ^>=0.12
+                     , containers >=0.7 && <0.9
+                     , directory ^>=1.3
+                     , filepath ^>=1.5
+                     , temporary ^>=1.3
+                     , stm ^>=2.5
+                     , text ^>=2.1
+                     , unix >=2.8 && <2.9
+
+library monk-test-support
+  import:              common-options
+  visibility:          private
+  hs-source-dirs:      test-support
   exposed-modules:     Monk.Internal.Fixture
                      , Monk.Internal.Shell
-  build-depends:       aeson ^>= 2.2
+  build-depends:       monk:monk-host
+                     , bytestring ^>=0.12
+                     , text ^>=2.1
+                     , aeson ^>= 2.2
                      , containers >= 0.7 && < 0.9
                      , path ^>= 0.9
                      , path-io ^>= 1.8
@@ -191,7 +298,7 @@ library monk-harness-support
 library monk-bakeoff-lib
   import:              common-options
   visibility:          private
-  hs-source-dirs:      scripts
+  hs-source-dirs:      tooling/src
   exposed-modules:     Bakeoff.Fixture
                      , Bakeoff.Artifacts
                      , Bakeoff.Benchmark
@@ -207,10 +314,12 @@ library monk-bakeoff-lib
   other-modules:       Bakeoff.Execution.Diff
                      , Bakeoff.Execution.Shared
                      , Bakeoff.Execution.Translation
-  build-depends:       monk
-                     , monk:monk-harness-support
+  build-depends:       monk:monk-host
+                     , monk
+                     , monk:monk-test-support
                      , aeson ^>= 2.2
                      , bytestring ^>= 0.12
+                     , text ^>= 2.1
                      , containers >= 0.7 && < 0.9
                      , filepath ^>= 1.5
                      , path ^>= 0.9
@@ -234,7 +343,7 @@ executable monk
 
 executable monk-bakeoff
   import:              common-options
-  hs-source-dirs:      scripts/app
+  hs-source-dirs:      tooling/app/bakeoff
   main-is:             Main.hs
   build-depends:       monk
                      , monk:monk-bakeoff-lib
@@ -263,6 +372,10 @@ test-suite monk-test
                      , Integration
                      , Unit.Inline
                      , Unit.OutputBundle
+                     , Unit.NormalizationFacts
+                     , Unit.PlanEffects
+                     , Unit.SessionRequest
+                     , Unit.Identifiers
                      , Unit.Bakeoff
                      , Unit.Diagnostics
                      , Unit.DSL
@@ -295,8 +408,11 @@ test-suite monk-test
                      , Property.Translation
                      , Property.OutputEquivalence
   build-depends:       monk
+                     , ShellCheck ^>= 0.11
+                     , monk:monk-foundation
+                     , monk:monk-compiler
                      , aeson ^>= 2.2
-                     , monk:monk-harness-support
+                     , monk:monk-test-support
                      , monk:monk-bakeoff-lib
                      , bytestring ^>= 0.12
                      , containers >= 0.7 && < 0.9
@@ -319,11 +435,11 @@ test-suite monk-test
 test-suite publication-test
   import:              common-options
   type:                exitcode-stdio-1.0
-  hs-source-dirs:      test src
+  hs-source-dirs:      test
   main-is:             PublicationSpec.hs
-  other-modules:       Monk.Output.Publication
-  build-depends:       bytestring ^>= 0.12
-                     , monk:monk-compiler-support
+  build-depends:       monk:monk-publication
+                     , bytestring ^>= 0.12
+                     , monk:monk-foundation
                      , directory ^>= 1.3
                      , filepath ^>= 1.5
                      , text ^>= 2.1
@@ -346,23 +462,14 @@ benchmark monk-benchmark
                        -with-rtsopts=-N
 
 
--- Pure compiler and host-tool support survives the native runtime replacement.
-library monk-compiler-support
-  visibility:          private
-  hs-source-dirs:      support-src
-  exposed-modules:     Monk.Runtime.Abi2
-                     , Monk.Runtime.Integer
-                     , Monk.Runtime.Digest
-                     , Monk.Runtime.NativeTarget
-                     , Monk.Runtime.Compatibility
-  default-language:   GHC2024
-  build-depends:       base >=4.21 && <5
-                     , array >=0.5 && <0.6
+test-suite host-nonthreaded-test
+  import:              common-options
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             HostNonThreaded.hs
+  build-depends:       monk:monk-host
                      , bytestring ^>=0.12
                      , process ^>=1.6
-  ghc-options:         -Wall
-  if flag(development)
-    ghc-options:       -Werror
 
 test-suite compiler-support-test
   type:                exitcode-stdio-1.0
@@ -370,7 +477,7 @@ test-suite compiler-support-test
   main-is:             Main.hs
   default-language:   GHC2024
   build-depends:       base >=4.21 && <5
-                     , monk:monk-compiler-support
+                     , monk:monk-foundation
                      , bytestring ^>=0.12
   ghc-options:         -Wall
   if flag(development)
@@ -379,7 +486,7 @@ test-suite compiler-support-test
 library monk-tooling
   import:              common-options
   visibility:          private
-  hs-source-dirs:      tooling
+  hs-source-dirs:      tooling/src
   exposed-modules:     Monk.Tooling.Package
                      , Monk.Tooling.Boundaries
                      , Monk.Tooling.Evidence.Common
@@ -400,8 +507,11 @@ library monk-tooling
                      , Monk.Tooling.Runtime.Ownership
                      , Monk.Tooling.Runtime.Semantics
                      , Monk.Tooling.Runtime.Sessions
+                     , Monk.Tooling.Runtime.Suite
                      , Monk.Tooling.Summary
-  build-depends:       monk:monk-compiler-support
+  build-depends:       monk:monk-host
+                     , base64-bytestring ^>=1.2.1
+                     , monk:monk-foundation
                      , aeson ^>= 2.2
                      , bytestring ^>= 0.12
                      , directory ^>= 1.3
@@ -426,6 +536,8 @@ executable monk-tool
                      , process ^>= 1.6
                      , text ^>= 2.1
                      , unix >= 2.8 && < 2.9
+  ghc-options:         -threaded
+                       -rtsopts
 
 test-suite monk-tool-test
   import:              common-options
@@ -433,10 +545,17 @@ test-suite monk-tool-test
   hs-source-dirs:      tooling-test
   main-is:             Main.hs
   other-modules:       Evidence
+                     , HostProcess
+                     , RuntimeSuite
+                     , Fixture
   build-tool-depends:  monk:monk-tool
                      , monk:monk
   build-depends:       monk:monk-tooling
-                     , monk:monk-compiler-support
+                     , async ^>=2.2
+                     , monk:monk-test-support
+                     , temporary ^>=1.3
+                     , path-io ^>=1.8
+                     , monk:monk-foundation
                      , aeson ^>= 2.2
                      , bytestring ^>= 0.12
                      , directory ^>= 1.3

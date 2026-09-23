@@ -5,6 +5,7 @@ module Integration
   )
 where
 
+import Data.Aeson (encode, object, (.=))
 import Data.List qualified as L
 import Data.Text qualified as T
 import Data.Text.IO qualified as TIO
@@ -148,15 +149,15 @@ integrationTest MkIntegrationFixture {ifName, ifPath} = H.testCaseSteps ifName $
           platforms <- loadFixturePlatforms fixturePath
           missingPrereqs <- fixtureMissingPrereqs fixturePath
           case fixturePlatformSkipReason (toText SysInfo.os) platforms of
-            Just reason -> step (toString reason)
-            Nothing | not (null missingPrereqs) -> step ("skipped: missing prerequisites: " <> toString (T.intercalate ", " missingPrereqs))
+            Just reason -> step (T.unpack (decodeUtf8 (encode (object ["status" .= ("skipped" :: Text), "category" .= ("platform" :: Text), "fixture" .= ifPath, "reason" .= reason]))))
+            Nothing | not (null missingPrereqs) -> H.assertFailure ("mandatory execution prerequisites missing: " <> toString (T.intercalate ", " missingPrereqs))
             Nothing -> do
               args <- loadFixtureArgs fixturePath
               stdinInput <- loadFixtureStdin fixturePath
               baseEnv <- prepareEnv
               bashRes <- runShellWithMode ShellRunExec ShellBash baseEnv bashSrc args stdinInput
               fishRes <- runShellWithMode ShellRunExec ShellFish baseEnv fishSrc args stdinInput
-              let observation value = (rrExit value, rrStdout value, rrStderr value)
+              let observation value = (rrExit value, rrStdoutBytes value, rrStderrBytes value)
               H.assertEqual
                 (if null diagnostics then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH")
                 (observation bashRes)

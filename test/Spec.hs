@@ -17,9 +17,12 @@ import Unit.Contract
 import Unit.DSL
 import Unit.Diagnostics
 import Unit.Harness
+import Unit.Identifiers
 import Unit.Inline
+import Unit.NormalizationFacts
 import Unit.OutputBundle
 import Unit.Pipefail
+import Unit.PlanEffects
 import Unit.PlannedArithmetic
 import Unit.PlannedArrays
 import Unit.PlannedCommonCoverage
@@ -37,6 +40,7 @@ import Unit.PlannedWordContexts
 import Unit.Pretty
 import Unit.Refactor
 import Unit.SemanticAdmission
+import Unit.SessionRequest
 import Unit.Source
 import Unit.SourceResolution
 import Unit.Translation
@@ -63,6 +67,10 @@ tests =
       unitDslTests,
       unitInlineTests,
       unitOutputBundleTests,
+      unitNormalizationFactTests,
+      unitPlanEffectTests,
+      unitSessionRequestTests,
+      unitIdentifierTests,
       unitSourceTests,
       unitSourceResolutionTests,
       unitHarnessTests,

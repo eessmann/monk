@@ -1,8 +1,9 @@
 # Translator semantic audit
 
-Refreshed 2026-09-23 for the typed Rust runtime. This document describes the
+Refreshed 2026-09-23 for the indexed compiler and typed Rust runtime. This document describes the
 conditional admission envelope; test results and platform evidence belong in
-the [verification report](rust-runtime-verification.md).
+the [typed architecture verification](typed-architecture-verification.md) and
+the earlier [Rust verification report](rust-runtime-verification.md).
 
 ## Contract and evidence
 
@@ -27,6 +28,13 @@ The runtime replacement preserves this semantic envelope. Ownership/type tests
 prevent invalid resource reuse but do not establish Bash equivalence by
 themselves: byte, process, signal, publication and packaged execution evidence
 remain independent requirements. See [Rust migration verification](rust-runtime-verification.md).
+
+The indexed cleanup preserves the reviewed admission classifications. It closes
+construction holes in pipeline grammar, redirects, flow evidence, control scopes,
+request arity and publication lifetime. Those type tests supplement execution
+comparisons. Fish control-word function targets now receive a located rejection
+before materialization; accepting such a name never established executable Fish
+semantics. See the [public API migration](typed-architecture-migration.md).
 
 ## Semantic regression responsibilities
 

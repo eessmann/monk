@@ -74,6 +74,122 @@ pub mod opcode {
             SPLIT,
             WRITE_BUILTIN,
         ];
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Opcode {
+            Argv,
+            BytesPlatform,
+            ChildCapture,
+            ChildCaptureSession,
+            ChildRun,
+            ChildRunSession,
+            DescriptorState,
+            DirectoryDiagnostic,
+            DirectoryInitialOldpwd,
+            DirectoryPathBound,
+            DirectoryPhysical,
+            DirectoryStack,
+            DirectoryValidate,
+            Echo,
+            ExecSite,
+            Expansion,
+            Glob,
+            Integer,
+            Launch,
+            Pattern,
+            PatternParts,
+            PipePaths,
+            Printf,
+            RaiseSignal,
+            SessionClient,
+            SessionDirectoryDiagnostic,
+            SessionExecError,
+            SessionGuardian,
+            SessionPrepare,
+            SessionRun,
+            SessionWrite,
+            Split,
+            WriteBuiltin,
+        }
+
+        impl Opcode {
+            pub const fn as_bytes(self) -> &'static [u8] {
+                match self {
+                    Self::Argv => ARGV,
+                    Self::BytesPlatform => BYTES_PLATFORM,
+                    Self::ChildCapture => CHILD_CAPTURE,
+                    Self::ChildCaptureSession => CHILD_CAPTURE_SESSION,
+                    Self::ChildRun => CHILD_RUN,
+                    Self::ChildRunSession => CHILD_RUN_SESSION,
+                    Self::DescriptorState => DESCRIPTOR_STATE,
+                    Self::DirectoryDiagnostic => DIRECTORY_DIAGNOSTIC,
+                    Self::DirectoryInitialOldpwd => DIRECTORY_INITIAL_OLDPWD,
+                    Self::DirectoryPathBound => DIRECTORY_PATH_BOUND,
+                    Self::DirectoryPhysical => DIRECTORY_PHYSICAL,
+                    Self::DirectoryStack => DIRECTORY_STACK,
+                    Self::DirectoryValidate => DIRECTORY_VALIDATE,
+                    Self::Echo => ECHO,
+                    Self::ExecSite => EXEC_SITE,
+                    Self::Expansion => EXPANSION,
+                    Self::Glob => GLOB,
+                    Self::Integer => INTEGER,
+                    Self::Launch => LAUNCH,
+                    Self::Pattern => PATTERN,
+                    Self::PatternParts => PATTERN_PARTS,
+                    Self::PipePaths => PIPE_PATHS,
+                    Self::Printf => PRINTF,
+                    Self::RaiseSignal => RAISE_SIGNAL,
+                    Self::SessionClient => SESSION_CLIENT,
+                    Self::SessionDirectoryDiagnostic => SESSION_DIRECTORY_DIAGNOSTIC,
+                    Self::SessionExecError => SESSION_EXEC_ERROR,
+                    Self::SessionGuardian => SESSION_GUARDIAN,
+                    Self::SessionPrepare => SESSION_PREPARE,
+                    Self::SessionRun => SESSION_RUN,
+                    Self::SessionWrite => SESSION_WRITE,
+                    Self::Split => SPLIT,
+                    Self::WriteBuiltin => WRITE_BUILTIN,
+                }
+            }
+
+            pub fn parse(bytes: &[u8]) -> Option<Self> {
+                match bytes {
+                    ARGV => Some(Self::Argv),
+                    BYTES_PLATFORM => Some(Self::BytesPlatform),
+                    CHILD_CAPTURE => Some(Self::ChildCapture),
+                    CHILD_CAPTURE_SESSION => Some(Self::ChildCaptureSession),
+                    CHILD_RUN => Some(Self::ChildRun),
+                    CHILD_RUN_SESSION => Some(Self::ChildRunSession),
+                    DESCRIPTOR_STATE => Some(Self::DescriptorState),
+                    DIRECTORY_DIAGNOSTIC => Some(Self::DirectoryDiagnostic),
+                    DIRECTORY_INITIAL_OLDPWD => Some(Self::DirectoryInitialOldpwd),
+                    DIRECTORY_PATH_BOUND => Some(Self::DirectoryPathBound),
+                    DIRECTORY_PHYSICAL => Some(Self::DirectoryPhysical),
+                    DIRECTORY_STACK => Some(Self::DirectoryStack),
+                    DIRECTORY_VALIDATE => Some(Self::DirectoryValidate),
+                    ECHO => Some(Self::Echo),
+                    EXEC_SITE => Some(Self::ExecSite),
+                    EXPANSION => Some(Self::Expansion),
+                    GLOB => Some(Self::Glob),
+                    INTEGER => Some(Self::Integer),
+                    LAUNCH => Some(Self::Launch),
+                    PATTERN => Some(Self::Pattern),
+                    PATTERN_PARTS => Some(Self::PatternParts),
+                    PIPE_PATHS => Some(Self::PipePaths),
+                    PRINTF => Some(Self::Printf),
+                    RAISE_SIGNAL => Some(Self::RaiseSignal),
+                    SESSION_CLIENT => Some(Self::SessionClient),
+                    SESSION_DIRECTORY_DIAGNOSTIC => Some(Self::SessionDirectoryDiagnostic),
+                    SESSION_EXEC_ERROR => Some(Self::SessionExecError),
+                    SESSION_GUARDIAN => Some(Self::SessionGuardian),
+                    SESSION_PREPARE => Some(Self::SessionPrepare),
+                    SESSION_RUN => Some(Self::SessionRun),
+                    SESSION_WRITE => Some(Self::SessionWrite),
+                    SPLIT => Some(Self::Split),
+                    WRITE_BUILTIN => Some(Self::WriteBuiltin),
+                    _ => None,
+                }
+            }
+        }
     }
     pub mod session {
         pub const CAPTURE: &[u8] = b"capture";
@@ -113,6 +229,74 @@ pub mod opcode {
             SUBSTITUTION_RELEASE,
             WAIT,
         ];
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Opcode {
+            Capture,
+            FdClose,
+            FdData,
+            FdDup,
+            FdEndpoint,
+            FdOpen,
+            FdPop,
+            FdPush,
+            FdReset,
+            FinishSignal,
+            Ping,
+            Read,
+            Run,
+            Spawn,
+            Substitution,
+            SubstitutionRelease,
+            Wait,
+        }
+
+        impl Opcode {
+            pub const fn as_bytes(self) -> &'static [u8] {
+                match self {
+                    Self::Capture => CAPTURE,
+                    Self::FdClose => FD_CLOSE,
+                    Self::FdData => FD_DATA,
+                    Self::FdDup => FD_DUP,
+                    Self::FdEndpoint => FD_ENDPOINT,
+                    Self::FdOpen => FD_OPEN,
+                    Self::FdPop => FD_POP,
+                    Self::FdPush => FD_PUSH,
+                    Self::FdReset => FD_RESET,
+                    Self::FinishSignal => FINISH_SIGNAL,
+                    Self::Ping => PING,
+                    Self::Read => READ,
+                    Self::Run => RUN,
+                    Self::Spawn => SPAWN,
+                    Self::Substitution => SUBSTITUTION,
+                    Self::SubstitutionRelease => SUBSTITUTION_RELEASE,
+                    Self::Wait => WAIT,
+                }
+            }
+
+            pub fn parse(bytes: &[u8]) -> Option<Self> {
+                match bytes {
+                    CAPTURE => Some(Self::Capture),
+                    FD_CLOSE => Some(Self::FdClose),
+                    FD_DATA => Some(Self::FdData),
+                    FD_DUP => Some(Self::FdDup),
+                    FD_ENDPOINT => Some(Self::FdEndpoint),
+                    FD_OPEN => Some(Self::FdOpen),
+                    FD_POP => Some(Self::FdPop),
+                    FD_PUSH => Some(Self::FdPush),
+                    FD_RESET => Some(Self::FdReset),
+                    FINISH_SIGNAL => Some(Self::FinishSignal),
+                    PING => Some(Self::Ping),
+                    READ => Some(Self::Read),
+                    RUN => Some(Self::Run),
+                    SPAWN => Some(Self::Spawn),
+                    SUBSTITUTION => Some(Self::Substitution),
+                    SUBSTITUTION_RELEASE => Some(Self::SubstitutionRelease),
+                    WAIT => Some(Self::Wait),
+                    _ => None,
+                }
+            }
+        }
     }
     pub mod integer {
         pub const ADD: &[u8] = b"add";
@@ -170,6 +354,101 @@ pub mod opcode {
             SUB,
             XOR,
         ];
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Opcode {
+            Add,
+            And,
+            Batch,
+            Div,
+            Eq,
+            Ge,
+            Gt,
+            Invert,
+            Le,
+            LogicalAnd,
+            LogicalOr,
+            Lt,
+            Mul,
+            Ne,
+            Neg,
+            Not,
+            Or,
+            Pos,
+            Pow,
+            Push,
+            Read,
+            Rem,
+            Shl,
+            Shr,
+            Sub,
+            Xor,
+        }
+
+        impl Opcode {
+            pub const fn as_bytes(self) -> &'static [u8] {
+                match self {
+                    Self::Add => ADD,
+                    Self::And => AND,
+                    Self::Batch => BATCH,
+                    Self::Div => DIV,
+                    Self::Eq => EQ,
+                    Self::Ge => GE,
+                    Self::Gt => GT,
+                    Self::Invert => INVERT,
+                    Self::Le => LE,
+                    Self::LogicalAnd => LOGICAL_AND,
+                    Self::LogicalOr => LOGICAL_OR,
+                    Self::Lt => LT,
+                    Self::Mul => MUL,
+                    Self::Ne => NE,
+                    Self::Neg => NEG,
+                    Self::Not => NOT,
+                    Self::Or => OR,
+                    Self::Pos => POS,
+                    Self::Pow => POW,
+                    Self::Push => PUSH,
+                    Self::Read => READ,
+                    Self::Rem => REM,
+                    Self::Shl => SHL,
+                    Self::Shr => SHR,
+                    Self::Sub => SUB,
+                    Self::Xor => XOR,
+                }
+            }
+
+            pub fn parse(bytes: &[u8]) -> Option<Self> {
+                match bytes {
+                    ADD => Some(Self::Add),
+                    AND => Some(Self::And),
+                    BATCH => Some(Self::Batch),
+                    DIV => Some(Self::Div),
+                    EQ => Some(Self::Eq),
+                    GE => Some(Self::Ge),
+                    GT => Some(Self::Gt),
+                    INVERT => Some(Self::Invert),
+                    LE => Some(Self::Le),
+                    LOGICAL_AND => Some(Self::LogicalAnd),
+                    LOGICAL_OR => Some(Self::LogicalOr),
+                    LT => Some(Self::Lt),
+                    MUL => Some(Self::Mul),
+                    NE => Some(Self::Ne),
+                    NEG => Some(Self::Neg),
+                    NOT => Some(Self::Not),
+                    OR => Some(Self::Or),
+                    POS => Some(Self::Pos),
+                    POW => Some(Self::Pow),
+                    PUSH => Some(Self::Push),
+                    READ => Some(Self::Read),
+                    REM => Some(Self::Rem),
+                    SHL => Some(Self::Shl),
+                    SHR => Some(Self::Shr),
+                    SUB => Some(Self::Sub),
+                    XOR => Some(Self::Xor),
+                    _ => None,
+                }
+            }
+        }
     }
     pub mod pattern {
         pub const MATCH: &[u8] = b"match";
@@ -189,6 +468,44 @@ pub mod opcode {
             TRIM_SUFFIX_LONG,
             TRIM_SUFFIX_SHORT,
         ];
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Opcode {
+            Match,
+            ReplaceAll,
+            ReplaceFirst,
+            TrimPrefixLong,
+            TrimPrefixShort,
+            TrimSuffixLong,
+            TrimSuffixShort,
+        }
+
+        impl Opcode {
+            pub const fn as_bytes(self) -> &'static [u8] {
+                match self {
+                    Self::Match => MATCH,
+                    Self::ReplaceAll => REPLACE_ALL,
+                    Self::ReplaceFirst => REPLACE_FIRST,
+                    Self::TrimPrefixLong => TRIM_PREFIX_LONG,
+                    Self::TrimPrefixShort => TRIM_PREFIX_SHORT,
+                    Self::TrimSuffixLong => TRIM_SUFFIX_LONG,
+                    Self::TrimSuffixShort => TRIM_SUFFIX_SHORT,
+                }
+            }
+
+            pub fn parse(bytes: &[u8]) -> Option<Self> {
+                match bytes {
+                    MATCH => Some(Self::Match),
+                    REPLACE_ALL => Some(Self::ReplaceAll),
+                    REPLACE_FIRST => Some(Self::ReplaceFirst),
+                    TRIM_PREFIX_LONG => Some(Self::TrimPrefixLong),
+                    TRIM_PREFIX_SHORT => Some(Self::TrimPrefixShort),
+                    TRIM_SUFFIX_LONG => Some(Self::TrimSuffixLong),
+                    TRIM_SUFFIX_SHORT => Some(Self::TrimSuffixShort),
+                    _ => None,
+                }
+            }
+        }
     }
     pub mod body {
         pub const BODY: &[u8] = b"body";
@@ -208,6 +525,44 @@ pub mod opcode {
             PIPELINE,
             SNAPSHOT,
         ];
+
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+        pub enum Opcode {
+            Body,
+            Builtin,
+            DirectoryOutput,
+            External,
+            ExternalSite,
+            Pipeline,
+            Snapshot,
+        }
+
+        impl Opcode {
+            pub const fn as_bytes(self) -> &'static [u8] {
+                match self {
+                    Self::Body => BODY,
+                    Self::Builtin => BUILTIN,
+                    Self::DirectoryOutput => DIRECTORY_OUTPUT,
+                    Self::External => EXTERNAL,
+                    Self::ExternalSite => EXTERNAL_SITE,
+                    Self::Pipeline => PIPELINE,
+                    Self::Snapshot => SNAPSHOT,
+                }
+            }
+
+            pub fn parse(bytes: &[u8]) -> Option<Self> {
+                match bytes {
+                    BODY => Some(Self::Body),
+                    BUILTIN => Some(Self::Builtin),
+                    DIRECTORY_OUTPUT => Some(Self::DirectoryOutput),
+                    EXTERNAL => Some(Self::External),
+                    EXTERNAL_SITE => Some(Self::ExternalSite),
+                    PIPELINE => Some(Self::Pipeline),
+                    SNAPSHOT => Some(Self::Snapshot),
+                    _ => None,
+                }
+            }
+        }
     }
 }
 

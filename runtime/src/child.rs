@@ -148,11 +148,7 @@ fn run(capture: bool, request: Request) -> io::Result<(i32, Vec<u8>)> {
         }
     };
     let code = child.complete()?.outcome().code();
-    let end = output
-        .iter()
-        .rposition(|byte| *byte != b'\n')
-        .map_or(0, |n| n + 1);
-    Ok((code, output[..end].to_vec()))
+    Ok((code, output))
 }
 
 fn normalize_integer(value: &[u8]) -> Vec<u8> {
@@ -185,44 +181,25 @@ pub fn restore_closed_streams(capture: bool, mask: DescriptorMask, script: &[u8]
     result
 }
 pub fn read_all(fd: BorrowedFd<'_>) -> io::Result<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut buffer = [0u8; 65536];
-    loop {
-        let amount = read(fd, &mut buffer)?;
-        if amount == 0 {
-            return Ok(result);
-        }
-        result.extend_from_slice(&buffer[..amount]);
-    }
+    crate::transport::read_all(fd)
 }
-fn read(fd: BorrowedFd<'_>, buffer: &mut [u8]) -> io::Result<usize> {
-    loop {
-        match rustix::io::read(fd, &mut *buffer) {
-            Ok(n) => return Ok(n),
-            Err(rustix::io::Errno::INTR) if native::pending_signal().is_none() => continue,
-            Err(e) => return Err(e.into()),
-        }
-    }
-}
-
 fn drain_capture(fd: BorrowedFd<'_>, stderr_open: bool, warning: &[u8]) -> io::Result<Vec<u8>> {
-    let mut result = Vec::new();
-    let mut buffer = [0u8; 65536];
-    let mut warned = false;
-    loop {
-        let n = read(fd, &mut buffer)?;
-        if n == 0 {
-            return Ok(result);
-        }
-        let chunk = &buffer[..n];
-        if !warned && chunk.contains(&0) {
+    crate::capture::drain(
+        fd,
+        || {
+            if native::pending_signal().is_some() {
+                Err(io::ErrorKind::Interrupted.into())
+            } else {
+                Ok(())
+            }
+        },
+        || {
             if stderr_open {
                 diagnostic(warning);
             }
-            warned = true;
-        }
-        result.extend(chunk.iter().copied().filter(|b| *b != 0));
-    }
+            Ok(())
+        },
+    )
 }
 fn packet(tag: &[u8], code: i32, bytes: &[u8]) -> io::Result<()> {
     native::write_all(

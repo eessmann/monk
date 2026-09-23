@@ -30,6 +30,15 @@ form is not an unconditional promise about every operand or context.
 
 ## Current verification
 
+The indexed architecture pass has newer local evidence: both GHC 9.14.1 and
+9.12.2 pass 1,021 main integration tests, 47 compiled-publication tests, 76
+tooling tests, the non-threaded host suite and 70 compiled boundary cases.
+All 90 reviewed admission classifications are preserved, and all 71 admitted
+outputs pass Fish syntax checks. See [typed architecture verification](typed-architecture-verification.md)
+for the exact guarantees, implementation decisions, final measurements and
+remaining platform gates. The table below retains the earlier Rust migration
+record rather than relabelling its binaries as the new compiler.
+
 The retained Rust records identify their measured binaries and source snapshots;
 this table summarizes them without treating every check as a run of the same
 artifact.

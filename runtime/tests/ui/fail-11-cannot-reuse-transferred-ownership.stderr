@@ -1,0 +1,8 @@
+error[E0382]: use of moved value: `fd`
+ --> tests/ui/fail-11-cannot-reuse-transferred-ownership.rs:2:74
+  |
+2 | use std::os::fd::OwnedFd; pub fn bad(fd:OwnedFd){let transferred=fd;drop(fd);drop(transferred);}
+  |                                      --                          --      ^^ value used here after move
+  |                                      |                           |
+  |                                      |                           value moved here
+  |                                      move occurs because `fd` has type `OwnedFd`, which does not implement the `Copy` trait

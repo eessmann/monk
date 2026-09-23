@@ -27,6 +27,7 @@ unitContractTests =
           invalidProgrammatic "output-only function reads reject" "caller-contract" (sourceable ((withEffects (Set.singleton "x") mempty) {callerVariables = M.singleton "x" (ScalarBinding OutputBinding GlobalBinding UnexportedBinding)})) ":",
           invalidProgrammatic "reserved scalar name rejects even when unused" "caller-contract" (sourceable (base {callerVariables = M.singleton "__monk_x" (ScalarBinding InputBinding VisibleBinding UnexportedBinding)})) ":",
           invalidProgrammatic "reserved Fish import target rejects" "caller-contract" (sourceable (base {callerFunctions = M.singleton "visit" (MkFunctionContract "end" mempty mempty)})) ":",
+          invalidProgrammatic "Fish timing keyword cannot become an executable import" "function-name" (sourceable (base {callerFunctions = M.singleton "visit" (MkFunctionContract "time" mempty mempty)})) "visit",
           invalidProgrammatic "invalid imported source name rejects" "caller-contract" (sourceable (base {callerFunctions = M.singleton "bad-name" (MkFunctionContract "host_visit" mempty mempty)})) ":",
           invalidProgrammatic "import target cannot also be exported" "caller-contract" (sourceable (imported {callerExportedFunctions = Set.singleton "host_visit"})) ":",
           H.testCase "valid programmatic sourceable import remains admitted" $ do

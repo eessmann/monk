@@ -1,0 +1,14 @@
+error[E0382]: use of moved value: `plan`
+ --> tests/ui/fail-05-prepared-launch-is-consumed.rs:2:107
+  |
+2 | use monk_runtime::capabilities::PreparedLaunch; pub fn bad(plan:PreparedLaunch){let _=plan.launch();let _=plan.launch();}
+  |                                                            ----                            --------       ^^^^ value used here after move
+  |                                                            |                               |
+  |                                                            |                               `plan` moved due to this method call
+  |                                                            move occurs because `plan` has type `PreparedLaunch`, which does not implement the `Copy` trait
+  |
+note: `monk_runtime::capabilities::PreparedLaunch::launch` takes ownership of the receiver `self`, which moves `plan`
+ --> src/native/process.rs
+  |
+  |     pub fn launch(self) -> io::Result<RunningChild> {
+  |                   ^^^^

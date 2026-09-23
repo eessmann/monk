@@ -8,6 +8,7 @@ mod types;
 
 pub mod abi2;
 mod capsule;
+mod capture;
 mod child;
 mod directory;
 mod exec;

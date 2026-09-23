@@ -68,7 +68,7 @@ admittedCompositionTests =
                     QCM.assert equal
     ]
   where
-    observations result = (rrExit result, rrStdout result, rrStderr result)
+    observations result = (rrExit result, rrStdoutBytes result, rrStderrBytes result)
 
 genProgram :: QC.Gen Program
 genProgram = do

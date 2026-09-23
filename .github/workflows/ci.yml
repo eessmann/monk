@@ -39,14 +39,19 @@ jobs:
     - run: devenv shell -- monk-rust-quality
 
   acceptance:
-    name: ${{ matrix.compiler }} / Fish ${{ matrix.fish }}
-    runs-on: ubuntu-24.04
+    name: ${{ matrix.runner }} / ${{ matrix.compiler }} / Fish ${{ matrix.fish }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        compiler: [ghc9141, ghc9122]
-        fish: [pinned, moving]
+        include:
+          - {runner: ubuntu-24.04, compiler: ghc9141, fish: pinned}
+          - {runner: ubuntu-24.04, compiler: ghc9122, fish: pinned}
+          - {runner: ubuntu-24.04, compiler: ghc9141, fish: moving}
+          - {runner: ubuntu-24.04, compiler: ghc9122, fish: moving}
+          - {runner: macos-14, compiler: ghc9141, fish: pinned}
+          - {runner: macos-14, compiler: ghc9122, fish: pinned}
     steps:
     - uses: actions/checkout@v5
     - uses: cachix/install-nix-action@v31
@@ -77,12 +82,18 @@ jobs:
         SCRIPT
     - name: Build, integrate, and check native protocol/publication/API boundaries
       run: devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- monk-integration
-    - name: Linux execution selectors and fixture admission manifest
+    - name: Linux execution selectors
+      if: runner.os == 'Linux'
       run: |
         devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
         set -euo pipefail
         export PATH="$PWD/target/debug:$PATH"
         MONK_INTEGRATION=1 timeout 5m cabal test monk-test --test-options="-p '/procsub-output/ || /Planned child isolation/'"
+        SCRIPT
+    - name: Fixture admission manifest
+      run: |
+        devenv -O monk.compiler:string '${{ matrix.compiler }}' -O monk.fishChannel:string '${{ matrix.fish }}' shell -- bash -e <<'SCRIPT'
+        set -euo pipefail
         bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity-manifest.tsv
         SCRIPT
     - name: Build API documentation
@@ -92,7 +103,7 @@ jobs:
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: acceptance-${{ matrix.compiler }}-fish-${{ matrix.fish }}
+        name: acceptance-${{ matrix.runner }}-${{ matrix.compiler }}-fish-${{ matrix.fish }}
         path: |
           artifacts/
           devenv.lock
@@ -135,8 +146,8 @@ jobs:
         nix build --dry-run --no-link "$package_drv^out" 2>&1 | tee artifacts/package-build-plan.txt
     - name: Build native artifact and enforce architecture/linkage checks
       run: |
-        devenv build "outputs.runtime.$MONK_PACKAGE_TARGET" outputs.reference.bash outputs.reference.fish outputs.testPrograms.coreutils outputs.tooling
-        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.outPath" outputs.reference.bash.outPath outputs.reference.fish.outPath outputs.testPrograms.coreutils.outPath outputs.tooling.outPath > artifacts/package-paths.json
+        devenv build "outputs.runtime.$MONK_PACKAGE_TARGET" outputs.reference.bash outputs.reference.fish outputs.testPrograms.coreutils outputs.tooling outputs.translator
+        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.outPath" outputs.reference.bash.outPath outputs.reference.fish.outPath outputs.testPrograms.coreutils.outPath outputs.tooling.outPath outputs.translator.outPath > artifacts/package-paths.json
         output_path() {
           MONK_OUTPUT_KEY="$1" nix eval --impure --raw --expr 'let paths = builtins.fromJSON (builtins.readFile ./artifacts/package-paths.json); in builtins.getAttr (builtins.getEnv "MONK_OUTPUT_KEY") paths'
         }
@@ -146,6 +157,7 @@ jobs:
         ln -s "$(output_path outputs.reference.fish.outPath)/bin/fish" artifacts/reference-bin/fish
         ln -s "$(output_path outputs.testPrograms.coreutils.outPath)/bin/sha256sum" artifacts/reference-bin/sha256sum
         ln -s "$(output_path outputs.tooling.outPath)/bin/monk-tool" artifacts/reference-bin/monk-tool
+        ln -s "$(output_path outputs.translator.outPath)/bin/monk" artifacts/reference-bin/monk
     - name: Execute copied artifact outside the build shell
       run: |
         runtime="$PWD/artifacts/runtime/bin/monk-runtime"
@@ -153,14 +165,11 @@ jobs:
         case "$(uname -s)" in Darwin) temp_root=/private/tmp;; *) temp_root=/tmp;; esac
         env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" "$runtime" --describe > artifacts/runtime-description.txt
         mkdir -p artifacts/native-checks
-        for suite in callback-diagnostics descriptors direct-output directory-signals exec expansion native-launcher pattern-parts portable printf process-substitution protocol read session signals; do
+        while IFS= read -r suite; do
           env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" \
-            artifacts/reference-bin/monk-tool runtime check --suite "$suite" --runtime "$runtime" \
+            artifacts/reference-bin/monk-tool runtime check --suite "$suite" --runtime "$runtime" --monk "$PWD/artifacts/reference-bin/monk" \
               --report "artifacts/native-checks/$suite.json"
-        done
-        env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" \
-          artifacts/reference-bin/monk-tool runtime check --suite child-transport --runtime "$runtime" \
-            --report artifacts/native-checks/child-transport.json
+        done < <(artifacts/reference-bin/monk-tool runtime check --list)
         artifacts/reference-bin/monk-tool runtime attest \
           --package-report artifacts/runtime/share/monk/package-evidence.json \
           --binary "$runtime" \

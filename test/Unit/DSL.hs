@@ -18,7 +18,7 @@ unitDslTests =
     [ testCase "lowers command args and redirects through the raw renderer"
         $ renderDsl
           ( script
-              [ stmt (command "echo" [arg (str "hello"), redirect stdout overwrite (fileTarget (str "out.txt"))])
+              [ stmt (command "echo" [arg (str "hello"), redirectArg (redirect stdout overwrite (fileTarget (str "out.txt")))])
               ]
           )
         @?= "echo hello > out.txt",
@@ -55,7 +55,7 @@ unitDslTests =
                     [redirect stdout overwrite (fileTarget (str "out.txt"))]
               ]
           )
-        @?= "if test -n $name\n  echo 'then'\nelse\n  echo 'else'\nend > out.txt",
+        @?= "if test -n \"$name\"\n  echo 'then'\nelse\n  echo 'else'\nend > out.txt",
       testCase "lowers typed loops, switch cases, and functions"
         $ renderDsl
           ( script
@@ -82,7 +82,7 @@ unitDslTests =
                     (block (stmt (command "echo" [arg (str "hi")]) NE.:| []))
               ]
           )
-        @?= "for item in a b\n  echo $item\nend\nswitch $item\n  case a\n    echo alpha\nend\nfunction say_hi\n  echo hi\nend",
+        @?= "for item in a b\n  echo \"$item\"\nend\nswitch \"$item\"\n  case a\n    echo alpha\nend\nfunction say_hi\n  echo hi\nend",
       testCase "lowers typed job conjunctions"
         $ renderDsl
           ( script

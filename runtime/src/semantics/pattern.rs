@@ -199,32 +199,49 @@ fn closure(tokens: &[Token], states: &mut [bool]) {
         }
     }
 }
-fn match_tokens(tokens: &[Token], subject: &[u8]) -> bool {
-    let mut states = vec![false; tokens.len() + 1];
-    states[0] = true;
-    closure(tokens, &mut states);
-    for &c in subject {
-        let mut next = vec![false; states.len()];
-        for i in 0..tokens.len() {
-            if !states[i] {
-                continue;
-            }
-            match &tokens[i] {
-                Token::Star => next[i] = true,
-                Token::AnyByte => next[i + 1] = true,
-                Token::Literal(b) => next[i + 1] |= *b == c,
-                Token::Class(negative, members) => {
-                    next[i + 1] |= members[usize::from(c)] != *negative
+struct Matcher<'a> {
+    tokens: &'a [Token],
+    states: Vec<bool>,
+    next: Vec<bool>,
+}
+impl<'a> Matcher<'a> {
+    fn new(tokens: &'a [Token]) -> Self {
+        Self {
+            tokens,
+            states: vec![false; tokens.len() + 1],
+            next: vec![false; tokens.len() + 1],
+        }
+    }
+    fn matches(&mut self, subject: &[u8]) -> bool {
+        let tokens = self.tokens;
+        let states = &mut self.states;
+        let next = &mut self.next;
+        states.fill(false);
+        states[0] = true;
+        closure(tokens, states);
+        for &c in subject {
+            next.fill(false);
+            for i in 0..tokens.len() {
+                if !states[i] {
+                    continue;
+                }
+                match &tokens[i] {
+                    Token::Star => next[i] = true,
+                    Token::AnyByte => next[i + 1] = true,
+                    Token::Literal(b) => next[i + 1] |= *b == c,
+                    Token::Class(negative, members) => {
+                        next[i + 1] |= members[usize::from(c)] != *negative
+                    }
                 }
             }
+            closure(tokens, next);
+            std::mem::swap(states, next);
         }
-        closure(tokens, &mut next);
-        states = next;
+        states[tokens.len()]
     }
-    states[tokens.len()]
 }
 pub fn matches(subject: &[u8], parts: &[(bool, Vec<u8>)]) -> bool {
-    match_tokens(&tokenize(parts, false), subject)
+    Matcher::new(&tokenize(parts, false)).matches(subject)
 }
 fn all_literal(tokens: &[Token]) -> bool {
     tokens.iter().all(|t| matches!(t, Token::Literal(_)))
@@ -270,6 +287,7 @@ fn walk(parent: Vec<u8>, components: &[Vec<Token>], found: &mut Vec<Vec<u8>>) {
     else {
         return;
     };
+    let mut matcher = Matcher::new(component);
     for entry in entries.flatten() {
         let name = entry.file_name();
         let bytes = name.as_bytes();
@@ -277,7 +295,7 @@ fn walk(parent: Vec<u8>, components: &[Vec<Token>], found: &mut Vec<Vec<u8>>) {
             || bytes == b"."
             || bytes == b".."
             || (bytes[0] == b'.' && component.first() != Some(&Token::Literal(b'.')))
-            || !match_tokens(component, bytes)
+            || !matcher.matches(bytes)
         {
             continue;
         }
@@ -331,6 +349,7 @@ pub fn trim_pattern_parts(
     parts: &[(bool, Vec<u8>)],
 ) -> Vec<u8> {
     let tokens = tokenize(parts, false);
+    let mut matcher = Matcher::new(&tokens);
     for i in 0..=subject.len() {
         let n = if longest { subject.len() - i } else { i };
         let candidate = if prefix {
@@ -338,7 +357,7 @@ pub fn trim_pattern_parts(
         } else {
             &subject[subject.len() - n..]
         };
-        if match_tokens(&tokens, candidate) {
+        if matcher.matches(candidate) {
             return if prefix {
                 subject[n..].to_vec()
             } else {

@@ -149,8 +149,8 @@ exactScriptCase name source expectedOutput = H.testCaseSteps name $ \step -> do
           fish <- runShell ShellFish shellEnvironment (renderTranslation translation)
           H.assertEqual "independent Bash stdout" expectedOutput (rrStdout bash)
           H.assertEqual "exit status" (rrExit bash) (rrExit fish)
-          H.assertEqual "stdout" (rrStdout bash) (rrStdout fish)
-          H.assertEqual "stderr" (rrStderr bash) (rrStderr fish)
+          H.assertEqual "stdout" (rrStdoutBytes bash) (rrStdoutBytes fish)
+          H.assertEqual "stderr" (rrStderrBytes bash) (rrStderrBytes fish)
 
 requireGraph :: Either SourceGraphFailure SourceGraph -> IO SourceGraph
 requireGraph = \case

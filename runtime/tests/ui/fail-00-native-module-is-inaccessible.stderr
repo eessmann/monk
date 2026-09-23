@@ -1,0 +1,13 @@
+error[E0603]: module `native` is private
+ --> tests/ui/fail-00-native-module-is-inaccessible.rs:2:34
+  |
+2 | pub fn bad(){let _=monk_runtime::native::adopt_initial_inherited(&[3]);}
+  |                                  ^^^^^^  ----------------------- function `adopt_initial_inherited` is not publicly re-exported
+  |                                  |
+  |                                  private module
+  |
+note: the module `native` is defined here
+ --> src/lib.rs
+  |
+  | mod native;
+  | ^^^^^^^^^^

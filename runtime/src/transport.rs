@@ -1,6 +1,8 @@
 //! Private byte protocol. Every received SCM_RIGHTS descriptor is owned immediately;
 //! malformed messages and partial copies roll back by dropping those owners.
+mod peer;
 use crate::native;
+pub(crate) use peer::Peer;
 use rustix::net::{
     self, AddressFamily, RecvAncillaryBuffer, RecvAncillaryMessage, RecvFlags, ReturnFlags,
     SendAncillaryBuffer, SendAncillaryMessage, SendFlags, Shutdown, SocketAddrUnix, SocketType,
@@ -209,66 +211,6 @@ pub fn receive_interruptible(
     Ok((fds, bytes))
 }
 
-/// Absolute deadline across the complete unauthenticated message, including a
-/// peer that sends a slow trickle of bytes. Read timeouts alone reset per call.
-pub fn receive_until(
-    socket: BorrowedFd<'_>,
-    deadline: std::time::Instant,
-) -> io::Result<(Vec<OwnedFd>, Vec<u8>)> {
-    use rustix::{
-        event::{PollFd, PollFlags, Timespec, poll},
-        fs::{OFlags, fcntl_getfl, fcntl_setfl},
-    };
-    let original = fcntl_getfl(socket)?;
-    fcntl_setfl(socket, original | OFlags::NONBLOCK)?;
-    let remaining = || {
-        deadline
-            .checked_duration_since(std::time::Instant::now())
-            .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))
-    };
-    let wait = || -> io::Result<()> {
-        loop {
-            let time = remaining()?;
-            let time = Timespec {
-                tv_sec: time.as_secs() as _,
-                tv_nsec: time.subsec_nanos() as _,
-            };
-            match poll(
-                &mut [PollFd::from_borrowed_fd(socket, PollFlags::IN)],
-                Some(&time),
-            ) {
-                Ok(0) => return Err(io::ErrorKind::TimedOut.into()),
-                Ok(_) => return Ok(()),
-                Err(rustix::io::Errno::INTR) => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-    };
-    let result = (|| {
-        let fds = loop {
-            wait()?;
-            match receive_fds_interruptible(socket, &mut || remaining().map(|_| ())) {
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => continue,
-                result => break result?,
-            }
-        };
-        let mut bytes = Vec::new();
-        let mut chunk = [0; 65536];
-        loop {
-            wait()?;
-            match rustix::io::read(socket, &mut chunk) {
-                Ok(0) => break,
-                Ok(n) => bytes.extend_from_slice(&chunk[..n]),
-                Err(rustix::io::Errno::INTR | rustix::io::Errno::AGAIN) => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Ok((fds, bytes))
-    })();
-    fcntl_setfl(socket, original)?;
-    result
-}
-
 #[cfg(test)]
 mod failure_tests {
     use super::*;
@@ -306,29 +248,5 @@ mod failure_tests {
                 "an ancillary descriptor leaked"
             );
         }
-    }
-    #[test]
-    fn trickled_payload_does_not_extend_absolute_deadline() {
-        let (left, right) = std::os::unix::net::UnixStream::pair().unwrap();
-        send_fds(left.as_fd(), &[]).unwrap();
-        let start = std::time::Instant::now();
-        let sender = std::thread::spawn(move || {
-            for _ in 0..40 {
-                if native::write_all(left.as_fd(), b"x").is_err() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
-            }
-        });
-        assert_eq!(
-            receive_until(right.as_fd(), start + std::time::Duration::from_millis(60))
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::TimedOut
-        );
-        // Keep the peer alive until sender finishes so default SIGPIPE cannot affect this unit-test process.
-        assert!(start.elapsed() < std::time::Duration::from_millis(180));
-        sender.join().unwrap();
-        drop(right);
     }
 }

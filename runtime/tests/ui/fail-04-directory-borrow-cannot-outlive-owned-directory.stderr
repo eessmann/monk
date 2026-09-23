@@ -1,0 +1,8 @@
+error[E0505]: cannot move out of `cwd` because it is borrowed
+ --> tests/ui/fail-04-directory-borrow-cannot-outlive-owned-directory.rs:2:115
+  |
+2 | use monk_runtime::capabilities::WorkingDirectory; pub fn bad(cwd:WorkingDirectory){let borrowed=cwd.borrow();drop(cwd);let _=borrowed;}
+  |                                                              ---                                ---               ^^^        -------- borrow later used here
+  |                                                              |                                  |                 |
+  |                                                              |                                  |                 move out of `cwd` occurs here
+  |                                                              binding `cwd` declared here        borrow of `cwd` occurs here

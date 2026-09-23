@@ -1,0 +1,12 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/fail-10-cannot-forge-descriptor-mask.rs:2:68
+  |
+2 | use monk_runtime::capabilities::DescriptorMask; pub fn bad(){let _=DescriptorMask(0);}
+  |                                                                    ^^^^^^^^^^^^^^
+  |
+  = note: a struct named `DescriptorMask` exists in another namespace
+note: constructor is not visible here due to private fields
+ --> src/types.rs
+  |
+  | pub struct DescriptorMask(MaskBits);
+  |                           ^^^^^^^^ private field

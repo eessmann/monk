@@ -4,10 +4,9 @@ The approved redesign has one authoritative semantic pipeline:
 
 ```text
 ShellCheck syntax + owned source text
-  -> private semantic plan and source occurrence identities
-  -> complete materialization with bound runtime references
-  -> optimization and admission
-  -> structural Fish DSL
+  -> indexed semantic plan and source occurrence identities
+  -> optimized draft structural Fish with bound runtime references
+  -> whole-artifact admission
   -> rendering and publication
 ```
 
@@ -174,21 +173,56 @@ The current implementation and evidence status is tracked in
 [the roadmap](translator-todo.md); the architecture is not a release-completion
 claim.
 
+## Package dependencies and host ownership
+
+One Cabal package contains the private `monk-foundation`, `monk-host`,
+`monk-compiler`, `monk-publication` and `monk-test-support` libraries. Foundation
+contains no language-specific imports. The compiler consumes immutable text and
+source documents; it cannot execute providers or discover files. Public `monk`
+coordinates discovery, materialization, provider capture, and output planning.
+Publication consumes validated bytes and filesystem identities without importing
+the compiler. Shared tooling and Bakeoff use the same host process runner and
+fixture metadata readers as production tests.
+
+`Monk.Host.Process` acquires a process group before starting a waiter and brackets
+stdin, stdout, stderr, cancellation, and descendant cleanup together. Observations
+retain raw bytes; decoding is an explicit operation for text consumers. A threaded
+RTS uses an asynchronous process waiter. A nonthreaded RTS polls process status so
+blocked waits cannot prevent stream workers or deadline handling from running.
+The chosen dependency exception and public API changes are described in the
+[typed architecture migration guide](typed-architecture-migration.md).
+
 ## Concrete implementation owners
 
 `Language.Bash.Plan.Normalize` owns syntax/context admission and finite flow
-joins. `Language.Bash.Plan.Effects` folds that same semantic plan to close child
+joins. Its `Context`, `Flow`, `Words`, `Commands`, `Control` and `Sources`
+modules separate immutable inputs, finite facts and source suspension from
+syntax orchestration. Scope-indexed statements retain loop, return and argv
+witnesses; body kinds distinguish functions, sources, children and callbacks.
+Entry bodies additionally retain the exact compilation owner and entry contract.
+Dense-array updates prove and apply their shape transition in the current flow
+world after normalizing the operand.
+
+`Language.Bash.Plan.Effects` folds that same semantic plan to close child
 captures and finite function dependencies; it does not walk ShellCheck again.
 The arithmetic source module correlates diagnostic spelling with the owned
 operator tree at normalization time.
 
-`Language.Fish.Translator.Plan` materializes the complete core and source
-boundary. `Binding` owns scalar presence, logical export attributes and the
+`Language.Fish.Translator.Plan` is the existential compilation facade.
+`Monk.Compiler.Artifact` owns complete materialization and its private draft
+constructor, so a caller cannot pair unrelated Fish or requirements with a
+normalized-plan token. `Materialize`, `Words`, `Invocation` and `Context` own the
+statement walker, ordered operands, invocation and scope state respectively.
+`Region` and opaque `Emission` keep operand definitions attached to their
+consumer. `Binding` owns scalar presence, logical export attributes and the
 inherited exported environment of unset locals. Ordinary assignments,
 declarations, arithmetic updates, external dispatch and child snapshots consume
 that ownership. These are runtime state values, not analysis receipts.
-`Child`, `Session`, `Traps`, `ArithmeticPlan` and `Pattern` implement bounded operations. All helpers
-consume structured operands; source expression strings are never interpreted.
+`Child`, `Session`, `Traps`, `ArithmeticPlan` and `Pattern` implement bounded
+operations. Opcode-indexed session and primitive requests retain mandatory
+operands and structural child bodies. All helpers consume structured operands;
+source expression strings are never interpreted. A deterministic registry
+interns equal helper definitions and rejects conflicting definitions of one name.
 
 `compileSourceBundle` collects source-wrapper definitions into immutable member
 scripts before admission. Each source occurrence still invokes its owned body
@@ -245,8 +279,9 @@ precheck.
 ## Rust runtime ownership
 
 Cargo is the sole producer of `monk-runtime`. The compiler and publication
-remain Haskell, with a private `monk-compiler-support` library retaining the
-integer specification, SHA-256, generated ABI metadata and provider validation.
+remain Haskell. The private `monk-foundation` library owns the integer
+specification, SHA-256 interface and generated ABI metadata; `monk-host` owns
+provider capture and validation.
 `protocol/abi2.tsv` generates committed Haskell and Rust tables; the drift check
 runs before builds. It preserves ABI 2 spellings and capability order.
 
@@ -263,6 +298,15 @@ checked scalar conversions are documented and tested under Miri. Consuming
 launch/completion/transfer methods prohibit reuse. One owner reaps and caches
 jobs; a completed background job remains explicitly waitable, and dropping
 an asynchronous job does not kill it. Guardian leases own cross-process cleanup.
+
+Request decoding validates the complete borrowed frame before execution.
+Session transport and initial capsule takeover multiplex incomplete peers and
+partially written replies without changing serialized semantic read, wait or
+foreground execution. A guardian owns one session root; job workspaces retain
+private liveness leases across generated children and are reclaimed after their
+last owner exits. Bootstrap validates all inherited descriptor roles before
+adopting or relocating any descriptor. Capture checks cancellation between
+buffered chunks as well as during blocking reads.
 
 Pre-main constructors retain original stream presence and ignored INT/QUIT.
 Rust's reserved standard descriptors stay valid internally, while child execution

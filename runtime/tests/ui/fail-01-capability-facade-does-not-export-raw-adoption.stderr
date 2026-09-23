@@ -1,0 +1,5 @@
+error[E0425]: cannot find function `adopt_initial_inherited` in module `monk_runtime::capabilities`
+ --> tests/ui/fail-01-capability-facade-does-not-export-raw-adoption.rs:2:48
+  |
+2 | pub fn bad(){let _=monk_runtime::capabilities::adopt_initial_inherited(&[3]);}
+  |                                                ^^^^^^^^^^^^^^^^^^^^^^^ not found in `monk_runtime::capabilities`

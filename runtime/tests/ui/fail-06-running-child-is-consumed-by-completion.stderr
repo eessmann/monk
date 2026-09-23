@@ -1,0 +1,14 @@
+error[E0382]: use of moved value: `child`
+ --> tests/ui/fail-06-running-child-is-consumed-by-completion.rs:2:107
+  |
+2 | use monk_runtime::capabilities::RunningChild; pub fn bad(child:RunningChild){let _=child.complete();let _=child.complete();}
+  |                                                          -----                           ----------       ^^^^^ value used here after move
+  |                                                          |                               |
+  |                                                          |                               `child` moved due to this method call
+  |                                                          move occurs because `child` has type `RunningChild`, which does not implement the `Copy` trait
+  |
+note: `monk_runtime::capabilities::RunningChild::complete` takes ownership of the receiver `self`, which moves `child`
+ --> src/native/lifecycle.rs
+  |
+  |     pub fn complete(mut self) -> io::Result<CompletedChild> {
+  |                         ^^^^

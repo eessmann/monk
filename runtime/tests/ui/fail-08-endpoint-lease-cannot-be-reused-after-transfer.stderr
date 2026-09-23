@@ -1,0 +1,14 @@
+error[E0382]: use of moved value: `lease`
+ --> tests/ui/fail-08-endpoint-lease-cannot-be-reused-after-transfer.rs:2:109
+  |
+2 | use monk_runtime::capabilities::EndpointLease; pub fn bad(lease:EndpointLease){let _=lease.transfer();let _=lease.transfer();}
+  |                                                           -----                            ----------       ^^^^^ value used here after move
+  |                                                           |                                |
+  |                                                           |                                `lease` moved due to this method call
+  |                                                           move occurs because `lease` has type `EndpointLease`, which does not implement the `Copy` trait
+  |
+note: `monk_runtime::capabilities::EndpointLease::transfer` takes ownership of the receiver `self`, which moves `lease`
+ --> src/types.rs
+  |
+  |     pub fn transfer(self) -> std::os::fd::OwnedFd {
+  |                     ^^^^

@@ -9,6 +9,23 @@ use std::{
     io::{self, Write},
     os::fd::{AsFd, OwnedFd},
 };
+pub(super) enum OpenMode {
+    Read,
+    Write,
+    Append,
+    ReadWrite,
+}
+impl OpenMode {
+    pub fn decode(bytes: &[u8]) -> io::Result<Self> {
+        match bytes {
+            b"read" => Ok(Self::Read),
+            b"write" => Ok(Self::Write),
+            b"append" => Ok(Self::Append),
+            b"read-write" => Ok(Self::ReadWrite),
+            _ => Err(super::invalid("invalid descriptor open mode")),
+        }
+    }
+}
 type Bindings = BTreeMap<SourceFd, Option<OwnedFd>>;
 pub(super) struct Table {
     stack: Vec<Bindings>,
@@ -19,30 +36,31 @@ pub(super) fn copy(streams: &Streams) -> io::Result<Streams> {
         .map(|(n, fd)| Ok((*n, native::duplicate_private(fd.as_fd())?)))
         .collect()
 }
-impl Table {
-    pub fn new() -> io::Result<Self> {
-        let mut numbers = Vec::new();
-        if let Some(value) = std::env::var_os("MONK_SESSION_FDS") {
-            use std::os::unix::ffi::OsStrExt;
-            for number in value
-                .as_bytes()
-                .split(|b| *b == b',')
-                .filter(|v| !v.is_empty())
-            {
-                let n = super::integer(number)?;
-                if !(3..=1048575).contains(&n) {
-                    return Err(super::invalid("invalid inherited descriptor table"));
-                }
-                numbers.push(n as i32);
+/// Read names before bootstrap adopts any inherited descriptor. The native
+/// boundary validates the complete user/private set before creating aliases.
+pub(super) fn inherited_numbers() -> io::Result<Vec<i32>> {
+    let mut numbers = Vec::new();
+    if let Some(value) = std::env::var_os("MONK_SESSION_FDS") {
+        use std::os::unix::ffi::OsStrExt;
+        for number in value
+            .as_bytes()
+            .split(|b| *b == b',')
+            .filter(|v| !v.is_empty())
+        {
+            let n = super::integer(number)?;
+            if !(3..=1048575).contains(&n) {
+                return Err(super::invalid("invalid inherited descriptor table"));
             }
+            numbers.push(n as i32);
         }
-        let initial = native::adopt_initial_inherited(&numbers)?
-            .into_iter()
-            .map(|(n, fd)| (n, Some(fd)))
-            .collect();
-        Ok(Self {
-            stack: vec![initial],
-        })
+    }
+    Ok(numbers)
+}
+impl Table {
+    pub fn from_inherited(streams: Streams) -> Self {
+        Self {
+            stack: vec![streams.into_iter().map(|(n, fd)| (n, Some(fd))).collect()],
+        }
     }
     pub fn push(&mut self) -> io::Result<()> {
         let next = self
@@ -103,16 +121,15 @@ impl Table {
         &mut self,
         number: SourceFd,
         cwd: native::BorrowedDirectory<'_>,
-        mode: &[u8],
+        mode: OpenMode,
         path: &[u8],
         mut check: impl FnMut() -> io::Result<()>,
     ) -> io::Result<()> {
         let flags = match mode {
-            b"read" => OFlags::RDONLY,
-            b"write" => OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC,
-            b"append" => OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND,
-            b"read-write" => OFlags::RDWR | OFlags::CREATE,
-            _ => return Err(super::invalid("invalid descriptor open mode")),
+            OpenMode::Read => OFlags::RDONLY,
+            OpenMode::Write => OFlags::WRONLY | OFlags::CREATE | OFlags::TRUNC,
+            OpenMode::Append => OFlags::WRONLY | OFlags::CREATE | OFlags::APPEND,
+            OpenMode::ReadWrite => OFlags::RDWR | OFlags::CREATE,
         };
         let fd = loop {
             match fs::openat(

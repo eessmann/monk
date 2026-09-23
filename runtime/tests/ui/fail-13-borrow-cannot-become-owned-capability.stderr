@@ -1,0 +1,7 @@
+error[E0308]: mismatched types
+ --> tests/ui/fail-13-borrow-cannot-become-owned-capability.rs:2:79
+  |
+2 | use std::os::fd::{BorrowedFd,OwnedFd}; pub fn bad(fd:BorrowedFd<'_>)->OwnedFd{fd}
+  |                                                                       ------- ^^ expected `OwnedFd`, found `BorrowedFd<'_>`
+  |                                                                       |
+  |                                                                       expected `OwnedFd` because of return type

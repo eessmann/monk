@@ -27,13 +27,13 @@ module Monk.Translation
 where
 
 import Data.List.NonEmpty qualified as NE
-import Language.Bash.Parser (parseBashFile, parseBashScript)
 import Language.Fish.DSL
   ( Script,
     renderScript,
   )
 import Language.Fish.Translator.Plan
-  ( compilePlannedDocument,
+  ( PlannedTranslation,
+    compilePlannedDocument,
     compilePlannedTranslation,
     plannedDiagnostics,
     plannedRequirements,
@@ -43,28 +43,29 @@ import Language.Fish.Translator.Plan
 import Monk.Source.Environment (readSourceSnapshot, snapshotPath, snapshotText)
 import Monk.Translation.Contract (parseCallerContract)
 import Monk.Translation.ParseDiagnostics (genericParseDiagnostic, positionedCommentDiagnostic)
+import Monk.Translation.Parser (parseBashFile, parseBashScript)
 import Monk.Translation.Types
 import ShellCheck.Interface (ParseResult, PositionedComment, prComments, prRoot)
 
+-- The admitted artifact stays owned by its result. Public projections cannot
+-- replace its script, provider binding, requirements or admission state.
 data TranslationResult = MkTranslationResult
-  { resultScript :: Script,
-    resultDiagnostics :: [Diagnostic],
-    resultRuntimeRequirements :: [RuntimeRequirement],
-    resultStatistics :: TranslationStatistics
+  { resultTranslation :: PlannedTranslation,
+    resultParseDiagnostics :: [Diagnostic]
   }
   deriving stock (Show, Eq)
 
 translationScript :: TranslationResult -> Script
-translationScript = resultScript
+translationScript = plannedScript . resultTranslation
 
 translationDiagnostics :: TranslationResult -> [Diagnostic]
-translationDiagnostics = resultDiagnostics
+translationDiagnostics result = resultParseDiagnostics result <> plannedDiagnostics (resultTranslation result)
 
 translationRuntimeRequirements :: TranslationResult -> [RuntimeRequirement]
-translationRuntimeRequirements = resultRuntimeRequirements
+translationRuntimeRequirements = plannedRequirements . resultTranslation
 
 translationStatistics :: TranslationResult -> TranslationStatistics
-translationStatistics = resultStatistics
+translationStatistics = plannedStatistics . resultTranslation
 
 translationExecutionStrategy :: TranslationResult -> ExecutionStrategy
 translationExecutionStrategy = executionStrategyFor . translationRuntimeRequirements
@@ -91,12 +92,8 @@ translateParseResult cfg parseResult =
         Right planned ->
           Right
             MkTranslationResult
-              { resultScript = plannedScript planned,
-                resultDiagnostics =
-                  map positionedCommentDiagnostic (prComments parseResult)
-                    <> plannedDiagnostics planned,
-                resultRuntimeRequirements = plannedRequirements planned,
-                resultStatistics = plannedStatistics planned
+              { resultTranslation = planned,
+                resultParseDiagnostics = map positionedCommentDiagnostic (prComments parseResult)
               }
 
 translateBashFile ::
@@ -123,10 +120,8 @@ translateBashScript cfg fileName scriptText = do
       Right planned ->
         Right
           ( MkTranslationResult
-              (plannedScript planned)
-              (map positionedCommentDiagnostic (prComments parsed) <> plannedDiagnostics planned)
-              (plannedRequirements planned)
-              (plannedStatistics planned)
+              planned
+              (map positionedCommentDiagnostic (prComments parsed))
           )
 
 renderTranslation :: TranslationResult -> Text

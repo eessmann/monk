@@ -7,6 +7,7 @@ where
 
 import Data.List.NonEmpty qualified as NE
 import Data.Text qualified as T
+import Language.Fish.DSL.Internal qualified as Internal
 import Monk.AST hiding (stdout)
 import Monk.AST qualified as AST
 import Test.Tasty (TestTree, testGroup)
@@ -17,7 +18,31 @@ unitPrettyTests :: TestTree
 unitPrettyTests =
   testGroup
     "Pretty printing"
-    [ H.testCase "Safe literal words omit unnecessary quotes" $ do
+    [ H.testCase "Backgrounding has one owner and groups a complete sequence" $ do
+        renderDsl (script [stmt (background (command "true" []))]) @?= "true &"
+        renderDsl (script [stmt (background (pipeline (stage (command "true" []) NE.:| [stage (command "false" [])])))]) @?= "true | false &"
+        renderDsl (script [stmt (background (semicolon (command "true" []) (background (command "false" []))))])
+          @?= "begin\n  true;\n  false &\nend &",
+      H.testCase "Command identities cannot introduce shell grammar" $ do
+        renderDsl (script [stmt (command "true; false" [])]) @?= "'true; false'"
+        for_ ["if", "!", "return", "exec", "", "bad\0name"] $ \name ->
+          H.assertBool ("reject executable " <> toString name) (isLeft (commandName name))
+        renderDsl (script [stmt (command "x\ny" [])]) @?= "'x'\\n'y'",
+      H.testCase "Function names and flag operands remain single tokens" $ do
+        renderDsl (script [stmt (function "x; false" [FuncOnEvent "e; false", FuncUnknownFlag "--x; false"] [] (block (stmt (command "true" []) NE.:| [])))])
+          @?= "function 'x; false' --on-event 'e; false' '--x; false'\n  true\nend",
+      H.testCase "Glob literal components cannot introduce commands" $ do
+        renderDsl (script [stmt (command "printf" [arg (glob (MkGlobPattern [GlobLiteral "x; false", GlobStar]))])]) @?= "printf 'x; false'*"
+        renderDsl (script [stmt (command "printf" [arg (glob (MkGlobPattern [GlobBraces ("a,b" NE.:| ["x; false"])]))])]) @?= "printf {'a,b','x; false'}"
+        renderDsl (script [stmt (command "printf" [arg (glob (MkGlobPattern [GlobCharClass "a]; false"]))])]) @?= "printf '[a]; false]'",
+      H.testCase "Every comment line remains a comment" $ do
+        renderDsl (script [comment "first\nprintf injected"]) @?= "#first\n#printf injected",
+      H.testCase "Read numeric flag text cannot introduce commands" $ do
+        renderDsl (script [stmt (read_ [ReadNChars "1; false", ReadTimeout "1; false", ReadFD "0; false"] ["name"])])
+          @?= "read --nchars '1; false' --timeout '1; false' -u '0; false' name",
+      H.testCase "Scalar special variables retain one quoted field" $ do
+        renderDsl (Internal.MkScript [Internal.Stmt (Internal.Command "printf" [Internal.ExprVal (Internal.ExprSpecialVar Internal.SVUser)])]) @?= "printf \"$USER\"",
+      H.testCase "Safe literal words omit unnecessary quotes" $ do
         renderDsl (script [stmt (command "printf" (map (arg . str) ["%s", "hello", "--local", "/tmp/out", "a_b-2.txt"]))])
           @?= "printf '%s' hello --local /tmp/out a_b-2.txt",
       H.testCase "Literal concatenation renders one canonical word" $ do
@@ -30,7 +55,7 @@ unitPrettyTests =
           @?= "printf '%s'\\n \\n'head' \\n\\n ''",
       H.testCase "Literal suffix cannot extend a variable name" $ do
         renderDsl (script [stmt (command "printf" [arg (concatStr (var "name") (concatStr (str "") (str "suffix")))])])
-          @?= "printf $name'suffix'",
+          @?= "printf \"$name\"'suffix'",
       H.testCase "Fish keywords and assignment-looking words remain quoted" $ do
         renderDsl (script [stmt (command "printf" (map (arg . str) ["if", "and", "not", "time", "command", "builtin", "exec", "x=y"]))])
           @?= "printf 'if' 'and' 'not' 'time' 'command' 'builtin' 'exec' 'x=y'",
@@ -45,7 +70,7 @@ unitPrettyTests =
                     ( command
                         "echo"
                         [ arg (str "Hello"),
-                          redirect AST.stdout overwrite (fileTarget (str "/dev/null"))
+                          redirectArg (redirect AST.stdout overwrite (fileTarget (str "/dev/null")))
                         ]
                     )
                 ]
@@ -59,7 +84,7 @@ unitPrettyTests =
                     ( command
                         "echo"
                         [ arg (str "Hello"),
-                          redirect both overwrite (fileTarget (str "/tmp/out"))
+                          redirectArg (redirect both overwrite (fileTarget (str "/tmp/out")))
                         ]
                     )
                 ]
@@ -105,7 +130,7 @@ unitPrettyTests =
         let inner = stmt (command "echo" [arg (str "x")])
             fishScript = script [stmt (command "cat" [arg (processSubst (inner NE.:| []))])]
             actual = renderDsl fishScript
-        T.isInfixOf "cat (" actual H.@? "must begin with cat ("
+        T.isInfixOf "cat \"$(" actual H.@? "must quote the scalar process substitution path"
         T.isInfixOf "| psub)" actual H.@? "must pipe to psub",
       H.testCase "Simple pipeline" $ do
         let fishScript =
@@ -193,7 +218,7 @@ unitPrettyTests =
       H.testCase "Join list fallback" $ do
         let fishScript = script [stmt (command "echo" [arg (joinList (vars "x"))])]
             actual = renderDsl fishScript
-            expected = "echo (string join ' ' -- $x ; or printf '')"
+            expected = "echo \"$(string join ' ' -- $x ; or printf '')\""
         actual @?= expected,
       H.testCase "Function printing (no params)" $ do
         let body = block (NE.fromList [stmt (command "echo" [arg (str "hi")])])

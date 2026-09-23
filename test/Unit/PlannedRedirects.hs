@@ -37,7 +37,7 @@ exact name source = H.testCaseSteps name $ \step -> do
           environment <- prepareEnv
           bash <- runShellWithMode ShellRunExec ShellBash environment source [] ""
           fish <- runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) [] ""
-          let observation value = (rrExit value, rrStdout value, rrStderr value)
+          let observation value = (rrExit value, rrStdoutBytes value, rrStderrBytes value)
           H.assertEqual
             ((if null (translationDiagnostics translated) then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH") <> "\n" <> toString source)
             (observation bash)

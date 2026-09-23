@@ -1,0 +1,9 @@
+error[E0505]: cannot move out of `fd` because it is borrowed
+ --> tests/ui/fail-12-borrow-cannot-outlive-owner.rs:2:94
+  |
+2 | use std::os::fd::{AsFd,AsRawFd,OwnedFd}; pub fn bad(fd:OwnedFd){let borrowed=fd.as_fd();drop(fd);let _=borrowed.as_raw_fd();}
+  |                                                     --                       --              ^^        -------- borrow later used here
+  |                                                     |                        |               |
+  |                                                     |                        |               move out of `fd` occurs here
+  |                                                     |                        borrow of `fd` occurs here
+  |                                                     binding `fd` declared here

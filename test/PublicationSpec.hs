@@ -5,6 +5,8 @@ module Main (main) where
 
 import Control.Concurrent qualified as Concurrent
 import Control.Exception (bracket)
+import Control.Exception qualified as Exception
+import Data.Bits ((.&.))
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as BS8
 import Data.IORef qualified as IORef
@@ -34,8 +36,13 @@ import Monk.Output.Publication
     publishPublication,
     publishPublicationWithHook,
   )
+import Monk.Output.Publication.Lock qualified as Lock
+import Monk.Output.Publication.Manifest qualified as Manifest
+import Monk.Output.Publication.Plan qualified as Plan
+import Monk.Output.Publication.Posix qualified as Posix
 import System.Directory
   ( createDirectory,
+    createDirectoryIfMissing,
     doesDirectoryExist,
     doesFileExist,
     getTemporaryDirectory,
@@ -47,9 +54,10 @@ import System.Environment qualified as Environment
 import System.Exit (ExitCode (..))
 import System.FilePath qualified as FP
 import System.IO qualified as IO
-import System.Posix.Files (createSymbolicLink, setFileMode)
+import System.Posix.Files (createSymbolicLink, fileMode, getFileStatus, setFileMode)
 import System.Posix.Process (ProcessStatus (Exited), executeFile, exitImmediately, forkProcess, getProcessStatus)
 import System.Posix.Types (ProcessID)
+import System.Timeout (timeout)
 import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit as H
 
@@ -65,12 +73,128 @@ publicationTests :: TestTree
 publicationTests =
   testGroup
     "Publication"
-    [ validationTests,
+    [ ownershipTests,
+      validationTests,
       managedPublicationTests,
       failureRecoveryTests,
       concurrencyTests,
       singleFileTests
     ]
+
+-- Removing lease revocation must fail these tests even though every phantom
+-- owner and stage parameter continues to typecheck.
+ownershipTests :: TestTree
+ownershipTests =
+  testGroup
+    "ownership leases"
+    [ H.testCase "live lock and stage publish nested member bytes" $
+        withOwnershipLayout $ \destination members target -> do
+          Lock.withAdvisoryDestinationLock destination $ \lock ->
+            Posix.withStagedGeneration lock members $ \stage -> do
+              durable <- Posix.sealGeneration ownershipHook stage
+              Posix.commitGeneration lock ownershipHook durable
+          assertFileBytes (target FP.</> "lib/entry.fish") "entry",
+      H.testCase "deferred seal cannot recreate a released staging directory" $
+        withOwnershipLayout $ \destination members target -> do
+          Lock.withAdvisoryDestinationLock destination $ \lock -> do
+            escaped <- Posix.withStagedGeneration lock members $ \stage ->
+              pure (void (Posix.sealGeneration ownershipHook stage))
+            assertExpiredLease escaped
+          assertOwnershipLayoutClean target,
+      H.testCase "deferred generation cannot publish after both callbacks return" $
+        withOwnershipLayout $ \destination members target -> do
+          escaped <- Lock.withAdvisoryDestinationLock destination $ \lock ->
+            Posix.withStagedGeneration lock members $ \stage -> pure $ do
+              durable <- Posix.sealGeneration ownershipHook stage
+              Posix.commitGeneration lock ownershipHook durable
+          assertExpiredLease escaped
+          assertOwnershipLayoutClean target,
+      H.testCase "deferred stage allocation cannot write after lock release" $
+        withOwnershipLayout $ \destination members target -> do
+          escaped <- Lock.withAdvisoryDestinationLock destination $ \lock ->
+            pure (Posix.withStagedGeneration lock members (const (pure ())))
+          assertExpiredLease escaped
+          assertOwnershipLayoutClean target,
+      H.testCase "concurrent stage cannot commit after its lock is released" $
+        withOwnershipLayout $ \destination members target -> do
+          ready <- Concurrent.newEmptyMVar
+          release <- Concurrent.newEmptyMVar
+          done <- Lock.withAdvisoryDestinationLock destination $ \lock -> do
+            worker <- forkOutcome $
+              Posix.withStagedGeneration lock members $ \stage -> do
+                durable <- Posix.sealGeneration ownershipHook stage
+                Concurrent.putMVar ready (Posix.commitGeneration lock ownershipHook durable)
+                Concurrent.takeMVar release
+            void (Concurrent.readMVar ready)
+            pure worker
+          (Concurrent.readMVar ready >>= assertExpiredLease)
+            `Exception.finally` Concurrent.putMVar release ()
+          awaitOutcome done
+          assertOwnershipLayoutClean target,
+      H.testCase "stage cleanup waits for an already running seal" $
+        withOwnershipLayout $ \destination members target -> do
+          entered <- Concurrent.newEmptyMVar
+          release <- Concurrent.newEmptyMVar
+          workerReady <- Concurrent.newEmptyMVar
+          let hook = mkPublicationHook $ \stage -> do
+                when (stage == StageAfterMemberWrite "lib/entry.fish") $ do
+                  Concurrent.putMVar entered ()
+                  Concurrent.readMVar release
+                pure Nothing
+          scope <- forkOutcome $
+            Lock.withAdvisoryDestinationLock destination $ \lock ->
+              Posix.withStagedGeneration lock members $ \stage -> do
+                worker <- forkOutcome (void (Posix.sealGeneration hook stage))
+                Concurrent.putMVar workerReady worker
+                Concurrent.readMVar entered
+          ( do
+              Concurrent.readMVar entered
+              completed <- timeout 100000 (Concurrent.readMVar scope)
+              H.assertBool "scope released while an operation was still writing" (isNothing completed)
+            )
+            `Exception.finally` Concurrent.putMVar release ()
+          Concurrent.readMVar workerReady >>= awaitOutcome
+          awaitOutcome scope
+          assertOwnershipLayoutClean target
+    ]
+
+ownershipHook :: PublicationHook
+ownershipHook = mkPublicationHook (const (pure Nothing))
+
+withOwnershipLayout :: (Plan.Destination -> Manifest.ValidatedMembers -> FilePath -> IO a) -> IO a
+withOwnershipLayout action = withTempDir "monk-publication-lease" $ \root -> do
+  destination <- either (fail . show) pure (Plan.validateDestination (root FP.</> "entry.fish"))
+  members <- either (fail . show) pure (Manifest.validateMembers [PublicationMember "lib/entry.fish" FishSource "entry"])
+  let target = root FP.</> Plan.generationRelativePath (Plan.generationFor destination members)
+  createDirectoryIfMissing True (FP.takeDirectory target)
+  action destination members target
+
+assertExpiredLease :: IO a -> H.Assertion
+assertExpiredLease action = do
+  result <- Exception.try @Exception.IOException action
+  case result of
+    Left failure -> H.assertBool "operation failed after touching a released resource" ("publication lease expired" `L.isInfixOf` Exception.displayException failure)
+    Right _ -> H.assertFailure "released publication lease admitted an operation"
+
+assertOwnershipLayoutClean :: FilePath -> H.Assertion
+assertOwnershipLayoutClean target = do
+  exists <- doesDirectoryExist target
+  H.assertBool "released operation published a generation" (not exists)
+  entries <- listDirectory (FP.takeDirectory (FP.takeDirectory target))
+  entries @?= ["generations"]
+
+forkOutcome :: IO a -> IO (Concurrent.MVar (Either Exception.SomeException a))
+forkOutcome action = do
+  done <- Concurrent.newEmptyMVar
+  void (Concurrent.forkFinally action (Concurrent.putMVar done))
+  pure done
+
+awaitOutcome :: Concurrent.MVar (Either Exception.SomeException a) -> IO a
+awaitOutcome done = do
+  result <- timeout 2000000 (Concurrent.readMVar done)
+  case result of
+    Nothing -> H.assertFailure "publication worker did not finish" >> error "unreachable"
+    Just outcome -> either Exception.throwIO pure outcome
 
 validationTests :: TestTree
 validationTests =
@@ -106,6 +230,13 @@ validationTests =
         assertPlanFailure
           InvalidPublicationPlan
           (planManagedPublication "/tmp/root.fish" [("lib", "file"), ("lib/child.fish", "child")] "loader"),
+      H.testCase "managed planning rejects descendants of the reserved manifest" $
+        assertPlanFailure
+          InvalidPublicationPlan
+          (planManagedPublication "/tmp/root.fish" [(".monk-manifest/member", "bad")] "loader"),
+      H.testCase "member-prefix checks distinguish neighboring directory names" $ do
+        let members = [("lib", "one"), ("lib-other/child.fish", "two")]
+        void (requirePlan (planManagedPublication "/tmp/root.fish" members "loader")),
       H.testCase "planning rejects a destination without an entry basename" $
         assertPlanFailure
           InvalidPublicationPlan
@@ -128,6 +259,15 @@ managedPublicationTests =
           assertFileBytes destination (loaderFor generation)
           forM_ members $ \(path, contents) ->
             assertFileBytes (tmpDir FP.</> generation FP.</> path) contents,
+      H.testCase "atomic staging preserves ordinary generation directory modes" $
+        withTempDir "monk-generation-mode" $ \tmpDir -> do
+          let peer = tmpDir FP.</> "ordinary-directory"
+          createDirectory peer
+          expectedMode <- fileMode <$> getFileStatus peer
+          receipt <- successfulPublish =<< managedPlan (tmpDir FP.</> "root.fish") [("root.fish", "entry")]
+          generation <- requireGeneration receipt
+          actualMode <- fileMode <$> getFileStatus (tmpDir FP.</> generation)
+          (actualMode .&. 0o7777) @?= (expectedMode .&. 0o7777),
       H.testCase "invalid staged runtime preserves the published entry" $
         withTempDir "monk-invalid-native" $ \tmpDir -> do
           let destination = tmpDir FP.</> "root.fish"

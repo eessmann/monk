@@ -47,7 +47,7 @@ test/fixtures/integration/read-delimiter-null-vars.bash	exact	-	Owned input, imm
 test/fixtures/integration/read-delimiter.bash	exact	-	Owned input, immutable source, or deferred trap execution preserves reference behavior
 test/fixtures/integration/read-flags.bash	exact	-	Owned input, immutable source, or deferred trap execution preserves reference behavior
 test/fixtures/integration/source-recursive-child.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.
-test/fixtures/integration/source-recursive-runtime-child.bash	reject	monk.semantic.	Read and descriptor-buffer ownership are excluded; pipeline forms without read have separate positive coverage.
+test/fixtures/integration/source-recursive-runtime-child.bash	exact	-	Native read owns delimiter and descriptor buffering; the source-matched baseline already admits this child body and matches Bash.
 test/fixtures/integration/source-recursive-runtime.bash	exact	-	Owned input, immutable source, or deferred trap execution preserves reference behavior
 test/fixtures/integration/source-recursive.bash	exact	-	Each source occurrence normalizes independently against one immutable dependency snapshot.
 test/fixtures/integration/stdout-stderr-exit.bash	exact	-	Mandatory exact fixture: output/status and generated syntax must remain verified.

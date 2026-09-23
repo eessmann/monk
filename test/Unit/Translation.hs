@@ -145,8 +145,8 @@ exactCaseTest MkExactCase {exactName, exactSource, exactStdout} = H.testCaseStep
 assertEquivalent :: RunResult -> RunResult -> H.Assertion
 assertEquivalent bash fish = do
   H.assertEqual "exit status" (rrExit bash) (rrExit fish)
-  H.assertEqual "stdout" (rrStdout bash) (rrStdout fish)
-  H.assertEqual "stderr" (rrStderr bash) (rrStderr fish)
+  H.assertEqual "stdout" (rrStdoutBytes bash) (rrStdoutBytes fish)
+  H.assertEqual "stderr" (rrStderrBytes bash) (rrStderrBytes fish)
 
 rawAstRejects :: H.Assertion
 rawAstRejects = do

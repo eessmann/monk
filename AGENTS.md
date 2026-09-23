@@ -4,14 +4,16 @@
 
 Monk is a Haskell translator from Bash to Fish.
 
-- `src/Monk/`: public translation, diagnostics, source discovery, and output planning APIs.
-- `src/Language/Bash/`: ShellCheck parser integration; `src/Language/Fish/`: structural DSL, translator subsystems, and private renderer.
-- `app/Main.hs`: command-line interface.
-- `runtime/`: Rust 2024 execution runtime; `support-src/`: pure Haskell compiler support for the runtime ABI.
+- `src/Monk/`: thin public translation, source discovery, and output orchestration APIs.
+- `foundation-src/`: shared source locations, contracts, diagnostics, integer specification, digest, and typed ABI inventory.
+- `host-src/`: byte-preserving subprocess ownership, snapshots, and runtime capture/validation.
+- `compiler-src/Language/Bash/`: pure ShellCheck integration and semantic normalization; `compiler-src/Language/Fish/`: structural DSL, materialization, and private renderer; `compiler-src/Monk/Compiler/`: shared indexed ownership boundaries.
+- `publication-src/`: validated layouts, manifests, locking, durability, publication, and recovery.
+- `app/Main.hs`: command-line interface; `runtime/`: Rust 2024 execution runtime.
 - `protocol/abi2.tsv`: shared ABI metadata, generated into Haskell and Rust by `scripts/generate-abi-metadata.sh`.
-- `test/`: unit, property, golden, integration, and real-world suites; `test/fixtures/` stores shell inputs and expectations.
-- `benchmark/`: Criterion benchmarks; `scripts/Bakeoff/`: comparison harness.
-- `docs/design/`: architecture, semantic audit, and roadmap.
+- `test/`: unit, property, golden, integration, and real-world suites; `test/fixtures/` stores inputs and expectations; `test-support/` owns shared fixture metadata and execution observations.
+- `benchmark/`: Criterion benchmarks; `tooling/src/`: verification, packaging, evidence, and Bakeoff domains.
+- `docs/design/`: architecture, semantic audit, roadmap, and public API migration guidance.
 
 ## Build, Test, and Development Commands
 

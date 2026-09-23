@@ -5,7 +5,10 @@ use clap::Parser;
 use std::{
     ffi::OsString,
     io,
-    os::{fd::AsFd, unix::ffi::OsStringExt},
+    os::{
+        fd::{AsFd, OwnedFd},
+        unix::ffi::OsStringExt,
+    },
 };
 /// The ABI header is positional even though its literal words begin with `--`.
 /// A parser-only end-of-options marker keeps every original argument opaque.
@@ -53,10 +56,65 @@ impl Invocation {
     }
 }
 
+// Raw inherited numbers are read and validated as one set before any of them
+// can be relocated into another number's initially empty slot.
+struct Bootstrap {
+    _workspace_lease: Option<OwnedFd>,
+    streams: native::Streams,
+    guardian: Option<OwnedFd>,
+}
+impl Bootstrap {
+    fn acquire(invocation: &Invocation) -> io::Result<Self> {
+        let mut numbers = match invocation {
+            Invocation::Abi { operation, .. } if operation == opcode::SESSION_RUN => {
+                session::inherited_numbers()?
+            }
+            _ => Vec::new(),
+        };
+        let lease = capsule::inherited_workspace_number()?;
+        let guardian = match invocation {
+            Invocation::Abi {
+                operation,
+                arguments,
+            } if operation == opcode::SESSION_GUARDIAN => {
+                Some(capsule::guardian_descriptor(arguments)?)
+            }
+            _ => None,
+        };
+        for private in [lease, guardian].into_iter().flatten() {
+            if numbers.contains(&private) {
+                return Err(capsule::invalid(
+                    "overlapping private and user inherited descriptors",
+                ));
+            }
+            numbers.push(private);
+        }
+        let mut streams = native::adopt_initial_inherited(&numbers)?;
+        let mut take = |number: Option<i32>| -> io::Result<Option<OwnedFd>> {
+            number
+                .map(|number| {
+                    streams
+                        .remove(&crate::types::SourceFd::new(number)?)
+                        .ok_or_else(|| capsule::invalid("missing adopted private descriptor"))
+                })
+                .transpose()
+        };
+        let workspace_lease = take(lease)?;
+        let guardian = take(guardian)?;
+        Ok(Self {
+            _workspace_lease: workspace_lease,
+            streams,
+            guardian,
+        })
+    }
+}
+
 pub(crate) fn run() -> ! {
-    let result = native::initialize_signals()
-        .map_err(io_failure)
-        .and_then(|()| dispatch(std::env::args_os().skip(1).collect()));
+    let result = Invocation::parse(std::env::args_os().skip(1).collect()).and_then(|invocation| {
+        let bootstrap = Bootstrap::acquire(&invocation).map_err(io_failure)?;
+        native::initialize_signals().map_err(io_failure)?;
+        dispatch(invocation, bootstrap)
+    });
     let status = match result {
         Ok(status) => status,
         Err(message) => {
@@ -91,10 +149,10 @@ fn diagnostic(bytes: &[u8]) {
         let _ = native::write_all(fd.as_fd(), bytes);
     }
 }
-fn dispatch(args: Vec<OsString>) -> Result<i32, Vec<u8>> {
+fn dispatch(invocation: Invocation, mut bootstrap: Bootstrap) -> Result<i32, Vec<u8>> {
     let description =
         abi2::description().ok_or_else(|| b"unsupported native OS or architecture".to_vec())?;
-    let (operation, arguments) = match Invocation::parse(args)? {
+    let (operation, arguments) = match invocation {
         Invocation::Describe => return output(description.as_bytes()),
         Invocation::Abi {
             operation,
@@ -103,12 +161,21 @@ fn dispatch(args: Vec<OsString>) -> Result<i32, Vec<u8>> {
     };
     let rest = arguments.as_slice();
     let raw = match operation.as_slice() {
-        opcode::SESSION_GUARDIAN => Some(capsule::guardian(rest)),
+        opcode::SESSION_GUARDIAN => Some(capsule::guardian(
+            rest,
+            bootstrap
+                .guardian
+                .take()
+                .expect("validated guardian descriptor"),
+        )),
         opcode::LAUNCH => Some(launch::dispatch(rest)),
         opcode::EXEC_SITE => Some(exec::dispatch(rest)),
         opcode::SESSION_EXEC_ERROR => Some(session::exec_error(rest)),
         opcode::SESSION_WRITE => Some(session::writer(rest)),
-        opcode::SESSION_RUN => Some(session::dispatch(rest)),
+        opcode::SESSION_RUN => Some(session::dispatch(
+            rest,
+            std::mem::take(&mut bootstrap.streams),
+        )),
         opcode::SESSION_DIRECTORY_DIAGNOSTIC if rest.is_empty() => {
             Some(session::directory_diagnostic())
         }

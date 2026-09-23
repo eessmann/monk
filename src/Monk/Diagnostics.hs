@@ -11,7 +11,7 @@ module Monk.Diagnostics
   )
 where
 
-import Language.Fish.DSL (SourcePos (..), SourceRange (..))
+import Monk.Source.Location (SourcePos (..), SourceRange (..))
 import Monk.Translation.Types
 
 data DiagnosticCounts = MkDiagnosticCounts

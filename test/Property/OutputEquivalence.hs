@@ -51,7 +51,7 @@ exactCases testName generator = QC.testProperty testName $ QC.withMaxSuccess 30 
           environment <- QCM.run prepareEnv
           bash <- QCM.run (runShellWithMode ShellRunExec ShellBash environment source (scArgs scriptCase) (scStdin scriptCase))
           fish <- QCM.run (runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) (scArgs scriptCase) (scStdin scriptCase))
-          let observation value = (rrExit value, rrStdout value, rrStderr value)
+          let observation value = (rrExit value, rrStdoutBytes value, rrStderrBytes value)
           QCM.monitor
             ( QC.counterexample
                 ( (if null (translationDiagnostics translated) then "ZERO_DIAGNOSTIC_MISMATCH" else "DIAGNOSED_MISMATCH")

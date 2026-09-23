@@ -11,11 +11,11 @@ unitRefactorTests =
   testGroup
     "Architecture boundaries"
     [ H.testCase "superseded semantic entry and rewrite walkers are retired" $ do
-        forM_ ["src/Language/Fish/Translator.hs", "src/Language/Fish/Inline.hs", "src/Language/Fish/Translator/Hoist.hs", "src/Language/Fish/Translator/Commands/CommandTokens.hs"] $ \path -> do
+        forM_ ["compiler-src/Language/Fish/Translator.hs", "compiler-src/Language/Fish/Inline.hs", "compiler-src/Language/Fish/Translator/Hoist.hs", "compiler-src/Language/Fish/Translator/Commands/CommandTokens.hs"] $ \path -> do
           present <- doesFileExist path
           H.assertBool ("superseded semantic owner remains: " <> path) (not present),
       H.testCase "materialization does not lower raw AST or walk ShellCheck tokens" $ do
-        files <- collectHsFiles "src/Language/Fish/Translator"
+        files <- collectHsFiles "compiler-src/Language/Fish/Translator"
         forM_ files $ \path -> do
           contents <- source path
           let imports = mapMaybe importedModule (T.lines contents)
@@ -24,7 +24,7 @@ unitRefactorTests =
             []
             (filter (\name -> any (`underModule` name) ["Language.Fish.AST", "Language.Fish.DSL.Lower", "ShellCheck.AST"]) imports),
       H.testCase "semantic plan owns meaning without executable parser nodes" $ do
-        contents <- source "src/Language/Bash/Plan.hs"
+        contents <- source "compiler-src/Language/Bash/Plan.hs"
         H.assertBool "raw parser token import in semantic plan" (not ("import ShellCheck" `T.isInfixOf` contents))
         H.assertBool "raw executable token field in semantic plan" (not (":: Token" `T.isInfixOf` contents)),
       H.testCase "source discovery uses the authoritative normalization continuation" $ do
@@ -33,18 +33,18 @@ unitRefactorTests =
         H.assertBool "second source AST walker" (not ("import ShellCheck.AST" `T.isInfixOf` contents))
         H.assertBool "source rewrite after admission" (not ("rewriteSources" `T.isInfixOf` contents)),
       H.testCase "public Fish DSL hides raw constructors and lowering" $ do
-        contents <- source "src/Language/Fish/DSL.hs"
+        contents <- source "compiler-src/Language/Fish/DSL.hs"
         let exports = fst (T.breakOn "\nwhere" contents)
         H.assertEqual "unsafe public DSL export" [] (filter (`T.isInfixOf` exports) ["Unsafe", "lower"]),
       H.testCase "structural DSL nodes do not embed the private renderer AST" $ do
-        contents <- source "src/Language/Fish/DSL/Internal.hs"
+        contents <- source "compiler-src/Language/Fish/DSL/Internal.hs"
         H.assertEqual
           "raw AST embedded in structural DSL"
           []
           (filter (`T.isInfixOf` contents) ["import Language.Fish.AST", "Raw.Fish", "UnsafeExpr", "UnsafeCommand", "UnsafeStmt"]),
       H.testCase "private plan and publication modules remain private library modules" $ do
         contents <- source "monk.cabal"
-        let public = fst (T.breakOn "  build-depends:" (snd (T.breakOn "\nlibrary\n" contents)))
+        let public = fst (T.breakOn "  other-modules:" (fst (T.breakOn "  build-depends:" (snd (T.breakOn "\nlibrary\n" contents)))))
         H.assertEqual
           "private implementation exposed"
           []

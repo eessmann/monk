@@ -29,7 +29,7 @@ genExprStr =
       pure (processSubst (NE.fromList [stmt (command "echo" [])]))
     ]
 
-genStatusCommand :: Gen (Command 'ReturnsStatus)
+genStatusCommand :: Gen (Command 'Atomic 'ReturnsStatus)
 genStatusCommand =
   oneof
     [ pure (command "true" []),
@@ -43,11 +43,11 @@ genStatusCommand =
         pure (exit (Just (int n))),
       eval . str <$> genTextNoQuote,
       source . str <$> genTextNoQuote,
-      pure (exec (str "true") []),
+      pure (execute (literalExecutable "true") []),
       pure (read_ [ReadPrompt "Enter:", ReadLocal] ["x"])
     ]
 
-genPipeline :: Gen (Command 'ReturnsStatus)
+genPipeline :: Gen (Command 'Compound 'ReturnsStatus)
 genPipeline = pipeline <$> genStages
 
 genConjunction :: Gen JobConjunction

@@ -5,25 +5,25 @@ profile bash53-i64
 target x86_64-linux
 target aarch64-linux
 target aarch64-darwin
-operation NativeArgv argv
-operation NativePlatformBytes bytes-platform
-operation NativeChildCapture child-capture
-operation NativeChildRun child-run
-operation NativeDescriptorState descriptor-state
-operation NativeDirectory directory
-operation NativeEcho echo
-operation NativeExec exec-site
-operation NativeExpansion expansion
-operation NativeGlob glob
 operation NativeInteger integer
-operation NativeLaunch launch
+operation NativeSplit split
+operation NativeArgv argv
+operation NativeEcho echo
 operation NativePattern pattern
 operation NativePatternParts pattern-parts
+operation NativePlatformBytes bytes-platform
+operation NativeGlob glob
+operation NativeChildRun child-run
+operation NativeChildCapture child-capture
+operation NativeDescriptorState descriptor-state
+operation NativeDirectory directory
+operation NativeSession session
+operation NativeExec exec-site
+operation NativeWrite write-builtin
+operation NativeLaunch launch
+operation NativeExpansion expansion
 operation NativePipePaths pipe-paths
 capability printf
-operation NativeSession session
-operation NativeSplit split
-operation NativeWrite write-builtin
 
 # Wire opcodes are distinct from advertised capabilities. The namespace selects
 # the CLI operation, session request, integer primitive/batch token, or pattern

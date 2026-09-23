@@ -5,7 +5,9 @@ module Unit.Harness
   )
 where
 
+import Bakeoff.Process (normalizeRuntimeStderr)
 import Control.Exception qualified as Exception
+import Data.ByteString qualified as B
 import Data.Map.Strict qualified as M
 import Data.Set qualified as Set
 import Data.Text qualified as T
@@ -26,7 +28,7 @@ import Monk.Internal.Shell
     runShell,
     shouldRunIntegration,
   )
-import Path (Abs, File, Path, parseRelFile, (</>))
+import Path (Abs, File, Path, parseAbsDir, parseRelFile, (</>))
 import Path.IO qualified as PathIO
 import System.Exit (ExitCode)
 import System.Process (proc)
@@ -89,6 +91,24 @@ unitHarnessTests =
         envAddedOrChanged delta @?= M.fromList [("ADD", "fresh"), ("CHANGE", "new")]
         envRemoved delta @?= Set.empty,
       testGroup "environment snapshots preserve framed values" (map environmentSnapshotCase [ShellBash, ShellFish]),
+      H.testCase "binary observations preserve equality and differences without UTF8 decoding" $ do
+        environment <- prepareEnv
+        original <- runShell ShellBash environment "printf '\\377'; printf '\\376' >&2"
+        same <- runShell ShellBash environment "printf '\\377'; printf '\\376' >&2"
+        different <- runShell ShellBash environment "printf '\\376'; printf '\\377' >&2"
+        let observation value = (rrExit value, rrStdoutBytes value, rrStderrBytes value)
+        rrStdoutBytes original @?= B.singleton 255
+        rrStderrBytes original @?= B.singleton 254
+        observation original @?= observation same
+        H.assertBool "distinct binary outputs compared equal" (observation original /= observation different),
+      H.testCase "Bakeoff stderr normalization preserves non-UTF8 byte differences" $ do
+        root <- parseAbsDir "/private/tmp/example"
+        let normalize = normalizeRuntimeStderr root
+            left = B.singleton 255 <> "/private/tmp/example/input.monk.fish"
+            right = B.singleton 255 <> "/private/tmp/example/input.babelfish.fish"
+            different = B.singleton 254 <> "/private/tmp/example/input.babelfish.fish"
+        normalize left @?= normalize right
+        H.assertBool "normalization erased distinct bytes" (normalize left /= normalize different),
       H.testCase "shell process runner times out hung commands" $ do
         result <-
           Exception.try

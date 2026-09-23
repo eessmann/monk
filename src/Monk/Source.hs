@@ -38,9 +38,9 @@ import Language.Bash.Plan.Normalize
     SourceDocument (..),
     beginNormalizationWithOrigin,
   )
-import Language.Fish.DSL (SourceRange)
 import Language.Fish.Translator.Plan (compileSourcePlan, plannedDiagnostics, plannedRequirements, plannedStatistics)
 import Monk.Source.Environment
+import Monk.Source.Location (SourceRange)
 import Monk.Source.Product
 import Monk.Translation (TranslationFailure (..), parseBashScript)
 import Monk.Translation.ParseDiagnostics (genericParseDiagnostic, positionedCommentDiagnostic)
@@ -72,7 +72,7 @@ sourceOccurrences :: SourceGraph -> [SourceOccurrence]
 sourceOccurrences = graphOccurrences
 
 sourceOccurrenceId :: SourceOccurrence -> Int
-sourceOccurrenceId = occurrenceSequence
+sourceOccurrenceId = unOccurrenceId . occurrenceSequence
 
 sourceOccurrenceParent :: SourceOccurrence -> FilePath
 sourceOccurrenceParent = occurrenceParent
@@ -118,14 +118,15 @@ translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
             (M.singleton (snapshotPath input) (input, parsed))
             [input]
             []
-            (map positionedCommentDiagnostic (prComments parsed))
+            0
+            (reverse (map positionedCommentDiagnostic (prComments parsed)))
             (beginNormalizationWithOrigin cfg (toText rootPath) (snapshotText input) parsed)
   where
-    drive root cache inputs occurrences diagnostics = \case
+    drive root cache inputs occurrences !nextOccurrence diagnostics = \case
       NormalizationFailed errors -> pure (Left (MkSourceGraphFailure root (MkTranslationFailure errors)))
       NormalizationComplete plan -> pure $ case compileSourcePlan plan of
         Left errors -> Left (MkSourceGraphFailure root (MkTranslationFailure errors))
-        Right translated -> Right (MkSourceGraph root environment inputs occurrences plan translated diagnostics)
+        Right translated -> Right (MkSourceGraph root environment (reverse inputs) (reverse occurrences) plan translated (reverse diagnostics))
       NormalizationNeedsSource request resume
         | not recursive ->
             pure
@@ -172,13 +173,14 @@ translateSourceGraphWithEnvironment cfg environment recursive rootPath = do
                         Nothing -> do
                           let fresh = not (M.member path cache)
                               parent = maybe root toString (listToMaybe (reverse (P.sourceRequestStack request)))
-                              occurrence = MkSourceOccurrence (length occurrences) (P.sourceRequestId request) parent path (P.sourceRequestRange request)
+                              occurrence = MkSourceOccurrence (OccurrenceId nextOccurrence) (ParserTokenId (P.sourceRequestId request)) parent path (P.sourceRequestRange request)
                           drive
                             root
                             (M.insert path (input, parsed) cache)
-                            (inputs <> [input | fresh])
-                            (occurrences <> [occurrence])
-                            (diagnostics <> [positionedCommentDiagnostic comment | fresh, comment <- prComments parsed])
+                            (if fresh then input : inputs else inputs)
+                            (occurrence : occurrences)
+                            (nextOccurrence + 1)
+                            (reverse [positionedCommentDiagnostic comment | fresh, comment <- prComments parsed] <> diagnostics)
                             (resume (SourceDocument (snapshotText input) parsed origin))
 
 parsedFailure :: ParseResult -> Maybe TranslationFailure

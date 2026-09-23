@@ -9,10 +9,13 @@ import Data.ByteString.Lazy qualified as BL
 import Data.List (isInfixOf)
 import Data.Text qualified as T
 import Evidence qualified
+import Fixture qualified
+import HostProcess qualified
 import Monk.Runtime.Abi2 (abiCapabilities)
 import Monk.Tooling.Package (Linkage (..), Target (..), attestExecution, inspectLinkage, nativeCheckReceipt, packageReport, readTarget, requiredNativeSuites, verifyArtifactIdentity, verifyDescription)
 import Monk.Tooling.Process (ProcessResult (..), ProcessSpec (..), runProcess)
 import Monk.Tooling.Summary (compact, summaryReport)
+import RuntimeSuite qualified
 import System.Directory (createDirectoryIfMissing, doesFileExist, findExecutable, getTemporaryDirectory, removeFile, removePathForcibly)
 import System.Environment qualified as Env
 import System.Exit (ExitCode (..))
@@ -29,6 +32,9 @@ main =
     testGroup
       "tooling"
       [ Evidence.tests,
+        Fixture.tests,
+        HostProcess.tests,
+        RuntimeSuite.tests,
         testCase "static AArch64 ELF is admitted without claiming execution" $
           inspectLinkage Aarch64Linux "Machine: AArch64\n" "" "" @?= Right (Linkage [] Nothing),
         testCase "ELF interpreter is rejected" $
@@ -100,10 +106,11 @@ main =
           assertBool "missing --binary option" ("--binary" `isInfixOf` output),
         testCase "public boundary CLI finds the built library without Cabal exec" $ do
           inherited <- Env.getEnvironment
+          plan <- fromMaybe "dist-newstyle/cache/plan.json" <$> Env.lookupEnv "MONK_CABAL_PLAN"
           let clean = filter (\(name, _) -> name `notElem` ["GHC_ENVIRONMENT", "GHC_PACKAGE_PATH"]) inherited
           (status, output, failure) <-
             readCreateProcessWithExitCode
-              ((proc "monk-tool" ["boundaries", "check"]) {env = Just clean})
+              ((proc "monk-tool" ["boundaries", "check", "--plan", plan]) {env = Just clean})
               ""
           assertBool (output <> failure) (status == ExitSuccess),
         testCase "native child transport receipt rejects an unreviewed script" $ do

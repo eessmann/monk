@@ -37,6 +37,13 @@ unitPlannedPrimitivesTests =
         case result of
           Left failure -> H.assertFailure (show failure)
           Right translation -> H.assertBool "literal command carries private state" (not ("__monk_" `T.isInfixOf` renderTranslation translation)),
+      H.testCase "mixed arithmetic and native control keep scalar operands direct" $ do
+        result <- translateBashScript strictConfig "mixed-native-region.bash" mixedNativeRegion
+        case result of
+          Left failure -> H.assertFailure (show failure)
+          Right translation -> H.assertBool "native suffix unnecessarily captures scalar fields" (not ("_field_" `T.isInfixOf` renderTranslation translation)),
+      exact "mixed native region preserves final short-circuit status" mixedNativeRegion "<1>:ok:<0>",
+      exact "native region reads incoming bounded-operation status" "n=0; ((n)); printf '<%s>' \"$?\"; false && printf bad; printf '<%s>' \"$?\"" "<1><1>",
       exact "native conditional has zero status when no branch runs" "if false; then printf bad; fi; printf '%s' \"$?\"" "0",
       exact "native short circuit preserves selected status" "false && printf bad; printf '%s:' \"$?\"; true || printf bad; printf '%s' \"$?\"" "1:0",
       exact "native scalar assignment retains incoming export" "export x=before; x=after; printenv x" "after\n",
@@ -55,6 +62,7 @@ unitPlannedPrimitivesTests =
       exact "echo stop escape suppresses following arguments and newline" "echo -e 'one\\cignored' two" "one",
       exact "concatenation freezes earlier scalar before later arithmetic update" "n=1; printf '%s\\n' \"$n$((n=2))$n\"" "122\n",
       exact "quoted argv prefix is evaluated before lazy suffix write" "set -- a b; unset x; printf '<%s>\\n' \"$x$@${x:=after}\"" "<a>\n<bafter>\n",
+      exact "prefix assignment installation precedes later substitution" "x=before; x=after y=$(printf '%s' \"$x\") printenv x y; printf '<%s>' \"$x\"" "after\nafter\n<before>",
       exact "builtin dispatch bypasses a function of the same name" "printf() { echo shadow; }; builtin printf '%s\\n' exact" "exact\n",
       exact "command dispatch retains builtin printf" "printf() { echo shadow; }; command printf '%s\\n' exact" "exact\n",
       exact "printf canonical signed decimal values" "printf '%d:%d\\n' 42 -7" "42:-7\n",
@@ -70,6 +78,9 @@ unitPlannedPrimitivesTests =
       rejected "numeric printf rejects noncanonical overflow or bases" "printf '%d\\n' 18446744073709551616",
       rejected "printf incomplete hex escape rejects" "printf '\\x'"
     ]
+
+mixedNativeRegion :: Text
+mixedNativeRegion = "n=0; ((n += 1)); if test \"$n\" = 1; then printf '<%s>' \"$n\"; else printf bad; fi; false || printf ':ok'; printf ':<%s>' \"$?\""
 
 exact :: String -> Text -> ByteString -> TestTree
 exact name source output = differential name source (Just output)

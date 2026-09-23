@@ -1,0 +1,12 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/ui/fail-09-cannot-forge-source-descriptor.rs:2:62
+  |
+2 | use monk_runtime::capabilities::SourceFd; pub fn bad(){let _=SourceFd(0);}
+  |                                                              ^^^^^^^^
+  |
+  = note: a struct named `SourceFd` exists in another namespace
+note: constructor is not visible here due to private fields
+ --> src/types.rs
+  |
+  | pub struct SourceFd(DescriptorNumber);
+  |                     ^^^^^^^^^^^^^^^^ private field

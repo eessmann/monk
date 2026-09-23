@@ -1,17 +1,25 @@
 //! ABI-2 raw byte framing. Shell values cannot contain NUL; no UTF-8 decoding occurs.
 pub type Bytes = Vec<u8>;
 pub type Frames = Vec<Bytes>;
-pub fn decode(bytes: &[u8]) -> Result<Frames, Bytes> {
+pub fn borrowed(bytes: &[u8]) -> Result<Vec<&[u8]>, Bytes> {
     if bytes.is_empty() {
         return Ok(Vec::new());
     }
     if bytes.last() != Some(&0) {
         return Err(b"unterminated frame".to_vec());
     }
-    Ok(bytes[..bytes.len() - 1]
-        .split(|b| *b == 0)
-        .map(<[u8]>::to_vec)
-        .collect())
+    Ok(bytes[..bytes.len() - 1].split(|b| *b == 0).collect())
+}
+pub fn decode(bytes: &[u8]) -> Result<Frames, Bytes> {
+    borrowed(bytes).map(|frames| frames.into_iter().map(<[u8]>::to_vec).collect())
+}
+pub fn encode_borrowed(frames: &[&[u8]]) -> Bytes {
+    let mut bytes = Vec::with_capacity(frames.iter().map(|f| f.len() + 1).sum());
+    for frame in frames {
+        bytes.extend_from_slice(frame);
+        bytes.push(0);
+    }
+    bytes
 }
 pub fn encode(frames: &[Bytes]) -> Bytes {
     let mut bytes = Vec::new();

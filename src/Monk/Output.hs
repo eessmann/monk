@@ -50,10 +50,10 @@ import Data.Set qualified as S
 import GHC.Show qualified as GHC
 import Language.Bash.Plan qualified as P
 import Language.Fish.DSL (Script, renderScript)
-import Language.Fish.Translator.Plan (compileBundleLoader, compileSourceBundle, plannedBundleEntry, plannedBundleModuleStatistics, plannedBundleModules, plannedDiagnostics, plannedRequirements, plannedScript, plannedStatistics)
+import Language.Fish.Translator.Plan (PlannedTranslation, compileBundleLoader, compileSourceBundle, plannedBundleEntry, plannedBundleModuleTranslations, plannedDiagnostics, plannedRequirements, plannedScript, plannedStatistics)
 import Monk.Output.Publication qualified as Publication
 import Monk.Output.Runtime
-import Monk.Source (SourceGraph, sourceGraphDiagnostics, sourceGraphRuntimeRequirements)
+import Monk.Source (SourceGraph)
 import Monk.Source.Product (graphParseDiagnostics, graphPlan, graphTranslation)
 import Monk.Translation.Types
 import System.Directory (makeAbsolute)
@@ -62,7 +62,8 @@ import System.FilePath qualified as FP
 data OutputTarget = OutputStdout | OutputPath FilePath
   deriving stock (Show, Eq, Ord)
 
-data GeneratedFile = MkGeneratedFile OutputTarget Script [Diagnostic] [RuntimeRequirement] TranslationStatistics
+-- Each file is a view of an admitted artifact, with source parse diagnostics.
+data GeneratedFile = MkGeneratedFile OutputTarget PlannedTranslation [Diagnostic]
   deriving stock (Show, Eq)
 
 data NativeRuntimeArtifact = MkNativeRuntimeArtifact OutputTarget NativeRuntimeImage
@@ -97,22 +98,22 @@ data OutputReceipt = MkOutputReceipt FilePath (Maybe FilePath) [Text]
   deriving stock (Show, Eq)
 
 generatedTarget :: GeneratedFile -> OutputTarget
-generatedTarget (MkGeneratedFile target _ _ _ _) = target
+generatedTarget (MkGeneratedFile target _ _) = target
 
 generatedScript :: GeneratedFile -> Script
-generatedScript (MkGeneratedFile _ script _ _ _) = script
+generatedScript (MkGeneratedFile _ translation _) = plannedScript translation
 
 generatedDiagnostics :: GeneratedFile -> [Diagnostic]
-generatedDiagnostics (MkGeneratedFile _ _ diagnostics _ _) = diagnostics
+generatedDiagnostics (MkGeneratedFile _ translation diagnostics) = diagnostics <> plannedDiagnostics translation
 
 generatedRuntimeRequirements :: GeneratedFile -> [RuntimeRequirement]
-generatedRuntimeRequirements (MkGeneratedFile _ _ _ requirements _) = requirements
+generatedRuntimeRequirements (MkGeneratedFile _ translation _) = plannedRequirements translation
 
 generatedExecutionStrategy :: GeneratedFile -> ExecutionStrategy
 generatedExecutionStrategy = executionStrategyFor . generatedRuntimeRequirements
 
 generatedStatistics :: GeneratedFile -> TranslationStatistics
-generatedStatistics (MkGeneratedFile _ _ _ _ statistics) = statistics
+generatedStatistics (MkGeneratedFile _ translation _) = plannedStatistics translation
 
 bundleUserFiles :: OutputBundle -> NonEmpty GeneratedFile
 bundleUserFiles (MkOutputBundle files _ _) = files
@@ -156,7 +157,7 @@ planCombinedOutputBundle target graph = do
   pure $ do
     ownedTarget <- resolved
     let script = plannedScript (graphTranslation graph)
-        file = MkGeneratedFile ownedTarget script (sourceGraphDiagnostics graph) (sourceGraphRuntimeRequirements graph) (plannedStatistics (graphTranslation graph))
+        file = MkGeneratedFile ownedTarget (graphTranslation graph) (graphParseDiagnostics graph)
     publication <- case ownedTarget of
       OutputStdout -> pure Nothing
       OutputPath path -> Just <$> first publicationPlanningDiagnostic (Publication.planSingleFilePublication path (encodeUtf8 (renderScript script)))
@@ -174,33 +175,33 @@ planSeparateOutputBundle = planManagedOutputBundle
 planManagedOutputBundle :: FilePath -> SourceGraph -> IO (Either Diagnostic OutputBundle)
 planManagedOutputBundle destination graph = do
   absolute <- resolveOutputPath destination
-  let P.SourcePlan cfg statements reserved = graphPlan graph
-      operations = foldMap (\case MkRuntimeRequirement (RequiresNativeRuntime _ _ ops) _ -> ops; _ -> mempty) (sourceGraphRuntimeRequirements graph)
-  imageResult <- if S.null operations then pure (Right Nothing) else fmap Just <$> captureNativeRuntime (translationRuntime cfg) operations
-  pure $ do
-    target <- absolute
-    image <- first (outputDiagnostic "native-runtime") imageResult
-    let runtimeMember = "bin/monk-runtime"
-        rebound = P.SourcePlan (cfg {translationRuntime = RuntimeGeneration runtimeMember}) statements reserved
-    planned <- first NE.head (compileSourceBundle rebound)
-    let entry = plannedBundleEntry planned
-        scriptStatistics = M.insert "entry.fish" (plannedStatistics entry) (plannedBundleModuleStatistics planned)
-        scripts = ("entry.fish", plannedScript entry) : M.toAscList (plannedBundleModules planned)
-        members =
-          [Publication.PublicationMember path Publication.FishSource (encodeUtf8 (renderScript script)) | (path, script) <- scripts]
-            <> [Publication.PublicationMember runtimeMember Publication.NativeExecutable (nativeImageBytes native) | native <- maybeToList image]
-        diagnostics = graphParseDiagnostics graph <> plannedDiagnostics entry
-        requirements = plannedRequirements entry
-    relativeGeneration <- first publicationPlanningDiagnostic (Publication.generationRelativeDirectoryMembers target members)
-    let generation = FP.takeDirectory target FP.</> relativeGeneration
-    loader <- first NE.head (compileBundleLoader (generation FP.</> "entry.fish") planned)
-    publication <- first publicationPlanningDiagnostic (Publication.planManagedPublicationMembers target members (encodeUtf8 (renderScript (plannedScript loader))))
-    files <- forM scripts $ \(path, script) -> do
-      statistics <- maybe (Left (outputDiagnostic "materialization-statistics" "Missing statistics for an owned generated member")) Right (M.lookup path scriptStatistics)
-      pure (MkGeneratedFile (OutputPath (generation FP.</> path)) script diagnostics requirements statistics)
-    let entryFile = MkGeneratedFile (OutputPath target) (plannedScript loader) diagnostics requirements (plannedStatistics loader)
-        runtime = [MkNativeRuntimeArtifact (OutputPath (generation FP.</> runtimeMember)) native | native <- maybeToList image]
-    pure (MkOutputBundle (entryFile :| files) runtime (Just publication))
+  let cfg = P.sourcePlanConfig (graphPlan graph)
+      runtimeMember = "bin/monk-runtime"
+      rebound = P.rebindSourcePlan (RuntimeGeneration runtimeMember) (graphPlan graph)
+  case (absolute, first NE.head (compileSourceBundle rebound)) of
+    (Left diagnostic, _) -> pure (Left diagnostic)
+    (_, Left diagnostic) -> pure (Left diagnostic)
+    (Right target, Right planned) -> do
+      -- Capture against the requirements of the fully rebound artifact. The
+      -- original graph's requirements cannot certify a changed materialization.
+      let entry = plannedBundleEntry planned
+          operations = foldMap (\case MkRuntimeRequirement (RequiresNativeRuntime _ _ ops) _ -> ops; _ -> mempty) (plannedRequirements entry)
+      imageResult <- if S.null operations then pure (Right Nothing) else fmap Just <$> captureNativeRuntime (translationRuntime cfg) operations
+      pure $ do
+        image <- first (outputDiagnostic "native-runtime") imageResult
+        let translations = ("entry.fish", entry) : M.toAscList (plannedBundleModuleTranslations planned)
+            members =
+              [Publication.PublicationMember path Publication.FishSource (encodeUtf8 (renderScript (plannedScript translation))) | (path, translation) <- translations]
+                <> [Publication.PublicationMember runtimeMember Publication.NativeExecutable (nativeImageBytes native) | native <- maybeToList image]
+            diagnostics = graphParseDiagnostics graph
+        relativeGeneration <- first publicationPlanningDiagnostic (Publication.generationRelativeDirectoryMembers target members)
+        let generation = FP.takeDirectory target FP.</> relativeGeneration
+        loader <- first NE.head (compileBundleLoader (generation FP.</> "entry.fish") planned)
+        publication <- first publicationPlanningDiagnostic (Publication.planManagedPublicationMembers target members (encodeUtf8 (renderScript (plannedScript loader))))
+        let files = [MkGeneratedFile (OutputPath (generation FP.</> path)) translation diagnostics | (path, translation) <- translations]
+            entryFile = MkGeneratedFile (OutputPath target) loader diagnostics
+            runtime = [MkNativeRuntimeArtifact (OutputPath (generation FP.</> runtimeMember)) native | native <- maybeToList image]
+        pure (MkOutputBundle (entryFile :| files) runtime (Just publication))
 
 resolveOutputPath :: FilePath -> IO (Either Diagnostic FilePath)
 resolveOutputPath destination

@@ -10,7 +10,8 @@ import Monk.Tooling.Evidence.Dispatch (runEvidence)
 import Monk.Tooling.Package (attestExecution, checkerDigest, inspectPackage, nativeCheckReceipt, readTarget, requiredNativeSuites, verifyArtifactIdentity)
 import Monk.Tooling.Parity (generateParityManifest)
 import Monk.Tooling.Process (ProcessResult (..), ProcessSpec (..), runProcess)
-import Monk.Tooling.Runtime.Checks (runChecks)
+import Monk.Tooling.Runtime.Checks (runSuite)
+import Monk.Tooling.Runtime.Suite (Suite, allSuites, parseSuite, suiteName)
 import Monk.Tooling.Summary (summaryReport)
 import Options.Applicative
 import System.Directory (canonicalizePath, createDirectoryIfMissing)
@@ -19,12 +20,13 @@ import System.Exit (ExitCode (..))
 import System.FilePath (takeDirectory, (</>))
 import System.IO (hClose)
 import System.Posix.IO (OpenMode (WriteOnly), creat, defaultFileFlags, exclusive, fdToHandle, openFd)
-import System.Process (callProcess)
 
 data Command
   = Inspect FilePath String (Maybe FilePath) (Maybe FilePath)
   | Attest FilePath FilePath FilePath FilePath FilePath
-  | RuntimeCheck String FilePath (Maybe FilePath) (Maybe FilePath)
+  | RuntimeList
+  | RuntimeAll FilePath (Maybe FilePath)
+  | RuntimeCheck Suite FilePath (Maybe FilePath) (Maybe FilePath)
   | ParityManifest FilePath FilePath
   | BoundariesCheck FilePath FilePath (Maybe FilePath)
   | Profile String String
@@ -88,24 +90,19 @@ runParsed = do
       verified <- either (die . toString) pure (attestExecution report description checkerHash receipts)
       createDirectoryIfMissing True (takeDirectory output)
       BL.writeFile output (encode verified <> "\n")
+    RuntimeList -> mapM_ (putStrLn . suiteName) allSuites
+    RuntimeAll runtimePath monkPath ->
+      forM_ allSuites $ \suite -> runSuite suite runtimePath monkPath
     RuntimeCheck suite runtimePath monkPath reportPath -> do
       binary <- canonicalizePath runtimePath
-      if suite == "child-transport"
-        then do
-          let script = "test/native/child-transport.sh"
-              expectedScriptHash = "5fa3e5f7af8745522c230564b6b70d3587df9f49e338d81509e8a09f5aee5a85"
-          scriptBytes <- B.readFile script
-          unless (checkerDigest scriptBytes == expectedScriptHash) $
-            die "child transport check script differs from the version embedded in monk-tool"
-          callProcess "bash" [script, binary]
-        else runChecks suite binary monkPath
+      runSuite suite binary monkPath
       forM_ reportPath $ \path -> do
         runtimeBytes <- B.readFile binary
         checkerBytes <- Env.getExecutablePath >>= B.readFile
         createDirectoryIfMissing True (takeDirectory path)
         descriptor <- openFd path WriteOnly defaultFileFlags {exclusive = True, creat = Just 0o666}
         handle <- fdToHandle descriptor
-        BL.hPut handle (encode (nativeCheckReceipt (T.pack suite) runtimeBytes checkerBytes) <> "\n")
+        BL.hPut handle (encode (nativeCheckReceipt (T.pack (suiteName suite)) runtimeBytes checkerBytes) <> "\n")
         hClose handle
     ParityManifest monkPath output -> do
       passed <- generateParityManifest monkPath output
@@ -205,8 +202,9 @@ attestParser =
 
 runtimeCheckParser :: Parser Command
 runtimeCheckParser =
-  RuntimeCheck
-    <$> strOption (long "suite" <> metavar "NAME")
-    <*> strOption (long "runtime" <> metavar "FILE")
-    <*> optional (strOption (long "monk" <> metavar "FILE"))
-    <*> optional (strOption (long "report" <> metavar "FILE"))
+  flag' RuntimeList (long "list" <> help "List native runtime suites, one per line; excludes the separate digest checker")
+    <|> (RuntimeAll <$> (flag' () (long "all" <> help "Run every native runtime suite; excludes digest") *> runtimeOption) <*> monkOption)
+    <|> (RuntimeCheck <$> option (eitherReader parseSuite) (long "suite" <> metavar "NAME") <*> runtimeOption <*> monkOption <*> optional (strOption (long "report" <> metavar "FILE")))
+  where
+    runtimeOption = strOption (long "runtime" <> metavar "FILE")
+    monkOption = optional (strOption (long "monk" <> metavar "FILE"))

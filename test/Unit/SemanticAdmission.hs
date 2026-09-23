@@ -32,7 +32,19 @@ unitSemanticAdmissionTests =
     "Semantic admission"
     [ testGroup "exact" (map exactFixtureTest exactFixtures),
       testGroup "rejected" (map rejectedFixtureTest rejectedFixtures),
-      testGroup "positive controls" (map exactFixtureTest positiveFixtures)
+      testGroup "positive controls" (map exactFixtureTest positiveFixtures),
+      testGroup
+        "Fish control names reject before materialization"
+        [ H.testCase (toString source) $ do
+            result <- translateBashScript strictConfig "function-name.bash" source
+            case result of
+              Left (MkTranslationFailure diagnostics) ->
+                H.assertBool
+                  "expected a located function-name rejection"
+                  (any (\diagnostic -> diagnosticCode diagnostic == MkDiagnosticCode "monk.semantic.function-name" && isJust (diagnosticRange diagnostic)) diagnostics)
+              Right translation -> H.assertFailure ("invalid function name admitted: " <> toString (renderTranslation translation))
+        | source <- ["and() { :; }; and", "and() { :; }; :", "function time { :; }; time", "function time { :; }; :", "begin() { :; }; begin"]
+        ]
     ]
 
 data SemanticFixture = MkSemanticFixture
@@ -106,5 +118,5 @@ rejectedFixtureTest MkSemanticFixture {sfName, sfPath} = H.testCase sfName $ do
 assertEquivalent :: String -> RunResult -> RunResult -> H.Assertion
 assertEquivalent fixtureName bashResult fishResult = do
   H.assertEqual (fixtureName <> ": exit status") (rrExit bashResult) (rrExit fishResult)
-  H.assertEqual (fixtureName <> ": stdout") (rrStdout bashResult) (rrStdout fishResult)
-  H.assertEqual (fixtureName <> ": stderr") (rrStderr bashResult) (rrStderr fishResult)
+  H.assertEqual (fixtureName <> ": stdout") (rrStdoutBytes bashResult) (rrStdoutBytes fishResult)
+  H.assertEqual (fixtureName <> ": stderr") (rrStderrBytes bashResult) (rrStderrBytes fishResult)

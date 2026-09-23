@@ -1,5 +1,10 @@
 # Migrating to the principled translator
 
+For the subsequent indexed architecture cleanup, see the
+[typed API migration guide](design/typed-architecture-migration.md). That pass
+preserves the CLI and ABI 2 while changing Haskell construction APIs. The broader
+translator redesign described below predates it.
+
 The redesign deliberately changes the pre-1.0 API and CLI. The active
 implementation and verification status is in
 [the roadmap](design/translator-todo.md).

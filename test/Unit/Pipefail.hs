@@ -22,6 +22,6 @@ unitPipefailTests =
                 environment <- prepareEnv
                 bash <- runShellWithMode ShellRunExec ShellBash environment source [] ""
                 fish <- runShellWithMode ShellRunExec ShellFish environment (renderTranslation translated) [] ""
-                let observations value = (rrExit value, rrStdout value, rrStderr value)
+                let observations value = (rrExit value, rrStdoutBytes value, rrStderrBytes value)
                 H.assertEqual "ZERO_DIAGNOSTIC_MISMATCH" (observations bash) (observations fish)
     ]

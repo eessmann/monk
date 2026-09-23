@@ -17,3 +17,6 @@ tempfile = "3"
 [[bin]]
 name = "monk-runtime"
 path = "src/main.rs"
+
+[dev-dependencies]
+trybuild = "1"

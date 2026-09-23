@@ -10,6 +10,7 @@ import Data.Text qualified as T
 import Gen
 import Monk.AST
 import ShellSupport
+import System.Exit (ExitCode (ExitSuccess))
 import Test.QuickCheck.Monadic qualified as QCM
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.QuickCheck qualified as QC
@@ -19,7 +20,44 @@ propertyPrettyTests :: TestTree
 propertyPrettyTests =
   testGroup
     "Pretty properties"
-    [ QC.testProperty "Literal rendering preserves the value through Fish parsing" $
+    [ QC.testProperty "Backgrounded compositions retain Fish grammar" $ QC.once $ QCM.monadicIO $ do
+        readiness <- QCM.run shouldRunIntegration
+        case readiness of
+          Left reason -> QCM.monitor (QC.label ("SKIPPED: " <> reason)) >> QCM.assert True
+          Right () -> do
+            environment <- QCM.run prepareEnv
+            let true = command "true" []
+                values =
+                  [ stmt (background true),
+                    stmt (background (begin (stmt true NE.:| []))),
+                    stmt (background (pipeline (stage true NE.:| [stage true]))),
+                    stmt (background (semicolon true (background true))),
+                    stmt (background (function "f" [] [] (block (stmt true NE.:| [])))),
+                    stmt (background (return_ Nothing)),
+                    stmt (background (job (jobConjunction Nothing (pipelineValue (stage true NE.:| [])) [andThen (pipelineValue (stage true NE.:| []))])))
+                  ]
+            for_ values $ \value -> do
+              let output = renderDsl (script [value])
+                  check = renderDsl (script [stmt (command "fish" (map (arg . str) ["--no-config", "-n", "-c", output]))])
+              result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment check [] "")
+              QCM.monitor (QC.counterexample ("rendered: " <> toString output))
+              QCM.assert (rrExit result == ExitSuccess && T.null (rrStderr result)),
+      QC.testProperty "Checked executable tokens preserve Fish pipeline grammar" $
+        QC.withMaxSuccess 50 $
+          QC.forAll genShellScalar $ \value -> QCM.monadicIO $ case commandName value of
+            Left _ -> QCM.assert True
+            Right name -> do
+              readiness <- QCM.run shouldRunIntegration
+              case readiness of
+                Left reason -> QCM.monitor (QC.label ("SKIPPED: " <> reason)) >> QCM.assert True
+                Right () -> do
+                  environment <- QCM.run prepareEnv
+                  let output = renderDsl (script [stmt (pipeline (stage (command name []) NE.:| [stage (command "true" [])]))])
+                      check = renderDsl (script [stmt (command "fish" (map (arg . str) ["--no-config", "-n", "-c", output]))])
+                  result <- QCM.run (runShellWithMode ShellRunExec ShellFish environment check [] "")
+                  QCM.monitor (QC.counterexample ("rendered: " <> toString output))
+                  QCM.assert (rrExit result == ExitSuccess && T.null (rrStderr result)),
+      QC.testProperty "Literal rendering preserves the value through Fish parsing" $
         QC.withMaxSuccess 50 $
           QC.forAllShrink genShellScalar (map T.pack . QC.shrink . T.unpack) $ \value -> QCM.monadicIO $ do
             readiness <- QCM.run shouldRunIntegration
@@ -97,7 +135,7 @@ propertyPrettyTests =
             let out = renderDsl (script [stmt (function nameTxt [] [] (block body))])
                 ls = T.lines out
                 headerOK = case ls of
-                  (h : _) -> T.isPrefixOf ("function " <> nameTxt) h
+                  (h : _) -> T.isPrefixOf "function " h && T.isInfixOf nameTxt h
                   _ -> False
                 ends = length (filter (== "end") ls)
              in headerOK QC..&&. ends == 1

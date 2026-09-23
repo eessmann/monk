@@ -170,8 +170,8 @@ exportedScalarCase = H.testCaseSteps "an exported scalar input satisfies the sta
       fish <- runShell ShellFish environment (renderTranslation translation)
       H.assertEqual "independent Bash stdout" "<expected>\n" (rrStdout bash)
       H.assertEqual "exit status" (rrExit bash) (rrExit fish)
-      H.assertEqual "stdout" (rrStdout bash) (rrStdout fish)
-      H.assertEqual "stderr" (rrStderr bash) (rrStderr fish)
+      H.assertEqual "stdout" (rrStdoutBytes bash) (rrStdoutBytes fish)
+      H.assertEqual "stderr" (rrStderrBytes bash) (rrStderrBytes fish)
 
 unrelatedHostileBindingCase :: TestTree
 unrelatedHostileBindingCase = H.testCaseSteps "unrelated list and path variables do not block standalone execution" $ \step -> do
