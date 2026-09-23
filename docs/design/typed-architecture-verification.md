@@ -2,9 +2,14 @@
 
 This pass starts from `43d12c81264ce30986c7e9ba80a1bceedd01f77d` and preserves
 CLI behavior and ABI 2. Implementation lives on `codex/typed-architecture` in an
-isolated checkout. The original checkout's uncommitted `devenv.lock` patch was
-retained unchanged. The isolated build uses the committed lock; the user's lock
-update is separate work.
+isolated checkout. During the measurements below, the original checkout's
+uncommitted `devenv.lock` patch was retained unchanged and the isolated build
+used the committed lock. The later commit/merge request also incorporates that
+dependency update, retaining the validated reference-shell pin and propagating
+devenv's package policy into explicit Haskell imports. Its shell and integration
+checks are recorded separately in
+[the merge follow-up](../evidence/typed-architecture-merge-2026-09-23.json).
+The measurements and source archives below retain their original lock identity.
 
 ## Enforced boundaries
 

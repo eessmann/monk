@@ -1,5 +1,5 @@
 # Native Rust release package for the three declared ABI 2 targets.
-{ inputs, system, buildSystem, src, compiler-nix-name ? "ghc9141" }:
+{ inputs, system, buildSystem, src, compiler-nix-name ? "ghc9141", allowUnfree ? false }:
 let
   lib = inputs.nixpkgs.lib;
   linux = lib.hasSuffix "-linux" system;
@@ -29,7 +29,7 @@ let
   };
   hostPkgs = import inputs.nixpkgs {
     system = buildSystem;
-    inherit (inputs.haskell-nix) config;
+    config = inputs.haskell-nix.config // { inherit allowUnfree; };
     overlays = [ inputs.haskell-nix.overlay ];
   };
   hostProject = import ./project.nix {

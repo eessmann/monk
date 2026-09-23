@@ -9,6 +9,10 @@ and reference package sets. haskell.nix's nested `nixpkgs` input follows the roo
 not in a `follows: nixpkgs/nixos-unstable` path.
 `cabal.project` supplies the shared Hackage index-state and development flags.
 The default compiler is GHC 9.14.1; compatibility uses GHC 9.12.2.
+The explicit haskell.nix imports for development and the release verifier inherit
+devenv's `allow_unfree` policy. Without that propagation, newer nixpkgs rejects
+the GHC toolchain bootstrap's unknown license metadata even when the project
+already enables the policy in `devenv.yaml`.
 The native runtime uses Rust 2024. `rust-toolchain.toml` pins the 2026-09-23
 nightly with rustfmt, Clippy, Miri, and standard libraries for both Linux musl
 targets and aarch64 Darwin. `languages.rust.toolchainFile` selects it through
@@ -54,6 +58,9 @@ Use targeted updates such as `devenv update haskell-nix`, `devenv update nixpkgs
 or `devenv update nixpkgs-tools`. A bare `devenv update` also advances
 `nixpkgs-reference`; update that input only when deliberately changing the
 reference pair and its version assertions in `nix/reference-runtimes.nix`.
+The reference input intentionally retains its validated revision when updating
+the compiler and tooling inputs; advancing it is a separate semantic-baseline
+change.
 Update `rust-overlay` separately when changing the Rust toolchain; verify the
 new manifest has every configured component and target before changing the
 toolchain file. `bash scripts/generate-abi-metadata.sh --check` verifies that

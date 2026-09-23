@@ -3,7 +3,10 @@ let
   # Share the lock-resolved root nixpkgs with haskell.nix's overlay.
   hp = import inputs.nixpkgs {
     system = pkgs.stdenv.hostPlatform.system;
-    inherit (inputs.haskell-nix) config;
+    config = inputs.haskell-nix.config // {
+      # Explicit imports do not inherit devenv.yaml's package policy.
+      inherit (pkgs.config) allowUnfree;
+    };
     overlays = [ inputs.haskell-nix.overlay ];
   };
   tools = import inputs.nixpkgs-tools { system = pkgs.stdenv.hostPlatform.system; };
@@ -115,6 +118,7 @@ in {
     outputs.runtime = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]
       (system: import ./nix/release.nix {
         inherit inputs system;
+        inherit (pkgs.config) allowUnfree;
         buildSystem = pkgs.stdenv.buildPlatform.system;
         src = import ./nix/source.nix { inherit lib; };
         compiler-nix-name = config.monk.compiler;
