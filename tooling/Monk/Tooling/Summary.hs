@@ -2,16 +2,20 @@
 module Monk.Tooling.Summary (compact, summaryReport) where
 
 import Data.Aeson (Value (..), eitherDecodeStrict', object, (.=))
+import Data.Aeson.Key qualified as K
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as C
+import Data.Text qualified as T
 import Monk.Runtime.Digest (sha256)
 
 compact :: Value -> Value
 compact value = case value of
-  Object fields -> Object (KM.map compact (KM.filterWithKey (\key _ -> key /= "base64" && key /= "observations") fields))
+  Object fields -> Object (KM.map compact (KM.filterWithKey keepField fields))
   Array values -> Array (fmap compact values)
   other -> other
+  where
+    keepField key _ = key /= "observations" && key /= "base64" && not ("_base64" `T.isSuffixOf` K.toText key)
 
 summaryReport :: FilePath -> B.ByteString -> Either String Value
 summaryReport sourcePath raw = do

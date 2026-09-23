@@ -32,7 +32,7 @@ in {
     env = {
       inherit (haskellShell) CABAL_CONFIG NIX_GHC NIX_GHCPKG NIX_GHC_LIBDIR NIX_GHC_DOCDIR;
     };
-    packages = (with tools; [ cabal-install hlint ormolu python3 git babelfish coreutils m4 cabal2nix ])
+    packages = (with tools; [ cabal-install hlint ormolu git babelfish coreutils m4 cabal2nix ])
       ++ [ hp.gmp (lib.hiPrio reference.bash)
         (lib.hiPrio (if config.monk.fishChannel == "pinned" then reference.fish else tools.fish)) ];
     env.LC_ALL = "C";
@@ -44,45 +44,30 @@ in {
     scripts.monk-build.exec = "cabal build all";
     scripts.monk-test.exec = ''
       set -euo pipefail
+      cabal build all
       cabal test all --test-show-details=direct
-      python3 scripts/test_runtime_package.py
-      python3 scripts/test_portable_comparison.py
-      python3 scripts/test_portable_performance.py
-      python3 scripts/test_verification_evidence.py
     '';
     scripts.monk-integration.exec = ''
       set -euo pipefail
       cabal build all
-      export PATH="$(dirname "$(cabal list-bin exe:monk-runtime)"):$PATH"
+      runtime="$(cabal list-bin exe:monk-runtime)"
+      monk="$(cabal list-bin exe:monk)"
+      tool="$(cabal list-bin exe:monk-tool)"
+      export PATH="$(dirname "$runtime"):$PATH"
       MONK_INTEGRATION=1 cabal test all --test-show-details=direct
-      python3 runtime-test/protocol.py "$(cabal list-bin exe:monk-runtime)"
-      python3 runtime-test/portable.py "$(cabal list-bin exe:monk-runtime)"
-      python3 runtime-test/printf.py "$(cabal list-bin exe:monk-runtime)"
-      python3 runtime-test/expansion.py "$(cabal list-bin exe:monk-runtime)"
-      python3 runtime-test/session.py "$(cabal list-bin exe:monk-runtime)"
-      for suite in descriptors read process-substitution pattern-parts exec signals; do
-        python3 "runtime-test/$suite.py" "$(cabal list-bin exe:monk-runtime)"
+      for suite in callback-diagnostics descriptors direct-output directory-signals exec expansion native-launcher pattern-parts portable printf process-substitution protocol read session signals; do
+        "$tool" runtime check --suite "$suite" --runtime "$runtime" --monk "$monk"
       done
-      python3 runtime-test/digest.py "$(cabal list-bin test:runtime-test)"
-      python3 runtime-test/callback-diagnostics.py "$(cabal list-bin exe:monk-runtime)" "$(cabal list-bin exe:monk)"
-      python3 runtime-test/native-launcher.py "$(cabal list-bin exe:monk-runtime)" "$(cabal list-bin exe:monk)"
-      python3 runtime-test/direct-output.py "$(cabal list-bin exe:monk-runtime)" "$(cabal list-bin exe:monk)"
-      python3 runtime-test/directory-signals.py "$(cabal list-bin exe:monk)" "$(cabal list-bin exe:monk-runtime)"
-      bash test/native/child-transport.sh "$(cabal list-bin exe:monk-runtime)"
-      MONK_NATIVE_TEST_BINARY="$(cabal list-bin exe:monk)" \
-        MONK_NATIVE_RUNTIME="$(cabal list-bin exe:monk-runtime)" \
-        python3 scripts/test_native_publication.py
-      cabal exec -- python3 scripts/check-public-boundaries.py --report artifacts/public-boundaries.json
-      python3 scripts/test_runtime_package.py
-      python3 scripts/test_portable_comparison.py
-      python3 scripts/test_portable_performance.py
-      python3 scripts/test_verification_evidence.py
+      "$tool" runtime check --suite digest --runtime "$(cabal list-bin test:runtime-test)"
+      bash test/native/child-transport.sh "$runtime"
+      "$tool" boundaries check --report artifacts/public-boundaries.json
     '';
     scripts.monk-quality.exec = ''
       set -euo pipefail
       hlint .
       git ls-files --cached --others --exclude-standard -z -- '*.hs' | xargs -0 ormolu --mode check
       cabal check
+      bash scripts/check-tooling-language.sh
     '';
     scripts.monk-benchmark.exec = "cabal bench monk-benchmark";
     scripts.monk-docs.exec = "cabal haddock all";
@@ -97,11 +82,13 @@ in {
       "monk:sdist".exec = config.scripts.monk-sdist.exec;
     };
     outputs.reference = reference;
-    outputs.testPrograms = { python = tools.python3; coreutils = tools.coreutils; };
+    outputs.testPrograms = { coreutils = tools.coreutils; };
+    outputs.tooling = project.hsPkgs.monk.components.exes.monk-tool;
     outputs.compiler = hp.haskell-nix.compiler.${config.monk.compiler};
     outputs.runtime = lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]
       (system: import ./nix/release.nix {
         inherit inputs system;
+        buildSystem = pkgs.stdenv.buildPlatform.system;
         src = import ./nix/source.nix { inherit lib; };
         compiler-nix-name = config.monk.compiler;
       });

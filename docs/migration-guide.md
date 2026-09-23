@@ -166,7 +166,7 @@ has not been broadened to these session operations. Consult the
 The bake-off now executes standalone output and records `ShellRunExec`; legacy
 fixture `.mode` sidecars no longer select sourcing for that runner. Use the
 dedicated caller-contract suite for sourceable comparisons. Run
-`scripts/compare-bakeoff-bash.py` after the runner to compare raw stdout/stderr
+`monk-tool evidence compare-bakeoff-bash` after the runner to compare raw stdout/stderr
 and status against Bash. The refreshed `--compatible` selector denotes the
 dated shared matching subset, rather than mere translation success.
 

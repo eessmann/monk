@@ -122,10 +122,10 @@ cabal build exe:monk-bakeoff -fdevelopment
 BAKEOFF_BIN=$(cabal list-bin exe:monk-bakeoff)
 "$BAKEOFF_BIN" --group all --file-list scripts/bakeoff-semantic.txt \
   --jobs 1 --babelfish-version 1.2.1 --out-dir artifacts/bakeoff-full
-python3 scripts/compare-bakeoff-bash.py artifacts/bakeoff-full
+cabal run monk-tool -- evidence compare-bakeoff-bash artifacts/bakeoff-full
 "$BAKEOFF_BIN" --compatible --jobs 1 --babelfish-version 1.2.1 \
   --out-dir artifacts/bakeoff-compatible
-python3 scripts/compare-bakeoff-bash.py artifacts/bakeoff-compatible
+cabal run monk-tool -- evidence compare-bakeoff-bash artifacts/bakeoff-compatible
 ```
 
 Babelfish and Fish are required. Hyperfine is optional for the runner, but is
@@ -149,8 +149,7 @@ two translators agreeing on a wrong answer, nonzero status, unavailable comparis
 empty/spaced arguments, binary streams and timeout cleanup:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts \
-  -p test_compare_bakeoff_bash.py
+cabal test monk-tool-test
 ```
 
 The [evidence snapshot](evidence/bakeoff-2026-09-09.json) records all 95 fixture
@@ -251,8 +250,8 @@ The native image SHA256 is
 Raw generated files, stream bytes, all samples, static reports, traces and
 managed bundle are retained under
 `.superpowers/sdd/2026-09-10-native-runtime-coverage/evidence/`.
-The collectors are `scripts/native-runtime-evidence.py`,
-`scripts/babelfish-runtime-evidence.py` and `scripts/trace-runtime-evidence.py`.
+The collectors are now the `monk-tool evidence native`,
+`monk-tool evidence babelfish` and `monk-tool evidence trace` commands.
 
 ### Replaying the frozen experiment
 
@@ -260,19 +259,24 @@ Run from the repository root with the retained local artifacts restored. These
 commands require `monk-baseline`, the `candidate-accepted` binaries, the pinned
 Bash/Fish bootstrap, `evidence/frozen-arithmetic.json`, and its three referenced
 `arithmetic-*.bash` inputs at their recorded paths. They also require the
-unchanged original fixture files and `docs/evidence/bakeoff-2026-09-09.json`.
+the original fixture bytes and `docs/evidence/bakeoff-2026-09-09.json`.
 The local baseline binary, baseline source archive and experiment inputs are
 **not packaged binaries or fixtures supplied by a normal source install**.
 Restore them from the retained experiment to reproduce the recorded identities.
 A rebuild of `baseline-source.tar.gz` is a newly identified baseline; never
 substitute the current translator for the baseline.
 
-Check the executable and collector hashes against the evidence snapshot before
-running. The exact collector copies and hashes are retained in
-`evidence/frozen-collectors/`. The commands below use the corresponding scripts
-in this checkout. Use the recorded repository cwd for an exact replay; a
-relocated experiment needs its own provenance. The collectors check input and
+Check executable and input hashes against the evidence snapshot before
+running. The original collector copies and hashes are retained in
+`evidence/frozen-collectors/`. The commands below use the Haskell replacements
+and produce a newly identified run with the same frozen inputs and cohort.
+A relocated experiment needs its own provenance. The collectors check input and
 baseline hashes and refuse to overwrite their output directories.
+The frozen `background-jobs.bash` bytes are retained at
+`docs/evidence/frozen95/background-jobs.bash`; the active integration fixture
+uses `sh` so development checks need no Python runtime. During a historical
+replay, `monk-tool` supplies an exact-command Haskell adapter for that one
+archived `python3 -c` probe and records its executable hash in the new report.
 
 ```bash
 task_root=.superpowers/sdd/2026-09-10-native-runtime-coverage
@@ -288,13 +292,13 @@ replay_dir=$(mktemp -d "$task_root/evidence/replay-XXXXXXXX")
 cp "$task_root/evidence/frozen-arithmetic.json" "$replay_dir/"
 
 # Freeze baseline outputs and the original 95 plus three extra arithmetic inputs.
-python3 scripts/native-runtime-evidence.py freeze \
+cabal run monk-tool -- evidence native freeze \
   --out "$replay_dir" --baseline "$baseline_monk" \
   --bash "$runtime_tools/bash" --fish "$runtime_tools/fish"
 
 # Wait until build jobs are idle. This collects both coverage contracts,
 # separate initial observations, three warmups and twenty alternating samples.
-python3 scripts/native-runtime-evidence.py measure \
+cabal run monk-tool -- evidence native measure \
   --out "$replay_dir" --baseline "$baseline_monk" \
   --candidate "$candidate_monk" --runtime "$candidate_runtime" \
   --bash "$runtime_tools/bash" --fish "$runtime_tools/fish" \
@@ -302,15 +306,15 @@ python3 scripts/native-runtime-evidence.py measure \
 
 # Run only after the preceding command finishes: fresh Babelfish comparisons
 # in both scopes, with its common-16 timing collected in a separate serial pass.
-python3 scripts/babelfish-runtime-evidence.py \
+cabal run monk-tool -- evidence babelfish \
   --out "$replay_dir" --babelfish "$babelfish_binary" \
   --bash "$runtime_tools/bash" --fish "$runtime_tools/fish" \
   --time-common16 --run-name babelfish-final
 
 # Untimed tracing follows the performance runs; these are observed syscalls.
-python3 scripts/trace-runtime-evidence.py \
+cabal run monk-tool -- evidence trace \
   --out "$replay_dir" --fish "$runtime_tools/fish" --variant baseline
-python3 scripts/trace-runtime-evidence.py \
+cabal run monk-tool -- evidence trace \
   --out "$replay_dir" --fish "$runtime_tools/fish" --variant candidate \
   --candidate-dir "$replay_dir/measurement"
 ```

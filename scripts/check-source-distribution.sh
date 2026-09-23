@@ -23,7 +23,7 @@ tar -xzf "$work_directory/monk-0.4.0.tar.gz" -C "$work_directory"
   printf 'packages: .\n' > cabal.project
   cabal check
   cabal "${cabal_options[@]}" build all --builddir="$work_directory/unpacked-build" --enable-tests --enable-benchmarks "${build_options[@]}"
-  cabal "${cabal_options[@]}" install exe:monk exe:monk-runtime --builddir="$work_directory/unpacked-build" --installdir="$work_directory/bin" --install-method=copy "${build_options[@]}"
+  cabal "${cabal_options[@]}" install exe:monk exe:monk-runtime exe:monk-tool --builddir="$work_directory/unpacked-build" --installdir="$work_directory/bin" --install-method=copy "${build_options[@]}"
   export PATH="$work_directory/bin:$PATH"
   printf '%s\n' "printf '%s:%s\\n' 'éλ' \"\$1\"; set -- '' 'two words'; printf '<%s>\\n' \"\$@\"" > 'smoke-éλ.bash'
   printf '%s\n' 'x=value; echo "$x"' >> 'smoke-éλ.bash'
@@ -35,6 +35,8 @@ tar -xzf "$work_directory/monk-0.4.0.tar.gz" -C "$work_directory"
   cmp bash.stdout combined.stdout
   cmp bash.stdout managed.stdout
   "$work_directory/bin/monk" --help > cli-help.txt
+  "$work_directory/bin/monk-tool" --help > tooling-help.txt
+  "$work_directory/bin/monk-tool" profile > tooling-profile.json
   "$work_directory/bin/monk-runtime" --describe > native-runtime.txt
 ) > "$work_directory/verification.log" 2>&1
 printf '%s\n' "$work_directory" > "$artifact_root/latest-verification.txt"

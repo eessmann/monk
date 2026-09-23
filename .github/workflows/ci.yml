@@ -33,7 +33,7 @@ jobs:
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
     - name: Install locked standalone devenv
       run: |
-        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        devenv_nixpkgs_rev=$(nix eval --impure --raw --expr 'let lock = builtins.fromJSON (builtins.readFile ./devenv.lock); in (builtins.getAttr (lock.nodes.root.inputs."nixpkgs-tools") lock.nodes).locked.rev')
         nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - run: devenv shell -- monk-quality
 
@@ -55,7 +55,7 @@ jobs:
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
     - name: Install locked standalone devenv
       run: |
-        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        devenv_nixpkgs_rev=$(nix eval --impure --raw --expr 'let lock = builtins.fromJSON (builtins.readFile ./devenv.lock); in (builtins.getAttr (lock.nodes.root.inputs."nixpkgs-tools") lock.nodes).locked.rev')
         nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - name: Identify the locked execution profile
       run: |
@@ -70,7 +70,8 @@ jobs:
           uname -a
           sha256sum devenv.lock cabal.project
         } > artifacts/runtime-evidence.txt
-        python3 scripts/reference-runtime-profile.py > artifacts/reference-profile.json
+        cabal build exe:monk-tool
+        "$(cabal list-bin exe:monk-tool)" evidence profile > artifacts/reference-profile.json
         cabal build all --dry-run --offline
         SCRIPT
     - name: Build, integrate, and check native protocol/publication/API boundaries
@@ -121,57 +122,48 @@ jobs:
           extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
     - name: Install locked standalone devenv
       run: |
-        devenv_nixpkgs_rev=$(python3 -c 'import json; lock=json.load(open("devenv.lock")); print(lock["nodes"][lock["nodes"][lock["root"]]["inputs"]["nixpkgs-tools"]]["locked"]["rev"])')
+        devenv_nixpkgs_rev=$(nix eval --impure --raw --expr 'let lock = builtins.fromJSON (builtins.readFile ./devenv.lock); in (builtins.getAttr (lock.nodes.root.inputs."nixpkgs-tools") lock.nodes).locked.rev')
         nix profile add "github:NixOS/nixpkgs/$devenv_nixpkgs_rev#devenv"
     - name: Inspect the release build plan and cache availability
       run: |
         mkdir -p artifacts
         devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.drvPath" > artifacts/package-derivation.json
-        package_drv=$(python3 -c 'import json; print(next(iter(json.load(open("artifacts/package-derivation.json")).values())))')
+        package_drv=$(nix eval --impure --raw --expr 'builtins.head (builtins.attrValues (builtins.fromJSON (builtins.readFile ./artifacts/package-derivation.json)))')
         nix build --dry-run --no-link "$package_drv^out" 2>&1 | tee artifacts/package-build-plan.txt
     - name: Build native artifact and enforce architecture/linkage checks
       run: |
-        devenv build "outputs.runtime.$MONK_PACKAGE_TARGET" outputs.reference.bash outputs.reference.fish outputs.testPrograms.python outputs.testPrograms.coreutils
-        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.outPath" outputs.reference.bash.outPath outputs.reference.fish.outPath outputs.testPrograms.python.outPath outputs.testPrograms.coreutils.outPath > artifacts/package-paths.json
-        python3 - <<'PY'
-        import json, os, pathlib, shutil
-        paths = json.load(open('artifacts/package-paths.json'))
-        target = os.environ['MONK_PACKAGE_TARGET']
-        shutil.copytree(paths[f'outputs.runtime.{target}.outPath'], 'artifacts/runtime')
-        reference = pathlib.Path('artifacts/reference-bin')
-        reference.mkdir()
-        for command in ['bash', 'fish']:
-            (reference / command).symlink_to(pathlib.Path(paths[f'outputs.reference.{command}.outPath']) / 'bin' / command)
-        for command, package in [('python3', 'python'), ('sha256sum', 'coreutils')]:
-            (reference / command).symlink_to(pathlib.Path(paths[f'outputs.testPrograms.{package}.outPath']) / 'bin' / command)
-        PY
+        devenv build "outputs.runtime.$MONK_PACKAGE_TARGET" outputs.reference.bash outputs.reference.fish outputs.testPrograms.coreutils outputs.tooling
+        devenv eval "outputs.runtime.$MONK_PACKAGE_TARGET.outPath" outputs.reference.bash.outPath outputs.reference.fish.outPath outputs.testPrograms.coreutils.outPath outputs.tooling.outPath > artifacts/package-paths.json
+        output_path() {
+          MONK_OUTPUT_KEY="$1" nix eval --impure --raw --expr 'let paths = builtins.fromJSON (builtins.readFile ./artifacts/package-paths.json); in builtins.getAttr (builtins.getEnv "MONK_OUTPUT_KEY") paths'
+        }
+        cp -R "$(output_path "outputs.runtime.$MONK_PACKAGE_TARGET.outPath")" artifacts/runtime
+        mkdir -p artifacts/reference-bin
+        ln -s "$(output_path outputs.reference.bash.outPath)/bin/bash" artifacts/reference-bin/bash
+        ln -s "$(output_path outputs.reference.fish.outPath)/bin/fish" artifacts/reference-bin/fish
+        ln -s "$(output_path outputs.testPrograms.coreutils.outPath)/bin/sha256sum" artifacts/reference-bin/sha256sum
+        ln -s "$(output_path outputs.tooling.outPath)/bin/monk-tool" artifacts/reference-bin/monk-tool
     - name: Execute copied artifact outside the build shell
       run: |
         runtime="$PWD/artifacts/runtime/bin/monk-runtime"
         reference_path="$PWD/artifacts/reference-bin:/usr/bin:/bin"
-        env -i PATH="$reference_path" LC_ALL=C LANG=C "$runtime" --describe > artifacts/runtime-description.txt
-        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/protocol.py "$runtime"
-        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/portable.py "$runtime"
-        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/printf.py "$runtime"
-        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/expansion.py "$runtime"
-        env -i PATH="$reference_path" LC_ALL=C LANG=C python3 runtime-test/session.py "$runtime"
-        for suite in descriptors read process-substitution pattern-parts exec signals direct-output native-launcher; do
-          env -i PATH="$reference_path" LC_ALL=C LANG=C python3 "runtime-test/$suite.py" "$runtime"
+        case "$(uname -s)" in Darwin) temp_root=/private/tmp;; *) temp_root=/tmp;; esac
+        env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" "$runtime" --describe > artifacts/runtime-description.txt
+        mkdir -p artifacts/native-checks
+        for suite in protocol portable printf expansion session descriptors read process-substitution pattern-parts exec signals direct-output native-launcher; do
+          env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" \
+            artifacts/reference-bin/monk-tool runtime check --suite "$suite" --runtime "$runtime" \
+              --report "artifacts/native-checks/$suite.json"
         done
-        env -i PATH="$reference_path" LC_ALL=C LANG=C bash test/native/child-transport.sh "$runtime"
-        python3 - <<'PY'
-        import json, pathlib
-        evidence = pathlib.Path('artifacts/runtime/share/monk/package-evidence.json')
-        report = json.loads(evidence.read_text())
-        description = pathlib.Path('artifacts/runtime-description.txt').read_text().splitlines()
-        assert len(description) == 3 and description[0] == f"monk-runtime {report['abi']} {report['profile']}"
-        assert description[2] == 'target ' + report['target']
-        report['runtime_description_verified'] = True
-        report['runtime_capabilities'] = description[1].split()
-        report['execution_verified'] = True
-        report['execution_checks'] = ['describe', 'byte-protocol', 'portable-descriptors', 'printf', 'expansion', 'session', 'descriptors', 'read', 'process-substitution', 'pattern-parts', 'exec', 'signals', 'direct-output', 'native-launcher', 'child-transport']
-        pathlib.Path('artifacts/native-execution.json').write_text(json.dumps(report, indent=2) + '\n')
-        PY
+        env -i PATH="$reference_path" LC_ALL=C LANG=C TMPDIR="$temp_root" \
+          artifacts/reference-bin/monk-tool runtime check --suite child-transport --runtime "$runtime" \
+            --report artifacts/native-checks/child-transport.json
+        artifacts/reference-bin/monk-tool runtime attest \
+          --package-report artifacts/runtime/share/monk/package-evidence.json \
+          --binary "$runtime" \
+          --description-file artifacts/runtime-description.txt \
+          --check-receipts artifacts/native-checks \
+          --output artifacts/native-execution.json
     - uses: actions/upload-artifact@v4
       if: always()
       with:

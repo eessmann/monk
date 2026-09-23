@@ -57,7 +57,7 @@ export PATH="$PWD/artifacts/runtime/bin:$PATH"
 export MONK_INTEGRATION=1 LC_ALL=C LANG=C
 cabal build all -fdevelopment --enable-tests --enable-benchmarks
 cabal test all -fdevelopment --test-show-details=direct
-cabal exec -- python3 scripts/check-public-boundaries.py --report artifacts/boundaries.json
+cabal run monk-tool -- boundaries check --report artifacts/boundaries.json
 cabal test monk-test -fdevelopment --test-options="-p '/procsub-output/ || /Planned child isolation/'"
 bash scripts/generate-parity-manifest.sh "$(cabal list-bin exe:monk)" artifacts/parity.tsv
 hlint .

@@ -103,10 +103,10 @@ Install the declared Bash/Fish profile, select a supported GHC, and run:
 cabal build all -fdevelopment --enable-tests --enable-benchmarks
 export PATH="$(dirname "$(cabal list-bin exe:monk-runtime)"):$PATH"
 MONK_INTEGRATION=1 LC_ALL=C LANG=C cabal test all -fdevelopment --test-options=-j1
-python3 runtime-test/protocol.py "$(cabal list-bin exe:monk-runtime)"
+cabal run monk-tool -- runtime check --suite protocol --runtime "$(cabal list-bin exe:monk-runtime)"
 bash test/native/child-transport.sh "$(cabal list-bin exe:monk-runtime)"
-MONK_NATIVE_TEST_BINARY="$(cabal list-bin exe:monk)" MONK_NATIVE_RUNTIME="$(cabal list-bin exe:monk-runtime)" python3 scripts/test_native_publication.py
-cabal exec -- python3 scripts/check-public-boundaries.py
+cabal test publication-test monk-tool-test
+cabal run monk-tool -- boundaries check
 cabal haddock all -fdevelopment --disable-documentation
 MONK_GHC=ghc-9.12.2 bash scripts/check-source-distribution.sh artifacts/sdist-9.12
 ```

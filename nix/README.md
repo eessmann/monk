@@ -40,7 +40,7 @@ of the upstream nixpkgs `bashNonInteractive` 5.3p9 package (Bash 5.3.9 at runtim
 Fish 4.6.0. The moving lane uses Fish from `nixpkgs-tools`, still fixed by the
 lock until an intentional `devenv update nixpkgs-tools` revision change.
 Record the exact binaries and locale-sensitive Bash build behavior with
-`python3 scripts/reference-runtime-profile.py`. In particular, iconv configuration
+`cabal run monk-tool -- evidence profile`. In particular, iconv configuration
 can change invalid Unicode escape behavior even at the same Bash version.
 Use targeted updates such as `devenv update haskell-nix`, `devenv update nixpkgs`,
 or `devenv update nixpkgs-tools`. A bare `devenv update` also advances
@@ -71,7 +71,7 @@ uses static Haskell libraries and must pass the Apple-system-only dynamic
 library check. Every output contains `bin/monk-runtime` and
 `share/monk/package-evidence.json`. The build fails if the artifact has the
 wrong architecture, a Linux interpreter/DT_NEEDED entry, or a non-Apple Darwin
-dynamic dependency. `scripts/verify-runtime-package.py` can repeat inspection
+dynamic dependency. `cabal run monk-tool -- runtime inspect --binary FILE --target TARGET` can repeat inspection
 on a copied artifact. Inspection deliberately records `execution_verified:
 false`: successful linking is not evidence of native execution outside Nix.
 Run the native protocol/transport tests on each copied artifact before making
