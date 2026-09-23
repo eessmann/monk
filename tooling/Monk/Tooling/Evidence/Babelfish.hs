@@ -136,5 +136,5 @@ asString _ = Left "expected argument string"
 
 sourceFor :: FilePath -> FilePath -> FilePath
 sourceFor cwd name
-  | name == "test/fixtures/integration/background-jobs.bash" = cwd </> "docs/evidence/frozen95/background-jobs.bash"
+  | name == "test/fixtures/integration/background-jobs.bash" = cwd </> "test/evidence/frozen95/background-jobs.bash"
   | otherwise = cwd </> name

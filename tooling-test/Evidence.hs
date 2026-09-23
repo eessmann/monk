@@ -11,8 +11,8 @@ import Data.Text qualified as T
 import Monk.Tooling.Evidence.Babelfish (common16Timing)
 import Monk.Tooling.Evidence.Common (Observation (..), arrayField, base64, compareEffects, compareObservations, copyTree, field, readJson, runObservation, snapshot, unbase64)
 import Monk.Tooling.Evidence.Comparison (runComparison)
-import Monk.Tooling.Evidence.Native (nativeExecute, nativeSame, validateCommon16, validateHistoric95)
-import Monk.Tooling.Evidence.Performance (aggregate)
+import Monk.Tooling.Evidence.Native (comparisonCorpusPath, nativeExecute, nativeSame, readComparisonCorpus, validateCommon16, validateHistoric95)
+import Monk.Tooling.Evidence.Performance (aggregate, freezePerformance)
 import Monk.Tooling.Evidence.Portable (freezePortable, insertFields, portableExecute, portableTranslate, strengthenedCases)
 import Monk.Tooling.Evidence.Profile (runProfile)
 import Monk.Tooling.Evidence.Trace (parseTrace, runTrace)
@@ -110,43 +110,64 @@ tests =
             length values @?= 104
             length [() | row <- toList values, field "cohort" row == Right (String "strengthened")] @?= 5
           _ -> assertBool "missing fixture rows" False,
-      testCase "frozen95 rejects changed metadata and incomplete common16" $ do
+      testCase "frozen95 rejects changed identities, metadata, input and order" $ do
         repo <- getCurrentDirectory
-        old <- readJson (repo <> "/docs/evidence/bakeoff-2026-09-09.json")
-        historical <- either fail pure (arrayField "fixtures" old)
+        corpus <- readComparisonCorpus repo
+        historical <- either fail pure (arrayField "historic95" corpus)
+        common <- either fail pure (arrayField "common16" corpus)
         validateHistoric95 repo historical
-        case historical of
-          initialRow : rest -> do
-            let changed = insertFields initialRow ["metadata" .= object ["fixtureMetaArgs" .= (["changed"] :: [Text])]] : rest
-            outcome <- try (validateHistoric95 repo changed) :: IO (Either SomeException ())
-            assertBool "changed historic metadata accepted" (either (const True) (const False) outcome)
-          [] -> assertBool "missing historical rows" False
-        durable <- readJson (repo <> "/docs/evidence/portable-exact-cohorts-2026-09-22.json")
-        performance <- either fail pure (arrayField "performance_cohorts" durable)
-        let common = [name | row <- performance, field "performance_cohort" row == Right (String "common16"), Right name <- [field "fixture" row]]
         validateCommon16 repo common
-        incomplete <- try (validateCommon16 repo (take 15 common)) :: IO (Either SomeException ())
-        assertBool "short common16 cohort accepted" (either (const True) (const False) incomplete),
-      testCase "portable freeze rejects altered historic execution metadata" $ withScratch $ \root -> do
+        case historical of
+          initialRow : nextRow : rest -> do
+            let variants =
+                  [ insertFields initialRow ["metadata" .= object ["fixtureMetaArgs" .= (["changed"] :: [Text])]] : nextRow : rest,
+                    insertFields initialRow ["input_sha256" .= ("changed" :: Text)] : nextRow : rest,
+                    insertFields initialRow ["stdin_base64" .= ("Y2hhbmdlZA==" :: Text)] : nextRow : rest,
+                    nextRow : initialRow : rest,
+                    initialRow : initialRow : rest,
+                    nextRow : rest
+                  ]
+            forM_ variants $ \changed -> do
+              outcome <- try (validateHistoric95 repo changed) :: IO (Either SomeException ())
+              assertBool "changed historic corpus accepted" (either (const True) (const False) outcome)
+          _ -> assertBool "missing historical rows" False
+        forM_ [take 15 common, reverse common, take 1 common <> take 15 common] $ \changed -> do
+          outcome <- try (validateCommon16 repo changed) :: IO (Either SomeException ())
+          assertBool "changed common16 cohort accepted" (either (const True) (const False) outcome),
+      testCase "portable freeze rejects altered canonical execution metadata" $ withScratch $ \root -> do
         repo <- getCurrentDirectory
-        forM_ ["test/fixtures", "benchmark/fixtures"] $ \folder -> do
+        forM_ ["test/fixtures", "benchmark/fixtures", "test/evidence"] $ \folder -> do
           createDirectoryIfMissing True (root <> "/" <> takeWhile (/= '/') folder)
           copyTree (repo <> "/" <> folder) (root <> "/" <> folder)
-        createDirectoryIfMissing True (root <> "/docs/evidence/frozen95")
-        copyFile (repo <> "/docs/evidence/portable-exact-cohorts-2026-09-22.json") (root <> "/docs/evidence/portable-exact-cohorts-2026-09-22.json")
-        copyFile (repo <> "/docs/evidence/frozen95/background-jobs.bash") (root <> "/docs/evidence/frozen95/background-jobs.bash")
-        original <- readJson (repo <> "/docs/evidence/bakeoff-2026-09-09.json")
-        historical <- either fail pure (arrayField "fixtures" original)
+        original <- readComparisonCorpus repo
+        historical <- either fail pure (arrayField "historic95" original)
         case historical of
           initialRow : rest -> do
             let changed = insertFields initialRow ["metadata" .= object ["fixtureMetaArgs" .= (["changed"] :: [Text])]] : rest
-                altered = insertFields original ["fixtures" .= changed]
-            BL.writeFile (root <> "/docs/evidence/bakeoff-2026-09-09.json") (encode altered)
+                altered = insertFields original ["historic95" .= changed]
+            BL.writeFile (root <> "/" <> comparisonCorpusPath) (encode altered)
           [] -> fail "missing historic fixtures"
         outcome <- try (freezePortable root (root <> "/frozen") "default") :: IO (Either SomeException Value)
-        assertBool "portable freeze accepted changed historic metadata" (either (const True) (const False) outcome)
+        assertBool "portable freeze accepted changed canonical metadata" (either (const True) (const False) outcome)
         reportExists <- doesFileExist (root <> "/frozen/manifest.json")
         assertBool "altered cohort published a manifest" (not reportExists),
+      testCase "comparison and performance freezes need no retired evidence reports" $ withScratch $ \root -> do
+        repo <- getCurrentDirectory
+        forM_ ["test/fixtures", "benchmark/fixtures", "test/evidence"] $ \folder -> do
+          createDirectoryIfMissing True (root <> "/" <> takeWhile (/= '/') folder)
+          copyTree (repo <> "/" <> folder) (root <> "/" <> folder)
+        _ <- freezePortable root (root <> "/frozen") "default"
+        manifest <- readJson (root <> "/frozen/manifest.json")
+        field "schema" manifest @?= Right (Number 2)
+        source <- B.readFile (root <> "/test/evidence/frozen95/background-jobs.bash")
+        frozenSource <- B.readFile (root <> "/frozen/inputs/test/fixtures/integration/background-jobs.bash")
+        frozenSource @?= source
+        freezePerformance (root <> "/frozen") (root <> "/performance")
+        performance <- readJson (root <> "/performance/manifest.json")
+        fixtures <- either fail pure (arrayField "fixtures" performance)
+        let arithmetic = [row | row <- fixtures, field "performance_cohort" row == Right (String "arithmetic3")]
+        length arithmetic @?= 3
+        forM_ arithmetic $ \row -> assertBool "missing arithmetic source accepted" (isRight (field "unavailable_reason" row)),
       testCase "Babelfish timing requires every common fixture and twenty numeric samples" $ do
         let common = [String (T.pack ("fixture-" <> show number)) | number <- [1 :: Int .. 16]]
             row name samples = object ["fixture" .= name, "modes" .= object ["default" .= object ["samples_ns" .= samples]]]

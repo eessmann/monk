@@ -28,7 +28,7 @@ import Data.Time.Format (defaultTimeLocale, formatTime)
 import Monk.Runtime.Digest (sha256)
 import Monk.Tooling.Evidence.Common (Observation (..), arrayField, base64, cleanEnvironment, compareEffects, copyTree, digestFile, field, hostPlatform, observationRecord, provenance, runObservation, snapshot, textField, unbase64, writeJson)
 import Monk.Tooling.Evidence.Freeze (freezeWithShake)
-import Monk.Tooling.Evidence.Native (validateCommon16, validateHistoric95)
+import Monk.Tooling.Evidence.Native (comparisonCorpusPath, readComparisonCorpus, validateCommon16, validateHistoric95)
 import Monk.Tooling.Evidence.Profile (runProfile)
 import System.Directory (canonicalizePath, copyFileWithMetadata, createDirectory, createDirectoryIfMissing, doesDirectoryExist, doesFileExist, doesPathExist, removeDirectoryRecursive)
 import System.Environment (getExecutablePath)
@@ -53,7 +53,7 @@ freezePortable repo output contract = do
   freezeWithShake
     (output </> "manifest.json")
     [(repo, ["test/fixtures//*", "benchmark/fixtures//*"])]
-    [repo </> "docs/evidence/bakeoff-2026-09-09.json", repo </> "docs/evidence/portable-exact-cohorts-2026-09-22.json", repo </> "docs/evidence/frozen95/background-jobs.bash"]
+    [repo </> comparisonCorpusPath, repo </> "test/evidence/frozen95/background-jobs.bash"]
     (void (freezePortableIO repo output contract))
   pure $ object ["historic" .= (95 :: Int), "effects" .= (4 :: Int), "strengthened" .= (5 :: Int)]
 
@@ -64,16 +64,16 @@ freezePortableIO repo output contract = do
   forM_ ["test/fixtures", "benchmark/fixtures"] $ \folder -> do
     createDirectoryIfMissing True (takeDirectory (inputs </> folder))
     copyTree (repo </> folder) (inputs </> folder)
-  historicalBytes <- B.readFile (repo </> "docs/evidence/bakeoff-2026-09-09.json")
-  previous <- either fail pure (eitherDecodeStrict' historicalBytes)
-  oldRows <- require (arrayField "fixtures" previous)
+  corpus <- readComparisonCorpus repo
+  corpusHash <- digestFile (repo </> comparisonCorpusPath)
+  oldRows <- require (arrayField "historic95" corpus)
   validateHistoric95 repo oldRows
   historical <- forM oldRows $ \fixture -> do
     name <- T.unpack <$> require (textField "fixture" fixture)
     expected <- require (textField "input_sha256" fixture)
     initial <- digestFile (inputs </> name)
     when (expected /= T.pack initial && name == "test/fixtures/integration/background-jobs.bash") $ do
-      let archived = repo </> "docs/evidence/frozen95/background-jobs.bash"
+      let archived = repo </> "test/evidence/frozen95/background-jobs.bash"
       archivedHash <- digestFile archived
       unless (expected == T.pack archivedHash) $ fail "Archived frozen95 background-jobs fixture hash differs"
       copyFileWithMetadata archived (inputs </> name)
@@ -116,17 +116,19 @@ freezePortableIO repo output contract = do
           "metadata" .= object ["fixtureMetaArgs" .= ([] :: [Text]), "fixtureMetaRecursive" .= False, "fixtureMetaHasStdin" .= not (B.null input)]
         ]
   tree <- snapshot inputs
-  let common = [name | row <- oldRows, let name = getValue "fixture" row, all (\tool -> (field "tools" row >>= field tool >>= field "status") == Right (String "match")) ["monk", "babelfish"]]
-      manifest =
+  common <- require (arrayField "common16" corpus)
+  arithmetic <- require (arrayField "arithmetic3" corpus)
+  let manifest =
         object
-          [ "schema" .= (1 :: Int),
+          [ "schema" .= (2 :: Int),
             "directory_contract" .= object ["lane" .= contract, "applies_to" .= (["current", "candidate"] :: [Text])],
             "candidate_entry" .= candidateEntry,
             "historic_denominator" .= (95 :: Int),
-            "historical_report_sha256" .= C.unpack (sha256 historicalBytes),
+            "corpus_sha256" .= corpusHash,
             "fixtures" .= (historical <> effects <> controls),
             "input_tree" .= tree,
-            "common16" .= common
+            "common16" .= common,
+            "arithmetic3" .= arithmetic
           ]
   validateCommon16 repo common
   writeJson (output </> "manifest.json") manifest
@@ -233,7 +235,7 @@ measurePortable options = do
   timestamp <- formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Q+00:00" <$> getCurrentTime
   let reportBase rows totals =
         object
-          [ "schema" .= (1 :: Int),
+          [ "schema" .= (2 :: Int),
             "stage" .= stage options,
             "timestamp" .= timestamp,
             "platform" .= platform,
@@ -249,9 +251,8 @@ measurePortable options = do
             "tools" .= object [fromString name .= value | (name, value) <- tools],
             "current_runtime_probe" .= currentProbeRecord,
             "runtimes" .= object [fromString name .= value | (name, value) <- runtimes],
-            "source_commits" .= object ["original" .= ("2bc0e72bcfaa6d90615946667a573093aed2262e" :: Text), "current" .= ("c2bd371b10f041f921acda7aeab85363df393661" :: Text)],
             "historical_python_adapter" .= object ["path" .= (providers </> "python3"), "sha256" .= adapterHash, "scope" .= ("Frozen background-jobs.bash python3 -c invocation only; stdin consumed, exit 7." :: Text)],
-            "performance" .= object ["status" .= ("unverified" :: Text), "reason" .= ("Historical native baseline does not support Darwin; Linux execution deferred by user. No historical measurements reused as fresh results." :: Text)],
+            "performance" .= object ["status" .= ("unverified" :: Text), "reason" .= ("This collector records correctness observations, not timing acceptance." :: Text)],
             "scope" .= (["raw stdout", "raw stderr", "exit status", "separate filesystem bytes and modes", "separate caller observations", "separate handshake process events"] :: [Text]),
             "fixtures" .= rows,
             "totals" .= totals

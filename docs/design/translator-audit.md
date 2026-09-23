@@ -1,7 +1,8 @@
 # Translator semantic audit
 
-Refreshed 2026-09-23 for the typed Rust runtime replacement; admission is unchanged. This document replaces the
-older blanket exactness claims based on the 339-test suite.
+Refreshed 2026-09-23 for the typed Rust runtime. This document describes the
+conditional admission envelope; test results and platform evidence belong in
+the [verification report](rust-runtime-verification.md).
 
 ## Contract and evidence
 
@@ -27,17 +28,11 @@ prevent invalid resource reuse but do not establish Bash equivalence by
 themselves: byte, process, signal, publication and packaged execution evidence
 remain independent requirements. See [Rust migration verification](rust-runtime-verification.md).
 
-## Reproduced main defects
+## Semantic regression responsibilities
 
-The [2026-09-09 Babelfish bake-off](../babelfish-comparison.md) adds standalone
-execution evidence: all 38 admitted translations among 95 selected fixtures
-match Bash stdout/stderr bytes and status; 57 reject. This bounded comparison
-does not test filesystem or caller-state equivalence and changes no admission
-classification.
-
-All eleven programs below were accepted by main in strict mode without a
-translation diagnostic. Their new regression group originally failed eleven
-of fourteen tests; three useful controls passed.
+The fixtures below preserve concrete failure modes that the translator must
+handle or reject. A passing aggregate test count does not replace these
+behavioral obligations.
 
 | Fixture | Defect | Required closure |
 | --- | --- | --- |
@@ -53,9 +48,8 @@ of fourteen tests; three useful controls passed.
 | `array-mixed` | Mixed dense/sparse array initialization silently lost elements. | Reject until sparse storage is implemented. |
 | `eval-bash-syntax` | Bash program text was interpreted as Fish. | Reject arbitrary eval without executable output. |
 
-The fixture directory and test sources are the durable counterexamples. The
-current implementation pass/fail counts belong in the roadmap and final-tree
-evidence; the old main result is a historical baseline.
+The source programs in `test/fixtures/semantic/` and their test cases retain
+these counterexamples independently of old comparison reports.
 
 ## Current admission responsibilities
 
@@ -81,7 +75,7 @@ These are the implemented conditional admission envelopes. Consult
 [the architecture](architecture.md) for ownership. Do not interpret this table
 as an unconditional promise about arbitrary Bash syntax or caller state.
 
-## Stable directory slice (2026-09-10)
+## Stable directory contract
 
 Standalone directory behavior requires `--directory-contract stable`.
 Sourceable directory behavior requires explicit version 2 cwd/PWD/OLDPWD/stack
@@ -90,37 +84,23 @@ empty CDPATH and logical ancestry that external commands cannot rename or
 invalidate. Direct PWD mutation, unknown directory paths, implicit HOME `cd`,
 physical `cd` options and stack rotations remain rejected.
 
-Local evidence adds the three existing fixtures `cd-tmp`, `pwd-cd` and
-`pushd-popd`: all were rejected by the frozen baseline and now match Bash
-stdout/stderr/status. A focused 142-case directory run passed with integrations
-enabled and one test thread. It covers both entry modes, actual missing/file
-errors, failed push/pop state, export preservation, spaces, symlink logical and
-physical pwd, `cd -` after a successful edge, isolated child/substitution stacks,
-a preexisting caller stack, and relative-source success/failure cwd edges.
-The run also covers the independent permission matrix, exported functions after
-entry return, and executed inline/separate source argv/return boundaries. The imported-cwd/deep-path cases and updated import/source fixture also pass
-in the final 725-test compiler/runtime matrix; see the separate verification
-record for release evidence. The detailed ledger is
-`.superpowers/sdd/2026-09-10-native-runtime-coverage/directory-report.md`.
+Directory tests cover both entry modes, missing/file errors, failed push/pop
+state, export preservation, spaces, symlink logical and physical paths,
+`cd -`, isolated child/substitution stacks, preexisting caller stacks and
+relative-source cwd edges. Caller permissions and exported functions remain
+separate obligations.
 
-## Native common-syntax verification slice (2026-09-10)
+## Lowering and optimization invariants
 
-The seven historical targets `pyramid-left`, `pyramid-right`,
-`syntax-dollar-single-quote`, `syntax-dollar-bracket-arithmetic`,
-`semver-normalize`, `neofetch-mini`, and `syntax-brace-expansion` now compare
-exactly with Bash in stdout bytes, stderr bytes and exit status. They were all
-explicit baseline rejections. They remain members of the original fixture
-inventory; new interaction tests do not alter its denominator.
+`Unit.PlannedCommonCoverage` exercises standalone and sourceable entry,
+arithmetic-for failures and loop ownership, invalid-byte/NUL ANSI quotes, brace
+effect duplication, quoted lazy operands, scalar append ordering, positional
+alternates, fixed-arity tests and literal-source argv ownership. These tests
+exercise the admitted cases; they do not remove the exclusions above.
 
-`Unit.PlannedCommonCoverage` exercises both standalone and sourceable entry,
-including arithmetic-for header failures and nested continue ownership,
-invalid-byte/NUL ANSI quotes, brace effect duplication, quoted lazy operands,
-scalar append ordering, positional alternates, fixed-arity tests, and literal
-source argv ownership. At that historical checkpoint, unsupported arrays, computed operands and inherited
-source argv writes retain explicit rejections.
-
-Materialization shares native signed-integer operations for successful constant
-folding and batches only total pure arithmetic islands. Failing arithmetic,
+Materialization uses the retained Haskell integer specification for successful
+constant folding and batches only total pure arithmetic islands for the Rust
+runtime. Failing arithmetic,
 lazy alternatives and writes stay in distinct evaluation regions. Helper
 closure follows structural command identities. Child snapshots are pruned
 only when the closed child has no transitive external environment consumer;
@@ -160,8 +140,7 @@ partial updates into unconditional facts. Literal sources inherit caller argv
 when operand expansion produces zero fields; a quoted empty field still owns
 a one-argument frame. Transitive writes through inherited/unknown frames reject.
 
-
-## Portable exactness boundary (2026-09-22)
+## Process and inspection boundaries
 
 The current implementation has no general Bash interpreter fallback. Finite
 source/eval text and literal callbacks are parsed by ShellCheck during
@@ -171,21 +150,11 @@ which executable can provide it. The final compiler/runtime/package matrix and
 frozen fixture comparison remain separate evidence in the roadmap.
 
 Implementation shell-depth inspection is outside the execution profile, even
-when an external program hides the read. A concrete `SHLVL` observer produced
-different bytes under file-launched Bash and the generated program; it is an
-unsupported counterexample, not a match. The
-[inspection-boundary review](../../.superpowers/sdd/2026-09-22-portable-exact/inspection-boundary-review.md)
-records the launch-shape dependence. This exclusion does not waive ordinary
-exported environment preservation, user descriptor effects, explicit `$!`/wait
-behavior or process cleanup.
-
-Focused feature and regression evidence is recorded in the
-[frontend report](../../.superpowers/sdd/2026-09-22-portable-exact/input-traps-expansion-report.md)
-and [runtime report](../../.superpowers/sdd/2026-09-22-portable-exact/portable-runtime-report.md).
-They distinguish the diagnosed pre-exec runtime crash, its POSIX-spawn repair,
-canonical local verification, stale expectation updates and remaining platform
-gaps. Historical 2026-09-09 and 2026-09-10 counts above remain historical.
-
+when an external program hides the read. The profile preserves the concrete
+[SHLVL counterexample](execution-profile.md#shell-identity-inspection) and explains
+why an environment offset cannot establish general equivalence. This exclusion
+does not waive ordinary exported environment preservation, user descriptor
+effects, explicit `$!`/wait behavior or process cleanup.
 
 External exec failures are not waived by the dependency contract: removing a
 command or changing its execute permission during a script must retain the
@@ -195,15 +164,13 @@ policy under its process owner. OS binaries and shebang scripts are the external
 executable envelope; Bash's implicit ENOEXEC interpretation of arbitrary runtime
 text remains excluded by the no-dynamic-Bash-fallback boundary.
 
-
-Direct-output review found that Fish printf silently returned0 with initially
-closed stdout while Bash returned1 and a source write diagnostic, and returned1
-for a readerless pipe while Bash terminated by SIGPIPE. The bounded native
-write-builtin boundary corrects this admitted behavior; it is an explicit
+Fish printf can silently return 0 with initially closed stdout where Bash
+returns 1 and a source write diagnostic, and return 1 for a readerless pipe
+where Bash terminates by SIGPIPE. The bounded native write-builtin boundary
+corrects this admitted behavior; it is an explicit
 exception to the historical helper-free greeting optimization requirement.
 The stream contract is unchanged. DirectExecution may use this one writer
 helper without introducing a session owner or a runtime source interpreter.
-
 
 Canonical standalone execution now uses `monk-runtime --abi 2 launch FILE
 [ARGS...]` to record missing stdio before Fish replaces it with read/write

@@ -50,7 +50,9 @@ extra-source-files:  cabal.project
                      test/fixtures/*.tsv
                      test/compile-fail/*.hs
                      benchmark/fixtures/*.bash
-                     docs/evidence/frozen95/*.bash
+                     test/evidence/*.json
+                     test/evidence/*.md
+                     test/evidence/frozen95/*.bash
                      scripts/*.hs
                      scripts/*.sh
                      scripts/*.txt

@@ -2,8 +2,9 @@
 
 The 2026-09-23 migration replaces the runtime in Cargo while retaining the
 Haskell compiler and its pure integer specification. ABI 2, `bash53-i64`, operation
-spellings and admission boundaries remain unchanged. The isolated implementation
-starts from `9d0cf0d`; no publication, merge or remote Git operation is implied.
+spellings and admission boundaries remain unchanged. The implementation started
+from `9d0cf0d` and was merged locally into `main` as `b48bfdd`. The receipts
+below retain their original source and executable identities.
 
 ## Baseline and native conformance
 
@@ -19,9 +20,9 @@ portable, printf, process-substitution, read, session, signals,
 directory-signals and callback-diagnostics. The executable and its hash are
 frozen alongside logs under `artifacts/rust-runtime-clap/` (SHA-256
 `5174a6e287204bf63c71e14b7d6d97ef0017ac467a2e3dfe7cacf3b8529a27a0`).
-Earlier `rust-runtime-final/`, `rust-runtime-release/`,
-`rust-runtime-accepted/` and `rust-runtime-complete/` directories retain separately
-identified intermediate verification snapshots. These checks include
+The earlier `rust-runtime-final/` snapshot remains because the retained coverage
+receipt identifies its providers. Superseded intermediate runs have been purged.
+The final native checks include
 all eight standard-stream masks, shared descriptor offsets, high descriptors,
 removed/renamed cwd, repeated waits, background survival, real SIGPIPE and
 managed provider capture. The separate Haskell digest specification is retained
@@ -111,18 +112,26 @@ remain unverified. Nix derivation evaluation is not native execution. Native
 x86_64/aarch64 Linux and minimum-supported-macOS execution remain incomplete
 acceptance gates. The user prohibits use of ccs-ci; no Monk build, test or source
 transfer ran there. Historical translator/performance evidence remains historical and is
-not silently attributed to this runtime.
+not silently attributed to this runtime. Superseded pre-migration reports were
+removed; neutral corpus definitions now live under `test/evidence/`.
 
-The frozen historic 95-fixture comparison retains 74 default and 77 stable
-matches, with zero admitted mismatches or changed admission results. Its provider
-hash identifies the earlier release snapshot used for that comparison; the final
-cwd capability refinement, private native boundary, generated opcode use and
-CLI diagnostic correction have their own native conformance checks. The legacy
-collector's separate process-effect fixtures use an incompatible helper protocol,
-so neither their timeout nor their raw matching helper failures count as acceptance evidence. Current native process-substitution
-checks do exercise producer/consumer bytes, FIFO-controlled waits and a
-300,000-byte producer terminating with SIGPIPE. They do not replace an independent
-full-stream replay of those exact legacy fixtures.
+The retained migration coverage receipt identifies an earlier Rust release
+snapshot and preserves its original scope. A
+[fresh current comparison](../evidence/babelfish-comparison-2026-09-23.json)
+now binds the final runtime SHA `5174a6e2…` to a rebuilt current compiler and
+neutral corpus definitions: 74 default and 77 stable matches out of 95, with
+zero admitted mismatches. All Bash reference executions in that corpus complete.
+The [comparison page](../babelfish-comparison.md) explains the contract lanes and
+independent Babelfish results.
+
+The fresh collector's two additional process fixtures do not establish process
+acceptance. Both invoke an unproven positional command head that Monk correctly
+rejects; the Bash background-handshake worker also fails and times out. The
+older coverage receipt separately records incompatible legacy helpers. Neither
+matching helper errors nor rejections count as positive execution evidence.
+Current native process-substitution checks exercise producer/consumer bytes,
+FIFO-controlled waits and a 300,000-byte producer terminating with SIGPIPE; those
+remain separate evidence from the excluded comparison probes.
 
 Final build/package, source installation, coverage and performance receipts are
 recorded in `docs/evidence/rust-runtime-*-2026-09-23.json`. Performance compares

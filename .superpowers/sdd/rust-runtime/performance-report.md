@@ -37,6 +37,7 @@ ghc -O2 -threaded -Wall -Werror -package aeson -outputdir /private/tmp/monk-runt
 
 The reported final Clap run started only after the coordinator and build agent confirmed a quiet window and finished at 2026-09-23 12:43:49 UTC. Builds resumed only after completion. All 200 measured invocations (five workloads, two providers, 20 samples) passed byte/status equality.
 
-Earlier measurements for SHA `9b5cb364…` are preserved under `artifacts/rust-runtime-performance/prior-snapshot-measurements.json` and `prior-snapshot-report.md`; they are not included in this report. A partial attempt during that earlier measurement phase overlapped packaging and was discarded without writing a report. The intermediate `rust-runtime-performance-complete` workspace contains untimed preparation only and was never measured. The durable JSON now identifies only the final Clap SHA `5174a6e2…`.
+Superseded measurement attempts and intermediate preparations have been purged.
+The retained report and raw workspace identify only the final Clap SHA `5174a6e2…`.
 
 Limits: one host, warmed wall times including launch/capture overhead, and a small representative workload set. No Linux execution, cold-cache measurement, allocation profiling, process tracing, or whole-system performance claims. Binary file size excludes separately installed shared libraries. Raw distributions are observations, not confidence intervals.

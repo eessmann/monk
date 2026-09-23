@@ -57,7 +57,7 @@ freezePerformance frozen output = do
   freezeWithShake
     (output </> "manifest.json")
     [(frozen, ["inputs//*"])]
-    [frozen </> "manifest.json", "docs/evidence/bakeoff-native-2026-09-10.json"]
+    [frozen </> "manifest.json"]
     (freezePerformanceIO frozen output)
 
 freezePerformanceIO :: FilePath -> FilePath -> IO ()
@@ -67,32 +67,27 @@ freezePerformanceIO frozen output = do
   fixtures <- either fail pure (arrayField "fixtures" original)
   common <- either fail pure (arrayField "common16" original)
   let selected = [insertField "performance_cohort" (String "common16") row | name <- common, row <- fixtures, field "fixture" row == Right name]
-  historical <- readJson "docs/evidence/bakeoff-native-2026-09-10.json"
-  oldRows <- either fail pure (arrayField "fixtures" historical)
-  arithmetic <- fmap catMaybes $ forM oldRows $ \old ->
-    if field "historic" old == Right (Bool True)
-      then pure Nothing
-      else do
-        path <- T.unpack <$> either fail pure (textField "fixture" old)
-        expected <- either fail pure (textField "input_sha256" old)
-        exists <- doesFileExist path
-        available <- if exists then (== T.unpack expected) <$> digestFile path else pure False
-        when available $ do
-          createDirectoryIfMissing True (takeDirectory (output </> "inputs" </> path))
-          copyFileWithMetadata path (output </> "inputs" </> path)
-        metadata <- either fail pure (field "metadata" old)
-        inputBase64 <- either fail pure (field "stdin_base64" old)
-        pure $
-          Just $
-            object $
-              [ "fixture" .= path,
-                "performance_cohort" .= ("arithmetic3" :: Text),
-                "cohort" .= ("arithmetic" :: Text),
-                "metadata" .= metadata,
-                "stdin_base64" .= inputBase64,
-                "input_sha256" .= expected
-              ]
-                <> ["unavailable_reason" .= ("Original frozen arithmetic input is absent locally; hash retained, no substitute generated." :: Text) | not available]
+  definitions <- either fail pure (arrayField "arithmetic3" original)
+  arithmetic <- forM definitions $ \definition -> do
+    path <- T.unpack <$> either fail pure (textField "fixture" definition)
+    expected <- either fail pure (textField "input_sha256" definition)
+    exists <- doesFileExist path
+    available <- if exists then (== T.unpack expected) <$> digestFile path else pure False
+    when available $ do
+      createDirectoryIfMissing True (takeDirectory (output </> "inputs" </> path))
+      copyFileWithMetadata path (output </> "inputs" </> path)
+    metadata <- either fail pure (field "metadata" definition)
+    inputBase64 <- either fail pure (field "stdin_base64" definition)
+    pure $
+      object $
+        [ "fixture" .= path,
+          "performance_cohort" .= ("arithmetic3" :: Text),
+          "cohort" .= ("arithmetic" :: Text),
+          "metadata" .= metadata,
+          "stdin_base64" .= inputBase64,
+          "input_sha256" .= expected
+        ]
+          <> ["unavailable_reason" .= ("Original frozen arithmetic input is absent locally; hash retained, no substitute generated." :: Text) | not available]
   targeted <- forM targetedSources $ \(name, source) -> do
     let path = "performance" </> name <> ".bash"
         destination = output </> "inputs" </> path

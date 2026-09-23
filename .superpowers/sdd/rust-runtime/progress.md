@@ -1,8 +1,8 @@
 # Rust runtime implementation ledger
 
 The user-approved plan is `docs/superpowers/plans/2026-09-23-rust-runtime.md`.
-The implementation is isolated on `codex/rust-runtime`, based on `9d0cf0d`.
-The user subsequently authorized a signed commit and local merge into `main`.
+The implementation was developed on `codex/rust-runtime`, based on `9d0cf0d`,
+and merged locally into `main` as signed commit `b48bfdd`.
 Verification snapshots below retain their original pre-commit source identities.
 Push and publication are outside this integration request.
 

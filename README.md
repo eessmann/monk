@@ -5,10 +5,10 @@ execution contract. Unsupported semantics
 produce structured diagnostics and a failure in both normal and strict mode.
 Named approximations require an explicit opt-in.
 
-The [roadmap](docs/design/translator-todo.md) records verified coverage,
-deliberate exclusions and remaining external CI evidence. The
-[portable verification report](docs/design/portable-runtime-verification.md) separates
-fresh local results from historical evidence and unverified target execution.
+The [roadmap](docs/design/translator-todo.md) records implemented behavior,
+deliberate exclusions and remaining acceptance gates. The
+[Rust verification report](docs/design/rust-runtime-verification.md) identifies
+the tested runtime, local results and unverified target execution.
 
 ## Build and translate
 
@@ -30,8 +30,8 @@ The explicit runtime path works directly from the build tree; building alone
 does not install `monk-runtime` on PATH.
 
 The initial profile is Bash 5.3, signed 64-bit arithmetic, UTF-8 source and C
-locale. The reference pair is Bash 5.3.9 and Fish 4.6.0; the locked newer Fish
-is tested separately. Generated programs use native Fish directly where
+locale. The reference pair is Bash 5.3.9 and Fish 4.6.0; compatibility with a newer
+Fish requires separate evidence. Generated programs use native Fish directly where
 equivalence is proved. External commands use a bounded replace-self dispatch
 shim for Bash-compatible launch errors. Source output uses a bounded writer to
 preserve Bash diagnostics and signal termination on failed writes, including
@@ -162,12 +162,13 @@ runtime and platform checks remain explicit evidence gaps.
 - [Legacy test migration](docs/design/legacy-test-migration.md)
 - [Bake-off workflow](docs/babelfish-comparison.md)
 
-The frozen 95-fixture bake-off compares original Monk, the previous baseline,
-the candidate and pinned Babelfish independently against Bash. Separate
-filesystem, caller-state and process-lifetime cohorts supplement its unchanged
-denominator. Rejections, mismatches and unavailable executions remain distinct.
+The [Babelfish comparison](docs/babelfish-comparison.md) separates successful
+translation from agreement with independently executed Bash. Comparison cohorts
+retain their own denominators; rejections, mismatches and unavailable executions
+remain distinct.
 
 Release definitions cover x86_64 Linux and arm64 Linux with static musl, plus
-Apple Silicon macOS with static Haskell/third-party dependencies and Apple
-system libraries. Native Linux execution remains unverified in this work: the
-user requested local source and local testing only.
+Apple Silicon macOS with permitted Apple system-library dependencies. The
+current Rust runtime has native execution evidence on Apple Silicon macOS.
+Native Linux execution and execution on the minimum supported macOS version
+remain unverified.

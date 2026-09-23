@@ -162,8 +162,8 @@ rejects endpoint storage/printing and unproved escaping consumers.
 
 Private capsule, socket and reply names are implementation state guarded before
 source effects. They are not user descriptor bindings or observable scalar
-results. The [execution profile](execution-profile.md) defines the external
-inspection boundary and its concrete SHLVL exclusion.
+results. The [execution profile](execution-profile.md#shell-identity-inspection)
+defines the external inspection boundary and its concrete SHLVL exclusion.
 
 ## Managed images and statistics
 
@@ -190,13 +190,10 @@ bundle bytes and elapsed times are separate evidence.
 
 
 Portable target declarations do not substitute for execution evidence. The
-[Rust migration report](rust-runtime-verification.md) records the current
-implementation and remaining execution gates. The historical
-[portable runtime report](../../.superpowers/sdd/2026-09-22-portable-exact/portable-runtime-report.md)
-records canonical local Darwin tests, the witnessed pre-exec GHC crash and its
-POSIX-spawn repair, byte-pattern oracle checks and remaining Linux verification.
-The roadmap owns final compiler, shell, package and frozen-corpus results.
-
+[Rust verification report](rust-runtime-verification.md) records tested runtime
+identities, native Darwin package execution and remaining Linux/minimum-OS gates.
+The [roadmap](translator-todo.md) keeps acceptance requirements separate from
+implemented behavior.
 
 ## Direct output and exact failures
 
@@ -208,8 +205,8 @@ status141 through the fixed raise-signal operation so the evaluator terminates
 by actual SIGPIPE. Empty output remains successful even with closed stdout.
 
 This is a necessary exception to the original helper-free greeting target.
-With initially closed stdout, direct Fish printf returned0 silently where Bash
-returned1 with a write-error diagnostic; with an already closed pipe reader,
-Fish returned1 where Bash terminated by SIGPIPE. Those admitted I/O states were
+With initially closed stdout, direct Fish printf returned 0 silently where Bash
+returned 1 with a write-error diagnostic; with an already closed pipe reader,
+Fish returned 1 where Bash terminated by SIGPIPE. Those admitted I/O states were
 not removed from the profile. Silent scalar/control bodies can remain free
 of primitive helpers; standalone stream fidelity still uses the native entry. The approved historical plan is retained unchanged.

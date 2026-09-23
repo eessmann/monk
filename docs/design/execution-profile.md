@@ -48,8 +48,9 @@ The reserved `MONK_LAUNCH_ORIGINAL` and `MONK_LAUNCH_WRAPPER` names cannot be
 source bindings. Sourceable entry and deferred calls reject caller-provided
 markers before effects, since private launcher metadata must not leak into
 user external environments.
-Owned transport records original open/closed descriptor state before GHC can
-reuse descriptor numbers and preserves that state across child startup.
+Owned transport records original open/closed descriptor state before runtime
+initialization can reuse descriptor numbers and preserves that state across
+child startup.
 Admitted ordered redirections can open, duplicate or close user descriptors;
 extra inherited descriptors are not admitted as owned merely because their
 numbers exist. Direct native output uses a bounded byte writer to preserve write errors and
@@ -73,9 +74,8 @@ arguments, exported scalars and user streams. They must not inspect private
 helpers, implementation processes, transport descriptors or shell identity and
 depth state. In particular, direct or indirect `SHLVL` observation is excluded,
 including through `printenv`, `env` or an external program. The
-[concrete SHLVL counterexample](../../.superpowers/sdd/2026-09-22-portable-exact/inspection-boundary-review.md)
-is an unsupported observation, not evidence of matching output. Ordinary
-exported environment preservation, explicit `$!`/wait semantics and user
+[counterexample below](#shell-identity-inspection) is an unsupported observation,
+not evidence of matching output. Ordinary exported environment preservation, explicit `$!`/wait semantics and user
 filesystem/descriptor effects remain obligations.
 
 No unmodeled signal handler, event callback or asynchronous mutation may
@@ -88,7 +88,7 @@ resources required by generated helpers.
 
 Requirements enumerate commands, typed Fish/platform capabilities, and native
 runtime ABI, profile and operation sets. Generated support uses Fish plus the
-Rust `monk-runtime`; Python is only a development/evidence tool. ABI 2 accepts
+Rust `monk-runtime`; generated support does not require Python. ABI 2 accepts
 fixed operations over NUL-terminated byte frames. Zero frames and one empty
 frame are distinct; NUL cannot occur inside a shell value. Child stdout/stderr
 and original stdin are separate from framed control input. Captures remove
@@ -118,6 +118,38 @@ independent seek offset or buffer producer data into files.
 Bundling captures the executable for one validated native target, not its
 dynamic libraries. Deployments must provide its compatible loader/libraries.
 See the [native runtime specification](native-runtime.md).
+
+## Shell identity inspection
+
+`SHLVL` depends on the shell's invocation and process-replacement behavior. The
+following concrete counterexample motivated the inspection exclusion:
+
+```bash
+/usr/bin/true &
+wait
+python3 -c 'import os; print(os.environ.get("SHLVL"))'
+```
+
+With initial `SHLVL=0`, Bash 5.3.9, Fish 4.6.0, C locale and the same PATH, the
+file-launched Bash program exposed `1\n` to the observer; a generated-program
+snapshot exposed `0\n`. Both exited successfully. This is retained as an
+unsupported observation, not as a current acceptance test or an exact match.
+
+The Bash result itself depends on how the program is launched:
+
+| Source shape | `bash script-file` | `bash -c source` |
+| --- | ---: | ---: |
+| One external SHLVL observer | 1 | 0 |
+| Background true, wait, final observer | 1 | 0 |
+| EXIT trap, final observer | 1 | 1 |
+
+Background work followed by `wait` does not by itself prevent Bash's final
+process replacement. Incrementing the evaluator's environment could repair the
+file-launch example without covering the other shapes. No general SHLVL
+projection is part of the contract. Direct source use is rejected; hiding the
+observation inside an external program does not make it an ordinary scalar
+input. Ordinary exported scalars, owned job PIDs and wait status, user
+descriptors and process cleanup remain covered obligations.
 
 ## Runtime checks and caller obligations
 
